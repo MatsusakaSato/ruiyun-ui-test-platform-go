@@ -96,7 +96,7 @@ docs/P0-差分验证报告.md                          完整发现与证据
 
 ## 3. 已修复的真实缺陷（**请勿回退，全部有回归测试保护**）
 
-累计 **63 处**（最近两轮新增 22 处）。都不是风格问题，
+累计 **70 处**（最近三轮新增 29 处）。都不是风格问题，
 而是**用真实生产数据差分出来的行为偏差**。
 
 ### 3.1 `internal/xlsx/`（3 处）
@@ -469,6 +469,105 @@ Go 的 `Chat` **两个都没有**（连空值都没判），`ProbeProvider` 只�
 > 现在**应无输出**（JS 字符串里的正则在 `internal/driver/scripts.go`，
 > 交给浏览器引擎执行，JS 的 `\s` 本身是 Unicode 感知的，不用改）。
 
+### 3.12 评估**客观评分层**的纯函数（`_obj_*` / `_coerce_score` / `_workspace_root`）（**7 处，本轮新增**）
+
+`core/evaluator.py` 里有一批**不依赖 LLM 的确定性纯函数**，它们是最终得分的一部分
+（`_objective_scores` 的 6 个客观项、判分档位校验、产物解析根）。
+本轮把它们逐个对照 Python 实测，**发现 7 处偏差并全部修复**，
+新增 18 个回归测试（`internal/evaluator/evaluator_obj_fidelity_test.go`）。
+
+> 这批函数此前**从未被任何差分层覆盖** —— 六层里最接近的是"评估前置层"，
+> 但它只到 `formatcheck` / `safetyscan` / `intent`，没进 `evaluator` 的评分逻辑。
+
+**64. 🔴 `objDeliveryEfficiency` 的 `minutes` 用了 `math.Round(mins*10)/10`。**
+Python 是 `round(mins, 1)`。这里其实是**两重**错误：
+
+1. 不是 ties-to-even（同 §3.7 第 35 条的银行家舍入问题）；
+2. `*10` 引入**二次舍入** —— 连**非精确 tie** 都会错。
+
+实测（`elapsedS` → `minutes`）：
+
+| elapsedS | mins 真实值 | Python | Go 原先 |
+|---|---|---|---|
+| 1875 | 31.25（二进制精确 .5） | **31.2** | 31.3 |
+| 15 | 0.25 | **0.2** | 0.3 |
+| 21 | 0.35 ≈ 0.34999…（**不是** tie） | **0.3** | 0.4 |
+| 9 | 0.15 ≈ 0.14999… | **0.1** | 0.2 |
+| 747 | 12.45 ≈ 12.44999… | **12.4** | 12.5 |
+
+→ 改用 `trajectory.PyRound(mins, 1)`（已对齐 Python 的实现），并加了
+`0.25` 步长扫到 3000 秒的交叉校验测试。
+
+**65. 🔴 `objToolSelection` 用 `strings.TrimSpace` 代替 Python 的 `.strip()`。**
+同 §3.10 第 47 条的老问题：Go 的 `TrimSpace` 少 U+001C–U+001F。
+实测 `expect_tools=["\x1cread_file\x1d"]`：Python 归一化成 `"read_file"` → 命中率 **1.0**；
+Go 保留原样 → `expected` 对不上 → 命中率 **0**。
+→ 改用 `pyre.Strip`。
+
+**66. 🔴 `objToolSelection` 用 `s != "<nil>"` 把 nil 过滤掉了，Python 不会。**
+Python 是 `[str(t).strip() for t in ... if str(t).strip()]`，
+而 **`str(None) == "None"`（非空）** → Python **保留**它。
+Go 因为 `fmt.Sprintf("%v", nil)` 产出 `"<nil>"`，就加了个 `!= "<nil>"` 的补丁把它丢掉。
+实测 `expect_tools=[None, "read_file"]`：Python `expected=["None","read_file"]` → 命中率 **0.5**；
+Go → `["read_file"]` → 命中率 **1.0**。
+→ 新增 `pyStrValue()` 复刻 Python `str()`，并**去掉那个补丁**：
+
+| 输入 | Python `str()` | Go `%v` | Go `pyStrValue` |
+|---|---|---|---|
+| `nil` | `"None"` | `"<nil>"` | `"None"` ✅ |
+| `true` | `"True"` | `"true"` | `"True"` ✅ |
+| `3.0` | `"3.0"` | `"3"` | `"3"`（见下方边界） |
+
+**67. `objToolSelection` 的 `hit` 空集合序列化成 `null`。**
+`var hit []string` 是 nil。Python 列表推导天然给 `[]`。→ 改 `hit := []string{}`。
+
+**68. 🔴🔴 `coerceScore` 用 `fmt.Sscanf(v, "%f")` —— 这是**前缀**解析。**
+Python 是 `v = float(raw)`，要求**整个**字符串合法，否则 `ValueError` → `return None`
+（记为**未评**）。Go 的 `Sscanf` 只解析前缀、忽略尾部：
+
+| 输入 | Python | Go 原先 |
+|---|---|---|
+| `"3"` / `"3.0"` | 3 | 3 ✅ |
+| `"3abc"` | **None（未评）** | **3** ❌ |
+| `"3,5"` | **None（未评）** | **3** ❌ |
+| `"3分"` | **None（未评）** | **3** ❌ |
+| `"3.0（满分5）"` | **None（未评）** | **3** ❌ |
+
+**这条最危险**：LLM 判分最常见的输出形态就是 `"3分"` / `"3.0（满分5）"` 这类
+带单位或说明的字符串。Go 会把**本该判为"模型未给出合法分值"的维度静默算成 3 分**，
+拉高总分且无任何提示。→ 改用 `strconv.ParseFloat(pyre.Strip(v), 64)`（整串必须合法）。
+
+**69. 🔴 `coerceScore` 缺 `bool` 分支。**
+Python `float(True) == 1.0`，落进 `(1,2,3,4,5)` → 返回 **1**；
+`float(False) == 0.0` → 在 `1-5` 下是 None，但在 `5-0` 档下返回 **0**。
+Go 的 switch 没有 `bool`，直接落到 `default: return nil`。→ 已补。
+
+**70. `workspaceRoot` 的 `strings.TrimSpace` → `pyre.Strip`**（一致性，影响极低）。
+Python 是 `str(paths.get("workspace_root") or "").strip()`。
+路径里不会出现 U+001C，但既然全项目已统一空白语义，这里也一并换掉。
+
+#### ⚠️ 顺带确认**正确**、并已加测试锁住的三处
+
+- `_obj_self_correction` —— bad 集合是 `TOOL_CALL_FAILED ∪ TOOL_RESULT_MISSING`；
+  「同名、成功、参数不同」才算一次自纠正，且 `break` 在第一个同名成功调用处。
+  Go 与之逐行一致（含 `break` 位置）。已加 5 个测试。
+- `_scope_note` —— 三档文案 + 两种后缀，Go 逐字一致。
+- `_workspace_root` 的回落链（`workspace_root` → `session_root` 父目录 → 空串）一致。
+  *（我第一版测试用错了配置键 `{"workspace":...}`，是**测试**错、代码对 —— 已改。）*
+
+#### ⚠️ 记录在案的一个残留边界（**不可达，未修**）
+
+Go 的 `encoding/json` 把 JSON 的 `3` 与 `3.0` **都解成 `float64(3)`**，
+而 Python 分别是 `int 3` 与 `float 3.0`。所以：
+
+| JSON 字面量 | Python `exp` 元素 | Go `pyStrValue` |
+|---|---|---|
+| `3` | `"3"` | `"3"` ✅（靠 `PyJSONDumps` 的整数形态补偿） |
+| `3.0` | `"3.0"` | `"3"` ❌ 边界在此 |
+
+现实语料里 `expect_tools` **全是工具名字符串**，此路径不可达；已在测试里显式记录，
+以免以后有人误以为"已经完全对齐"。这与 §3.4 第 18 条的残留边界同源。
+
 ---
 
 ## 4. 差分工装 —— 请把它当作验收门禁
@@ -518,7 +617,8 @@ python3 tools/diff/run_eval_diff.py       # 评估前置层：667 用例 × (for
 | 断言层（`internal/assertor`） | 同上，**229 条 Finding** | ✅ **9 类规则计数逐类相同，零真实差异** |
 | 指标层（`internal/trajectory` / `metrics`） | 219 用例全链路（parse→assert→CaseDetail→RoundDetail→Metrics） | ✅ **逐用例 detail 219/219 一致；round_detail 一致；metrics 零真实差异** |
 | **评估前置层**（`internal/formatcheck` / `safetyscan` / `intent`） | 219 会话 × 3 变体 + 10 对抗 = **667 用例** | ✅ **formatcheck 0 差异；intent 0 差异；safetyscan 仅剩 282 处「JSON 对象键序」（归一化后 0 真实差异）** |
-| 评估层（`internal/evaluator` / `llm` / `rubric` / …） | 需 stub OpenAI | 🔶 产物路径已对齐（2 处）；安全扫描已改用**有序 API**；评分/judge 主流程尚未差分 |
+| 评估层的**客观纯函数**（`_obj_*` / `_coerce_score` / `_workspace_root` / `_scope_note`） | 无需 LLM，已逐个对照实测 | ✅ **7 处偏差已修（§3.12），18 个回归测试** |
+| 评估层的 **judge / rubric 主流程**（`_judge_case` / `evaluate_round`） | 需 stub OpenAI | 🔶 产物路径已对齐（2 处）；安全扫描已改用**有序 API**；judge 主流程尚未差分 |
 | 驱动层（`internal/driver` = ui_driver.py 1849 行） | — | 🔄 **你正在做**（最高风险） |
 | 服务层（`internal/pipeline` / `server` / `report`） | — | 🔄 你正在做（当前可编译） |
 
@@ -678,7 +778,7 @@ oracle 与端口保持一致。
 
 - **`go build ./...` ✅**、**`go test ./...` ✅**、**`go vet ./...` ✅** 全绿
 - **六层差分全部 ✅ 退出码 0**：xlsx / DB / 分析层 / 断言层 / 指标层 / **评估前置层**
-- 累计修复 **63 处**真实保真度缺陷；回归测试 **10 个文件 133 个用例**
+- 累计修复 **70 处**真实保真度缺陷；回归测试 **11 个文件 151 个用例**
 - 你新增了 `internal/repro`、`internal/driver`、`internal/sysutil`、`internal/pipeline`、
   `internal/llm`、`internal/server` 👍
 
@@ -713,11 +813,13 @@ Go 原先调的是只做字符串拼接的 `ResolveAbsPath` —— 会给出**�
 
 0. ~~先清掉 `pyre` 的遗留同类问题~~ —— **✅ 本轮已全部清完**（见 §3.11）。
 1. **`internal/evaluator`** —— 需 stub OpenAI server，成本最高。
-   产物路径那两处我已对齐（见 §7.2）；**安全扫描已改用有序 API**
-   （`BuildSourcesOrdered` + `ScanOrdered`，见 §3.10 第 51/56 条，请勿用回 map 版本）。
-   剩下的是**评分 / rubric / judge 调用**主流程。
-   建议先做**不依赖 LLM 的纯函数部分**（`_workspace_root`、scope 判定、
-   分档与加权、`expect_tools` 比对），把需要 stub OpenAI 的放最后。
+   - ~~不依赖 LLM 的纯函数部分~~ —— **✅ 本轮已做完**（§3.12）：
+     `_obj_tool_selection` / `_obj_self_correction` / `_obj_delivery_efficiency` /
+     `_coerce_score` / `_workspace_root` / `_scope_note` 已逐个对照 Python 实测，
+     修掉 7 处偏差并加了 18 个回归测试。**这些函数现在可以当已验收黑盒。**
+   - 产物路径那两处我已对齐（见 §7.2）；**安全扫描已改用有序 API**
+     （`BuildSourcesOrdered` + `ScanOrdered`，见 §3.10 第 51/56 条，请勿用回 map 版本）。
+   - **剩下的是 `_judge_case` / `evaluate_round` 主流程**（需要 stub OpenAI server）。
    `formatcheck` / `safetyscan` / `intent` 三层**已经差分完毕**，可以直接当已验收的黑盒。
 2. **`internal/driver`** —— 最难差分（依赖 Electron + CDP 调试端口），
    建议先做**纯函数部分**（`internal/driver/scripts.go` 里的 JS 注入脚本、

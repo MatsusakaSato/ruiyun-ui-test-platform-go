@@ -8,6 +8,7 @@ import (
 	"path/filepath"
 	"regexp"
 	"sort"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -209,11 +210,47 @@ func finalAnswerTruncated(trace *models.ExecutionTrace, findings []interface{}, 
 	return false, ""
 }
 
+// pyStrValue 复刻 Python 的 str() 对标量的字符串化。
+//
+// 与 Go 的 `fmt.Sprintf("%v", x)` 的差异（都会真实影响 expect_tools 归一化）：
+//
+//	          Python str()   Go %v
+//	nil       "None"        "<nil>"
+//	true      "True"        "true"
+//	3.0       "3.0"         "3"
+//
+// 字符串原样返回；float 交给 models.PyJSONDumps（已实测 str(float) ≡ json.dumps(float)）。
+// 容器类型走 JSON 兜底 —— Python repr 用单引号，此处不追求逐字一致，
+// 但 expect_tools 里出现容器本身即属异常数据。
+func pyStrValue(v interface{}) string {
+	switch t := v.(type) {
+	case nil:
+		return "None"
+	case string:
+		return t
+	case bool:
+		if t {
+			return "True"
+		}
+		return "False"
+	case float64:
+		return models.PyJSONDumps(t)
+	case int:
+		return strconv.Itoa(t)
+	case int64:
+		return strconv.FormatInt(t, 10)
+	}
+	return fmt.Sprintf("%v", v)
+}
+
 func objToolSelection(expectTools []interface{}, trace *models.ExecutionTrace) (*float64, map[string]interface{}) {
+	// Python: `[str(t).strip() for t in (expect_tools or []) if str(t).strip()]`
+	//   - str(t) 而非 fmt %v：str(None)=="None"（**非空，会被保留**）、str(3.0)=="3.0"；
+	//   - .strip() 是 Python 的 29 字符空白集，必须用 pyre.Strip（Go 的 TrimSpace 少 U+001C–U+001F）。
 	var exp []string
 	for _, t := range expectTools {
-		s := strings.TrimSpace(fmt.Sprintf("%v", t))
-		if s != "" && s != "<nil>" {
+		s := pyre.Strip(pyStrValue(t))
+		if s != "" {
 			exp = append(exp, s)
 		}
 	}
@@ -228,7 +265,7 @@ func objToolSelection(expectTools []interface{}, trace *models.ExecutionTrace) (
 	for _, tc := range trace.ToolCalls {
 		usedSet[tc.Name] = true
 	}
-	var hit []string
+	hit := []string{} // 非 nil：Python 列表推导天然给 []，Go 的 nil 会序列化成 null
 	for _, t := range exp {
 		if usedSet[t] {
 			hit = append(hit, t)
@@ -289,8 +326,12 @@ func objSelfCorrection(trace *models.ExecutionTrace, findings []interface{}) (*f
 func objDeliveryEfficiency(turns int, elapsedS float64, completionOK bool) (int, map[string]interface{}) {
 	mins := elapsedS / 60.0
 	ev := map[string]interface{}{
-		"turns":   turns,
-		"minutes": math.Round(mins*10) / 10,
+		"turns": turns,
+		// Python `round(mins, 1)` 是银行家舍入（对二进制精确值做正确十进制舍入）。
+		// 原先写 `math.Round(mins*10)/10` 有两重错误：不是 ties-to-even，
+		// 且 `*10` 引入二次舍入 —— 连 0.35 / 12.45 这类**非精确 tie** 都会错
+		// （0.35 的真实值 ≈ 0.34999…，Python 给 0.3，`*10` 路线给 0.4）。
+		"minutes": trajectory.PyRound(mins, 1),
 	}
 	if turns <= 2 || mins < 5 {
 		return 5, ev
@@ -544,12 +585,13 @@ func objectiveScores(caseItem map[string]interface{}, trace *models.ExecutionTra
 
 func workspaceRoot(cfg map[string]interface{}) string {
 	if cfg != nil {
+		// Python 侧是 `.strip()`（29 字符集），统一走 pyre.Strip
 		if paths, ok := cfg["paths"].(map[string]interface{}); ok {
-			if root, ok := paths["workspace_root"].(string); ok && strings.TrimSpace(root) != "" {
-				return strings.TrimSpace(root)
+			if root, ok := paths["workspace_root"].(string); ok && pyre.Strip(root) != "" {
+				return pyre.Strip(root)
 			}
-			if sr, ok := paths["session_root"].(string); ok && strings.TrimSpace(sr) != "" {
-				return filepath.Dir(strings.TrimSpace(sr))
+			if sr, ok := paths["session_root"].(string); ok && pyre.Strip(sr) != "" {
+				return filepath.Dir(pyre.Strip(sr))
 			}
 		}
 	}
@@ -792,13 +834,23 @@ func coerceScore(raw interface{}, scale string) *int {
 		f = v
 	case int:
 		f = float64(v)
-	case string:
-		var parsed float64
-		if _, err := fmt.Sscanf(v, "%f", &parsed); err == nil {
-			f = parsed
+	case bool:
+		// Python `float(True) == 1.0` —— 会落进 (1,2,3,4,5) 等档位
+		if v {
+			f = 1
 		} else {
+			f = 0
+		}
+	case string:
+		// Python `float(s)` 要求**整个**字符串合法，多余字符直接 ValueError → None（记为未评）。
+		// 原先用 `fmt.Sscanf(v, "%f", &parsed)` 是**前缀**解析：
+		// "3分" / "3.0（满分5）" / "3abc" 都会静默得到 3 —— 把"本该未评"变成"有分"，
+		// 而这类带单位/说明的回复恰恰是 LLM 判分最常见的输出形态。
+		parsed, err := strconv.ParseFloat(pyre.Strip(v), 64)
+		if err != nil {
 			return nil
 		}
+		f = parsed
 	default:
 		return nil
 	}
