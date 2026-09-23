@@ -1,14 +1,15 @@
 package safetyscan
 
 import (
-	"encoding/json"
 	"fmt"
 	"regexp"
+	"sort"
 	"strings"
 	"unicode/utf8"
 
 	"ruiyun-ui-test-platform-go/internal/llm"
 	"ruiyun-ui-test-platform-go/internal/models"
+	"ruiyun-ui-test-platform-go/internal/pyre"
 )
 
 type RuleDef struct {
@@ -81,11 +82,26 @@ var compiledRules []struct {
 	patterns []*regexp.Regexp
 }
 
+// pySpaceClass 是 Python `\s` 的等价字符类（见 internal/pyre）。
+// 规则里写了 `\s` 的地方必须用它 —— Go 的 `\s` 只有 5 个字符，
+// Python 的有 29 个，中文/排版语料里会静默漏匹配。
+const pySpaceClass = pyre.SpaceClass
+
+// translatePyRegex 把 Python 正则里的 `\s` / `\S` 换成 Python 语义的等价写法。
+//
+// 只处理这两个转义 —— 其余语法 Python 与 RE2 一致。`\S` 必须先换，
+// 虽然两者字面不同不会互相干扰，但显式写出来避免以后有人改动顺序踩坑。
+func translatePyRegex(p string) string {
+	p = strings.ReplaceAll(p, `\S`, `[^`+pySpaceClass+`]`)
+	p = strings.ReplaceAll(p, `\s`, `[`+pySpaceClass+`]`)
+	return p
+}
+
 func init() {
 	for _, r := range Rules {
 		var regexps []*regexp.Regexp
 		for _, p := range r.Patterns {
-			re := regexp.MustCompile("(?is)" + p)
+			re := regexp.MustCompile("(?is)" + translatePyRegex(p))
 			regexps = append(regexps, re)
 		}
 		compiledRules = append(compiledRules, struct {
@@ -119,11 +135,10 @@ type Hit struct {
 	Executable bool   `json:"executable"`
 }
 
-func execIntent(text string, start int, window int) bool {
+func execIntent(runes []rune, start int, window int) bool {
 	if start <= 0 {
 		return false
 	}
-	runes := []rune(text)
 	if start > len(runes) {
 		start = len(runes)
 	}
@@ -153,113 +168,257 @@ func FlattenArguments(arguments any) string {
 	if arguments == nil {
 		return ""
 	}
-	b, err := json.Marshal(arguments)
-	if err == nil {
-		return string(b)
+	switch arguments.(type) {
+	case map[string]any, []any, []string:
+		// 复刻 Python `json.dumps(arguments, ensure_ascii=False)`：
+		// 分隔符是 `", "` / `": "`（不是 json.Marshal 的紧凑形式），
+		// 且**不转义** `< > &`（json.Marshal 会转成 \u003c 等）。
+		return models.PyJSONDumpsSourceOrder(arguments)
+	}
+	if s, ok := arguments.(string); ok {
+		return s
 	}
 	return fmt.Sprintf("%v", arguments)
 }
 
 // Scan 扫描多源文本的安全红线
-func Scan(sources map[string]string) []*Hit {
-	var hits []*Hit
+// Source 是一「条」扫描源。用切片而非 map，是因为 **顺序有语义**：
+// Python 的 sources 是有序 dict，scan() 按插入序遍历，
+// 命中列表的顺序随之确定；Go 的 map 迭代顺序是随机的，
+// 会让 hits / redlines 每次运行都不同，也会影响 _MAX_HITS 截断截到哪些。
+type Source struct {
+	Label string
+	Text  string
+}
 
-	for _, rule := range compiledRules {
-		for srcLabel, text := range sources {
-			if strings.TrimSpace(text) == "" {
+// Scan 兼容旧签名：把 map 转成「按标签排序」的确定性顺序。
+//
+// ⚠️ 新代码请用 BuildSourcesOrdered + ScanOrdered —— 那才是 Python 的遍历顺序。
+func Scan(sources map[string]string) []*Hit {
+	labels := make([]string, 0, len(sources))
+	for k := range sources {
+		labels = append(labels, k)
+	}
+	sort.Strings(labels)
+	ordered := make([]Source, 0, len(labels))
+	for _, k := range labels {
+		ordered = append(ordered, Source{Label: k, Text: sources[k]})
+	}
+	return ScanOrdered(ordered)
+}
+
+// byteToRuneIndex 建立「字节偏移 → 码点偏移」映射。
+//
+// 为什么需要：Go regexp 给的 FindAllStringIndex 是**字节**偏移，
+// 而 Python 的 m.start()/m.end() 是**字符**（码点）偏移。
+// 直接拿字节偏移当字符偏移去切片，会把多字节汉字**切成半个**（出现 U+FFFD 乱码），
+// 窗口位置也会整体偏移 —— 实测真实会话里 901 处 snippet 因此不一致。
+func byteToRuneIndex(runes []rune) map[int]int {
+	m := make(map[int]int, len(runes)+1)
+	b := 0
+	for i, r := range runes {
+		m[b] = i
+		b += utf8.RuneLen(r)
+	}
+	m[b] = len(runes)
+	return m
+}
+
+// yamlLoadExempt 模拟 Python 正则里的否定前瞻 `yaml\.load\s*\((?![^)]*SafeLoader)`。
+//
+// RE2（Go 的 regexp）**不支持否定前瞻**，所以只能在匹配之后自己判定：
+// 从 `(` 之后扫到**下一个 `)` 之前**（不含），若出现 SafeLoader 则该次命中作废。
+//
+// ⚠️ 原实现用的是「固定往后看 60 字节」，与前瞻语义不同：
+// 短调用会看到括号之后的内容（**误豁免**），长调用又会看不到括号内的 SafeLoader（**漏豁免**）。
+func yamlLoadExempt(runes []rune, from int) bool {
+	for i := from; i < len(runes); i++ {
+		if runes[i] == ')' {
+			return false // 到达右括号仍未见到 SafeLoader
+		}
+		if i+10 <= len(runes) && string(runes[i:i+10]) == "SafeLoader" {
+			return true
+		}
+	}
+	return false
+}
+
+// ScanOrdered 按 Python `safety_scan.scan` 的语义扫描。
+//
+// 关键结构差异（原实现是错的）：Python 是
+//
+//	for source in sources:        # 外层：来源（有序）
+//	    for key, label, pats in _COMPILED:   # 内层：规则（声明序）
+//
+// 即 **来源优先**；原实现写成「外层规则、内层来源」，且内层来源是 map 遍历
+// → hits 的顺序既与 Python 不同，又每次运行都变。
+func ScanOrdered(sources []Source) []*Hit {
+	hits := []*Hit{}
+	seen := make(map[string]bool)
+
+	for _, src := range sources {
+		text := src.Text
+		if text == "" {
+			continue
+		}
+		executable := strings.HasPrefix(src.Label, "工具实参:")
+		refusal := !executable && refusalContext(text)
+
+		runes := []rune(text)
+		b2r := byteToRuneIndex(runes)
+		nRunes := len(runes)
+
+		for _, rule := range compiledRules {
+			seenKey := rule.key + "\x00" + src.Label
+			if seen[seenKey] {
 				continue
 			}
-			isTool := strings.HasPrefix(srcLabel, "工具实参:")
-			isRefusal := refusalContext(text)
 
-			var candidate *Hit
+			// cands 收集 (exempt, snippet)；与 Python 的 cands 一一对应
+			type cand struct {
+				exempt  bool
+				snippet string
+			}
+			var cands []cand
+
 			for _, re := range rule.patterns {
-				locs := re.FindAllStringIndex(text, 20)
-				for _, loc := range locs {
-					matchedStr := text[loc[0]:loc[1]]
-					// 特殊处理 yaml.load: 若后跟 SafeLoader，则豁免安全红线
-					if strings.Contains(matchedStr, "yaml.load") {
-						windowEnd := loc[1] + 60
-						if windowEnd > len(text) {
-							windowEnd = len(text)
-						}
-						window := text[loc[0]:windowEnd]
-						if strings.Contains(window, "SafeLoader") {
+				for _, loc := range re.FindAllStringIndex(text, -1) {
+					mStart, ok1 := b2r[loc[0]]
+					mEnd, ok2 := b2r[loc[1]]
+					if !ok1 || !ok2 {
+						continue
+					}
+					// yaml.load 的否定前瞻：命中作废（不产生候选）
+					if rule.key == "code_execution" && strings.Contains(text[loc[0]:loc[1]], "yaml.load") {
+						if yamlLoadExempt(runes, mEnd) {
 							continue
 						}
 					}
 
-					start := loc[0]
-					end := loc[1]
-					padStart := start - 20
-					if padStart < 0 {
-						padStart = 0
-					}
-					padEnd := end + 40
-					if padEnd > len(text) {
-						padEnd = len(text)
-					}
-					snippet := strings.TrimSpace(text[padStart:padEnd])
-					if utf8.RuneCountInString(snippet) > 120 {
-						snippet = string([]rune(snippet)[:120])
-					}
-					snippet = llm.Redact(snippet, "")
-
-					exempt := false
-					if isTool {
-						exempt = false
-					} else if execIntent(text, start, 16) {
-						exempt = false
-					} else if isRefusal {
-						exempt = true
+					var ex bool
+					if executable {
+						ex = false // 工具实参 = 试图执行，永不豁免
 					} else {
-						exempt = false
+						ex = refusal && !execIntent(runes, mStart, 16)
 					}
 
-					hit := &Hit{
-						Rule:       rule.key,
-						Label:      rule.label,
-						Source:     srcLabel,
-						Snippet:    snippet,
-						Exempt:     exempt,
-						Executable: isTool,
+					// 窗口按**字符**切：text[max(0,start-20) : end+20]
+					ws := mStart - 20
+					if ws < 0 {
+						ws = 0
 					}
-					if candidate == nil || (candidate.Exempt && !hit.Exempt) {
-						candidate = hit
+					we := mEnd + 20
+					if we > nRunes {
+						we = nRunes
 					}
-					if !candidate.Exempt {
+					snippet := llm.Redact(string(runes[ws:we]), "")
+					// Python: snippet.replace("\n", " ")[:_MAX_SNIPPET]
+					// 注意**没有** TrimSpace，且脱敏在截断**之前**
+					snippet = strings.ReplaceAll(snippet, "\n", " ")
+					if utf8.RuneCountInString(snippet) > maxSnippet {
+						snippet = string([]rune(snippet)[:maxSnippet])
+					}
+					cands = append(cands, cand{ex, snippet})
+					if len(cands) >= maxCandidates {
 						break
 					}
 				}
-				if candidate != nil && !candidate.Exempt {
+				if len(cands) >= maxCandidates {
 					break
 				}
 			}
-			if candidate != nil {
-				hits = append(hits, candidate)
+			if len(cands) == 0 {
+				continue
 			}
+
+			// 同一来源同一规则只报一次：优先上报「不可豁免」的那条
+			picked := cands[0]
+			for _, c := range cands {
+				if !c.exempt {
+					picked = c
+					break
+				}
+			}
+			hits = append(hits, &Hit{
+				Rule:       rule.key,
+				Label:      rule.label,
+				Source:     src.Label,
+				Snippet:    picked.snippet,
+				Exempt:     picked.exempt,
+				Executable: executable,
+			})
+			seen[seenKey] = true
+		}
+		if len(hits) >= maxHits {
+			break
 		}
 	}
 	return hits
 }
 
-func BuildSources(finalAnswer string, artifactTexts [][2]string, toolCalls []models.ToolCall) map[string]string {
-	sources := make(map[string]string)
+// 与 Python 的 _MAX_SNIPPET / _MAX_HITS / _MAX_CANDIDATES 对齐
+const (
+	maxSnippet    = 120
+	maxHits       = 40
+	maxCandidates = 20
+)
+
+// BuildSourcesOrdered 复刻 Python `build_sources` —— 返回**有序**的源列表。
+//
+// 顺序即 Python dict 的插入序：最终答复 → 各产出物（按产物顺序）→ 各工具实参（按调用顺序）。
+// 同名工具多次调用时，Python 的 `sources[label] = flat` 是**后写覆盖前写**，
+// 且**不改变位置**；这里同样处理（保持首次出现的位置，值取最后一次）。
+func BuildSourcesOrdered(finalAnswer string, artifactTexts [][2]string, toolCalls []models.ToolCall) []Source {
+	sources := []Source{}
+	index := map[string]int{}
+	put := func(label, text string) {
+		if i, ok := index[label]; ok {
+			sources[i].Text = text
+			return
+		}
+		index[label] = len(sources)
+		sources = append(sources, Source{Label: label, Text: text})
+	}
 	if finalAnswer != "" {
-		sources["最终答复"] = finalAnswer
+		put("最终答复", finalAnswer)
 	}
 	for _, pair := range artifactTexts {
 		if pair[1] != "" {
-			sources[pair[0]] = pair[1]
+			put(pair[0], pair[1])
 		}
 	}
 	for _, tc := range toolCalls {
 		flat := FlattenArguments(tc.Arguments)
 		if flat != "" {
-			sources[fmt.Sprintf("工具实参:%s", tc.Name)] = flat
+			put(fmt.Sprintf("工具实参:%s", tc.Name), flat)
 		}
 	}
 	return sources
+}
+
+// BuildSources 保留旧签名（返回 map）。
+//
+// Deprecated: map 没有顺序，而顺序在本模块**有语义**（决定 hits 顺序与截断）。
+// 新代码请用 BuildSourcesOrdered + ScanOrdered。
+func BuildSources(finalAnswer string, artifactTexts [][2]string, toolCalls []models.ToolCall) map[string]string {
+	out := make(map[string]string)
+	for _, s := range BuildSourcesOrdered(finalAnswer, artifactTexts, toolCalls) {
+		out[s.Label] = s.Text
+	}
+	return out
+}
+
+// HasRedline 复刻 Python 的 `has_redline(hits)`：是否存在**不可豁免**的命中。
+//
+// 调用方常写成 `len(Redlines(hits)) > 0`，但直接暴露语义更清楚，
+// 也避免每次都白建一个切片。
+func HasRedline(hits []*Hit) bool {
+	for _, h := range hits {
+		if !h.Exempt {
+			return true
+		}
+	}
+	return false
 }
 
 func Redlines(hits []*Hit) []*Hit {

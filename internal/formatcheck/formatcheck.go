@@ -3,14 +3,20 @@ package formatcheck
 import (
 	"fmt"
 	"regexp"
+	"sort"
 	"strings"
 
+	"ruiyun-ui-test-platform-go/internal/pyre"
 	"ruiyun-ui-test-platform-go/internal/rubric"
 )
 
 var (
-	reSplit = regexp.MustCompile(`[，,、；;：:/（）()\[\]【】和与及\s]+`)
-	rePunct = regexp.MustCompile(`[\s，,。.、；;：:！!？?“”\"'（）()\[\]【】《》<>—\-_/\\|]+`)
+	// ⚠️ 这里**不能**写 `\s`：Python 的 `\s` 是 29 个字符、Go 的只有 5 个，
+	// 中文语料里极常见的 U+3000 全角空格 / U+00A0 NBSP / U+2003 EM SPACE，
+	// Python 会归一化掉、Go 不会 —— 结果是「要求项覆盖率」静默算错。
+	// 用 pyre.SpaceClass 才是 Python 语义（真实语料实测 105 处这类字符）。
+	reSplit = regexp.MustCompile(`[，,、；;：:/（）()\[\]【】和与及` + pyre.SpaceClass + `]+`)
+	rePunct = regexp.MustCompile(`[` + pyre.SpaceClass + `，,。.、；;：:！!？?“”\"'（）()\[\]【】《》<>—\-_/\\|]+`)
 	reLead  = regexp.MustCompile(`^(?:包含|包括|具有|具备|提供|给出|需要|必须|要有|应有|涵盖|涉及|有)`)
 )
 
@@ -38,17 +44,24 @@ func kindsFromTargets(targets []string) map[string]bool {
 }
 
 func BuildContract(labels map[string]any, kindsOverride []string) map[string]any {
-	var targets []string
-	if tg, ok := labels["targets"].([]any); ok {
-		for _, t := range tg {
-			s := strings.TrimSpace(fmt.Sprintf("%v", t))
-			if s != "" {
-				targets = append(targets, strings.ToLower(s))
-			}
+	// Python: [str(t).strip().lower() for t in (labels.get("targets") or []) if str(t).strip()]
+	// 注意 strip 用 pyre.Strip（Python str.strip 会去掉 U+001C–U+001F，TrimSpace 不会），
+	// 且**两个分支都要 strip** —— 原实现漏了 []string 那条。
+	targets := []string{}
+	appendTarget := func(raw string) {
+		v := pyre.Strip(raw)
+		if v != "" {
+			targets = append(targets, strings.ToLower(v))
 		}
-	} else if tg, ok := labels["targets"].([]string); ok {
-		for _, s := range tg {
-			targets = append(targets, strings.ToLower(s))
+	}
+	switch tg := labels["targets"].(type) {
+	case []any:
+		for _, t := range tg {
+			appendTarget(fmt.Sprintf("%v", t))
+		}
+	case []string:
+		for _, t := range tg {
+			appendTarget(t)
 		}
 	}
 
@@ -84,23 +97,29 @@ func TypeConsistency(contract map[string]any, artifactKinds []string) (*float64,
 		gotSet[k] = true
 	}
 
-	var hit []string
+	// Python 是 sorted(kinds) / sorted(got) / sorted(hit) —— 三个都**必须排序**。
+	// 原实现直接 range map：既与 Python 顺序不同，又**每次运行都变**（map 随机序）。
+	// 另外空集合必须序列化成 `[]` 而不是 `null`（前端按数组消费）。
+	hit := []string{}
 	for k := range kinds {
 		if gotSet[k] {
 			hit = append(hit, k)
 		}
 	}
+	sort.Strings(hit)
 
 	rate := float64(len(hit)) / float64(len(kinds))
 
-	var expectedList []string
+	expectedList := make([]string, 0, len(kinds))
 	for k := range kinds {
 		expectedList = append(expectedList, k)
 	}
-	var gotList []string
+	sort.Strings(expectedList)
+	gotList := make([]string, 0, len(gotSet))
 	for k := range gotSet {
 		gotList = append(gotList, k)
 	}
+	sort.Strings(gotList)
 
 	return &rate, map[string]any{
 		"expected": expectedList,
@@ -142,11 +161,12 @@ func requirementHit(req string, hayNorm string) bool {
 }
 
 func RequirementCoverage(requirements []string, haystack string) (*float64, map[string]any) {
-	var reqs []string
+	// Python: [str(r).strip() for r in (requirements or []) if str(r).strip()]
+	reqs := []string{}
 	for _, r := range requirements {
-		s := strings.TrimSpace(r)
-		if s != "" {
-			reqs = append(reqs, s)
+		v := pyre.Strip(r)
+		if v != "" {
+			reqs = append(reqs, v)
 		}
 	}
 	if len(reqs) == 0 {
@@ -154,8 +174,9 @@ func RequirementCoverage(requirements []string, haystack string) (*float64, map[
 	}
 
 	hay := normText(haystack)
-	var hit []string
-	var missing []string
+	// 空集合必须是 `[]` 而非 `null` —— Python 的列表推导天然给 []，Go 的 nil 给 null
+	hit := []string{}
+	missing := []string{}
 	for _, r := range reqs {
 		if requirementHit(r, hay) {
 			hit = append(hit, r)

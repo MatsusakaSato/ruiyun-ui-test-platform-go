@@ -4,7 +4,6 @@ import (
 	"fmt"
 	"math"
 	"sort"
-	"time"
 	"unicode/utf8"
 
 	"ruiyun-ui-test-platform-go/internal/assertor"
@@ -16,11 +15,15 @@ var severityOrder = map[string]int{
 	"P0": 0, "P1": 1, "P2": 2,
 }
 
+// pct 复刻 Python _pct(a, b) = round(a * 100.0 / b, 1) if b else 0.0
+//
+// 注意两点：中间量是 a*100.0/b（不是 a*1000.0/b 再除 10），
+// 舍入是银行家舍入 —— 写成 math.Round 会在恰好半值处与 Python 分道扬镳。
 func pct(a, b int) float64 {
 	if b == 0 {
 		return 0.0
 	}
-	return math.Round(float64(a)*1000.0/float64(b)) / 10.0
+	return trajectory.PyRound(float64(a)*100.0/float64(b), 1)
 }
 
 func ReproBlock(recipes []*models.Recipe) ([]map[string]any, map[string]any) {
@@ -105,17 +108,19 @@ func BuildMetrics(caseResults []*models.CaseResult, cfg map[string]any, recipes 
 	for _, f := range findings {
 		ruleCounter[f.Rule]++
 	}
-	var ruleRows []map[string]any
-	for rule, meta := range assertor.Rules {
-		cnt := ruleCounter[rule]
+	ruleRows := []map[string]any{}
+	// Python 按 RULES.items() 的**声明顺序**生成，再稳定排序；
+	// range map 会随机化顺序，sort.Slice 又是不稳定排序 —— 两处都得改。
+	for _, rule := range assertor.RuleOrder {
+		meta := assertor.Rules[rule]
 		ruleRows = append(ruleRows, map[string]any{
 			"rule":     rule,
 			"name":     meta.Label,
 			"severity": meta.Severity,
-			"count":    cnt,
+			"count":    ruleCounter[rule],
 		})
 	}
-	sort.Slice(ruleRows, func(i, j int) bool {
+	sort.SliceStable(ruleRows, func(i, j int) bool {
 		sI := severityOrder[fmt.Sprintf("%v", ruleRows[i]["severity"])]
 		sJ := severityOrder[fmt.Sprintf("%v", ruleRows[j]["severity"])]
 		if sI != sJ {
@@ -137,6 +142,7 @@ func BuildMetrics(caseResults []*models.CaseResult, cfg map[string]any, recipes 
 	// 工具维度
 	callTotal := 0
 	toolCounter := make(map[string]int)
+	var toolOrder []string
 	toolFailed := make(map[string]int)
 	toolTruncated := make(map[string]int)
 
@@ -144,6 +150,9 @@ func BuildMetrics(caseResults []*models.CaseResult, cfg map[string]any, recipes 
 		if c.Trace != nil {
 			for _, tc := range c.Trace.ToolCalls {
 				callTotal++
+				if _, seen := toolCounter[tc.Name]; !seen {
+					toolOrder = append(toolOrder, tc.Name)
+				}
 				toolCounter[tc.Name]++
 			}
 		}
@@ -158,15 +167,16 @@ func BuildMetrics(caseResults []*models.CaseResult, cfg map[string]any, recipes 
 		Name  string
 		Count int
 	}
-	var toolSorted []toolCountItem
-	for nm, c := range toolCounter {
-		toolSorted = append(toolSorted, toolCountItem{Name: nm, Count: c})
+	// Counter.most_common() 按次数降序，**并列时保持首次出现顺序**（稳定）
+	toolSorted := []toolCountItem{}
+	for _, nm := range toolOrder {
+		toolSorted = append(toolSorted, toolCountItem{Name: nm, Count: toolCounter[nm]})
 	}
-	sort.Slice(toolSorted, func(i, j int) bool {
+	sort.SliceStable(toolSorted, func(i, j int) bool {
 		return toolSorted[i].Count > toolSorted[j].Count
 	})
 
-	var toolRows []map[string]any
+	toolRows := []map[string]any{}
 	for _, item := range toolSorted {
 		fl := toolFailed[item.Name]
 		tr := toolTruncated[item.Name]
@@ -180,7 +190,7 @@ func BuildMetrics(caseResults []*models.CaseResult, cfg map[string]any, recipes 
 	}
 
 	// 工具覆盖度
-	var expected []string
+	expected := []string{}
 	expectedSet := make(map[string]bool)
 	usedSet := make(map[string]bool)
 	for nm := range toolCounter {
@@ -194,8 +204,8 @@ func BuildMetrics(caseResults []*models.CaseResult, cfg map[string]any, recipes 
 			}
 		}
 	}
-	var covered []string
-	var missing []string
+	covered := []string{}
+	missing := []string{}
 	for _, t := range expected {
 		if usedSet[t] {
 			covered = append(covered, t)
@@ -203,7 +213,7 @@ func BuildMetrics(caseResults []*models.CaseResult, cfg map[string]any, recipes 
 			missing = append(missing, t)
 		}
 	}
-	var usedList []string
+	usedList := []string{}
 	for t := range usedSet {
 		usedList = append(usedList, t)
 	}
@@ -268,6 +278,69 @@ func BuildMetrics(caseResults []*models.CaseResult, cfg map[string]any, recipes 
 		avgFirstResponse = &v
 	}
 
+	// sessions_closed：Python 统计的是 objective.status.session_closed 为真的用例数
+	closedCount := 0
+	for _, o := range caseObjective {
+		obj, _ := o.(map[string]any)
+		if obj == nil {
+			continue
+		}
+		if st, ok := obj["status"].(map[string]any); ok {
+			if b, ok := st["session_closed"].(bool); ok && b {
+				closedCount++
+			}
+		}
+	}
+
+	// Skill 使用（仅本轮，从 read_skill_file 返回解析）
+	// Python 侧是**列表**，按 key 首次出现顺序；sessions 是该 skill 覆盖的用例号（已排序）
+	type skillRowAgg struct {
+		name     string
+		sessions map[string]bool
+		files    []string
+		calls    int
+	}
+	skillAgg := map[string]*skillRowAgg{}
+	var skillRowOrder []string
+	for _, c := range caseResults {
+		if c.Trace == nil {
+			continue
+		}
+		for _, tc := range c.Trace.ToolCalls {
+			sn := trajectory.SkillName(tc)
+			if sn == "" && tc.Name != "read_skill_file" {
+				continue
+			}
+			key := sn
+			if key == "" {
+				key = trajectory.UnknownSkill
+			}
+			row, ok := skillAgg[key]
+			if !ok {
+				row = &skillRowAgg{name: key, sessions: map[string]bool{}, files: []string{}}
+				skillAgg[key] = row
+				skillRowOrder = append(skillRowOrder, key)
+			}
+			row.calls++
+			row.sessions[c.CaseID] = true
+			for _, fp := range trajectory.SkillFiles(tc) {
+				row.files = appendUniqueStr(row.files, fp)
+			}
+		}
+	}
+	skillRows := []map[string]any{}
+	for _, key := range skillRowOrder {
+		row := skillAgg[key]
+		ss := []string{}
+		for sid := range row.sessions {
+			ss = append(ss, sid)
+		}
+		sort.Strings(ss)
+		skillRows = append(skillRows, map[string]any{
+			"name": row.name, "sessions": ss, "files": row.files, "calls": row.calls,
+		})
+	}
+
 	objective := map[string]any{
 		"requests": map[string]any{
 			"turns":          turns,
@@ -280,7 +353,7 @@ func BuildMetrics(caseResults []*models.CaseResult, cfg map[string]any, recipes 
 			"tool_truncated":  truncsCount,
 			"error_rate":      pct(failsCount, toolCallsCount),
 			"truncated_rate":  pct(truncsCount, toolCallsCount),
-			"sessions_closed": len(caseResults) - len(uiFailed),
+			"sessions_closed": closedCount,
 			"sessions_total":  len(caseResults),
 		},
 		"tokens": map[string]any{
@@ -341,8 +414,10 @@ func BuildMetrics(caseResults []*models.CaseResult, cfg map[string]any, recipes 
 	}
 
 	// 问题发现行列表
-	var findingsRows []map[string]any
-	sort.Slice(findings, func(i, j int) bool {
+	findingsRows := []map[string]any{}
+	// 必须稳定排序：Python 的 sorted(...) 稳定，(severity, rule) 相同时保持原序。
+	// 用 sort.Slice 会让同严重度同规则的发现行随机换位。
+	sort.SliceStable(findings, func(i, j int) bool {
 		sI := severityOrder[findings[i].Severity]
 		sJ := severityOrder[findings[j].Severity]
 		if sI != sJ {
@@ -385,7 +460,7 @@ func BuildMetrics(caseResults []*models.CaseResult, cfg map[string]any, recipes 
 	}
 
 	return map[string]any{
-		"generated_at": time.Now().Format("2006-01-02 15:04:05"),
+		"generated_at": "", // Python 侧恒为空串（时间由上层写文件时决定）
 		"summary": map[string]any{
 			"cases":                len(caseResults),
 			"passed":               len(passed),
@@ -403,15 +478,35 @@ func BuildMetrics(caseResults []*models.CaseResult, cfg map[string]any, recipes 
 		},
 		"objective":      objective,
 		"case_objective": caseObjective,
+		"skill_rows":     skillRows,
 		"rule_rows":      ruleRows,
 		"severity":       severity,
 		"tool_rows":      toolRows,
 		"coverage":       coverage,
 		"case_rows":      caseRows,
 		"findings_rows":  findingsRows,
-		"repro_rows":     reproRows,
+		"repro_rows":     nonNilRows(reproRows),
 		"repro_summary":  reproSummary,
 	}
+}
+
+func appendUniqueStr(list []string, v string) []string {
+	if v == "" {
+		return list
+	}
+	for _, e := range list {
+		if e == v {
+			return list
+		}
+	}
+	return append(list, v)
+}
+
+func nonNilRows(rows []map[string]any) []map[string]any {
+	if rows == nil {
+		return []map[string]any{}
+	}
+	return rows
 }
 
 func getInt(v any) int {

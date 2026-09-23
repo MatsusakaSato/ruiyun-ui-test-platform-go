@@ -1,7 +1,6 @@
 package assertor
 
 import (
-	"encoding/json"
 	"fmt"
 	"regexp"
 	"sort"
@@ -9,6 +8,7 @@ import (
 	"unicode/utf8"
 
 	"ruiyun-ui-test-platform-go/internal/models"
+	"ruiyun-ui-test-platform-go/internal/pyre"
 )
 
 // PAYLOAD_CONTENT_FIELDS 结构化返回中承载正文/数据的载荷字段
@@ -46,6 +46,16 @@ var Rules = map[string]RuleMeta{
 	"CONFIRM_MANUAL_NEEDED": {"P0", "确认卡片自动点击失败，需人工介入"},
 }
 
+// RuleOrder 规则的**声明顺序**。
+// Python 侧 RULES 是 dict，rule_rows 按 RULES.items() 的插入顺序生成后做稳定排序；
+// Go 的 map 遍历会随机化，必须显式保留顺序，否则同严重度同数量的规则行会乱序。
+var RuleOrder = []string{
+	"TOOL_CALL_FAILED", "TOOL_RESULT_MISSING", "ORPHAN_TOOL_CALL",
+	"LOOP_CONSECUTIVE", "MAX_ITERATIONS_HIT", "NO_FINAL_ANSWER",
+	"OUTPUT_TRUNCATED", "DUPLICATE_CALL", "LOOP_TOTAL",
+	"EMPTY_REQUIRED_ARG", "SESSION_NOT_CLOSED", "CONFIRM_MANUAL_NEEDED",
+}
+
 func makeFinding(rule string, trace *models.ExecutionTrace, detail string, tool string, step *int, evidence string) *models.Finding {
 	sev := "P2"
 	if r, ok := Rules[rule]; ok {
@@ -67,8 +77,8 @@ func makeFinding(rule string, trace *models.ExecutionTrace, detail string, tool 
 	}
 }
 
-var reException = regexp.MustCompile(`(?i)(?:^|[\s\[\(\"'])(?:\w+)?exception\s*:`)
-var reRaisedException = regexp.MustCompile(`(?i)\b(?:unhandled|uncaught|raised|raise)\s+(?:an?\s+)?(?:\w+)?exception\b`)
+var reException = regexp.MustCompile(`(?i)(?:^|[` + pyre.SpaceClass + `\[\(\"'])(?:\w+)?exception[` + pyre.SpaceClass + `]*:`)
+var reRaisedException = regexp.MustCompile(`(?i)\b(?:unhandled|uncaught|raised|raise)[` + pyre.SpaceClass + `]+(?:an?[` + pyre.SpaceClass + `]+)?(?:\w+)?exception\b`)
 
 func matchMarker(textLower, marker string) bool {
 	m := strings.ToLower(strings.TrimSpace(marker))
@@ -90,13 +100,20 @@ func getErrorMarkers(cfg map[string]any) []string {
 	var res []string
 	if mList, ok := cfg["error_markers"].([]any); ok {
 		for _, v := range mList {
-			s := strings.TrimSpace(fmt.Sprintf("%v", v))
+			// Python: markers = [m.lower() for m in cfg.get("error_markers", [])]
+			// 必须小写：配置里同时存在 "[ERROR]" 与 "[error]"，不小写会被当成
+			// 两个不同特征，命中列表里会多出一项。
+			s := strings.ToLower(strings.TrimSpace(fmt.Sprintf("%v", v)))
 			if s != "" {
 				res = append(res, s)
 			}
 		}
 	} else if mList, ok := cfg["error_markers"].([]string); ok {
-		res = mList
+		for _, v := range mList {
+			if s := strings.ToLower(strings.TrimSpace(v)); s != "" {
+				res = append(res, s)
+			}
+		}
 	}
 	return res
 }
@@ -247,12 +264,18 @@ func CheckTotalLoop(trace *models.ExecutionTrace, cfg map[string]any) []*models.
 		th = v
 	}
 	counts := make(map[string]int)
+	// Python 的 Counter 是 dict 子类，遍历顺序 = 首次出现顺序。
+	// 直接用 map range 会让 finding 顺序随机化（真实差分：6 条 finding 顺序错乱）。
+	var order []string
 	for _, tc := range trace.ToolCalls {
+		if _, seen := counts[tc.Name]; !seen {
+			order = append(order, tc.Name)
+		}
 		counts[tc.Name]++
 	}
 	var out []*models.Finding
-	for nm, c := range counts {
-		if c >= th {
+	for _, nm := range order {
+		if c := counts[nm]; c >= th {
 			out = append(out, makeFinding("LOOP_TOTAL", trace,
 				fmt.Sprintf("%s 单会话共调用 %d 次（阈值 %d）", nm, c, th), nm, nil, ""))
 		}
@@ -267,12 +290,19 @@ func CheckDuplicate(trace *models.ExecutionTrace, cfg map[string]any) []*models.
 		sig  string
 	}
 	seen := make(map[key][]*models.ToolCall)
+	// Python 用 seen.setdefault(...) 的 dict，遍历顺序 = 首次出现顺序。
+	// 直接用 map range 会让 finding 顺序随机化（真实差分：10 条 finding 顺序错乱）。
+	var order []key
 	for _, tc := range trace.ToolCalls {
 		k := key{name: tc.Name, sig: tc.Signature()}
+		if _, ok := seen[k]; !ok {
+			order = append(order, k)
+		}
 		seen[k] = append(seen[k], tc)
 	}
 	var out []*models.Finding
-	for k, items := range seen {
+	for _, k := range order {
+		items := seen[k]
 		if len(items) >= 2 {
 			step := items[1].Index
 			evi := k.sig
@@ -293,8 +323,11 @@ func CheckEmptyArgs(trace *models.ExecutionTrace, cfg map[string]any) []*models.
 	for _, tc := range trace.ToolCalls {
 		if len(tc.EmptyRequiredArg) > 0 {
 			step := tc.Index
-			b, _ := json.Marshal(tc.Arguments)
-			evi := string(b)
+			// Python: json.dumps(t.arguments, ensure_ascii=False)[:300]
+			// 分隔符与转义必须一致（紧凑格式会全量不一致）。
+			// ⚠️ 注意 Python 这里**没有** sort_keys，用的是 JSON 源文件里的键序；
+			// Go 的 map 不保留键序，此处按有序输出，属已知的显示层差异（见报告）。
+			evi := models.PyJSONDumps(tc.Arguments)
 			if len([]rune(evi)) > 300 {
 				evi = string([]rune(evi)[:300])
 			}
@@ -379,6 +412,43 @@ type truncSignal struct {
 	detail string
 }
 
+// pyRepr 复刻 Python repr(str) 的形态，供截断信号的「实际结尾」摘录使用。
+//
+// Python 侧写的是 {body[-60:]!r}，所以换行会显示成字面量 \n、反斜杠变成 \\，
+// 而可打印的非 ASCII 字符（中文、emoji）保持原样（Python 3 的 repr 不做 ASCII 转义）。
+// Go 若直接用 %s 输出原始切片，凡是含换行的最终答案都会全量不一致。
+func pyRepr(s string) string {
+	quote := byte('\'')
+	if strings.Contains(s, "'") && !strings.Contains(s, "\"") {
+		quote = '"'
+	}
+	var sb strings.Builder
+	sb.WriteByte(quote)
+	for _, r := range s {
+		switch r {
+		case '\\':
+			sb.WriteString(`\\`)
+		case '\n':
+			sb.WriteString(`\n`)
+		case '\r':
+			sb.WriteString(`\r`)
+		case '\t':
+			sb.WriteString(`\t`)
+		default:
+			if r < 128 && byte(r) == quote {
+				sb.WriteByte('\\')
+				sb.WriteByte(quote)
+			} else if r < 0x20 || r == 0x7f {
+				sb.WriteString(fmt.Sprintf(`\x%02x`, r))
+			} else {
+				sb.WriteRune(r)
+			}
+		}
+	}
+	sb.WriteByte(quote)
+	return sb.String()
+}
+
 func truncationSignals(text string, trace *models.ExecutionTrace, cfg map[string]any) []truncSignal {
 	var ocfg map[string]any
 	if v, ok := cfg["output_truncation"].(map[string]any); ok {
@@ -454,7 +524,7 @@ func truncationSignals(text string, trace *models.ExecutionTrace, cfg map[string
 			if strings.HasSuffix(body, d) {
 				hits = append(hits, truncSignal{
 					"结尾为接续词",
-					fmt.Sprintf("以 '%s' 收尾（共 %d 字），该字/词后必须还有下文，实际结尾：…'%s'", d, n, tailRunes(60)),
+					fmt.Sprintf("以 %s 收尾（共 %d 字），该字/词后必须还有下文，实际结尾：…%s", pyRepr(d), n, pyRepr(tailRunes(60))),
 				})
 				break
 			}
@@ -477,8 +547,8 @@ func truncationSignals(text string, trace *models.ExecutionTrace, cfg map[string
 				pct := float64(n-c) / float64(c) * 100.0
 				hits = append(hits, truncSignal{
 					"命中截断上限",
-					fmt.Sprintf("长度 %d 字落在上限 %d 的 ±%.0f%% 范围内（偏差 %+.1f%%），且结尾无自然收尾符，实际结尾：…'%s'",
-						n, c, tol*100, pct, tailRunes(60)),
+					fmt.Sprintf("长度 %d 字落在上限 %d 的 ±%.0f%% 范围内（偏差 %+.1f%%），且结尾无自然收尾符，实际结尾：…%s",
+						n, c, tol*100, pct, pyRepr(tailRunes(60))),
 				})
 				break
 			}
@@ -488,7 +558,7 @@ func truncationSignals(text string, trace *models.ExecutionTrace, cfg map[string
 	// 信号 E：结构未闭合
 	unclosed := unclosedStructure(text)
 	if unclosed != "" {
-		hits = append(hits, truncSignal{"结构未闭合", fmt.Sprintf("%s，实际结尾：…'%s'", unclosed, tailRunes(60))})
+		hits = append(hits, truncSignal{"结构未闭合", fmt.Sprintf("%s，实际结尾：…%s", unclosed, pyRepr(tailRunes(60)))})
 	}
 
 	return hits
@@ -511,7 +581,7 @@ func CheckOutputTruncated(trace *models.ExecutionTrace, cfg map[string]any) []*m
 		names = append(names, s.name)
 		details = append(details, fmt.Sprintf("【%s】%s", s.name, s.detail))
 	}
-	detailStr := fmt.Sprintf("最终答案疑似被强制截断（命中信号：%s；共 %d 字）。 %s",
+	detailStr := fmt.Sprintf("最终答案疑似被强制截断（命中信号：%s；共 %d 字）。%s",
 		strings.Join(names, "、"), utf8.RuneCountInString(ans), strings.Join(details, " "))
 
 	ansRunes := []rune(ans)

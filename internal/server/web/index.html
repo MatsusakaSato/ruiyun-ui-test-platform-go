@@ -1,0 +1,399 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8"/>
+<meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+<!-- 空 favicon：避免浏览器自动请求 /favicon.ico 打出一条 404 控制台噪音 -->
+<link rel="icon" href="data:,"/>
+<title>睿云智能工作台 · UI 测试平台</title>
+<link rel="stylesheet" href="/css/base.css"/>
+<link rel="stylesheet" href="/css/layout.css"/>
+<link rel="stylesheet" href="/css/home.css"/>
+<link rel="stylesheet" href="/css/cases.css"/>
+<link rel="stylesheet" href="/css/history.css"/>
+<link rel="stylesheet" href="/css/modals.css"/>
+</head>
+<body>
+
+<div class="app">
+
+<!-- ============ 侧边导航（三栏） ============ -->
+<aside class="side">
+  <div class="brand">睿云智能工作台<small>UI 测试平台</small></div>
+  <nav>
+    <button class="nav-item on" data-page="home" onclick="switchPage('home')">
+      <span class="ni-ico">🏠</span>首页</button>
+    <button class="nav-item" data-page="cases" onclick="switchPage('cases')">
+      <span class="ni-ico">📝</span>测试用例</button>
+    <button class="nav-item" data-page="history" onclick="switchPage('history')">
+      <span class="ni-ico">🗂</span>历史记录</button>
+  </nav>
+  <div class="side-ft">
+    <span id="ver"></span>
+  </div>
+</aside>
+
+<div class="main">
+
+<header><div class="wrap hd">
+  <span class="badge b-idle" id="statusBadge">空闲</span>
+  <div class="spacer"></div>
+  <span class="opt" id="wrapEnv">环境
+    <select id="optEnv"></select>
+    <span class="q" data-tip="只有「开发」与「线上」两种环境。
+应用【启动时】注入对应环境变量，运行中的实例改不了：
+- 应用未运行 → 可切换，选择后写入 config.yaml，下次启动生效
+- 应用运行中 → 选择器置灰，需先点「✕ 关闭实例」
+注意：切换环境只影响下次启动。">?</span>
+  </span>
+  <span class="opt">
+    <button class="btn-ghost" id="btnCloseApp" title="关闭应用实例">✕ 关闭实例</button>
+    <span class="q" data-tip="关闭当前运行的应用实例（含手动从 Dock 启动的）。
+关闭后可重新选择环境，下次运行时会按所选环境启动。
+测试运行期间不可关闭。">?</span>
+  </span>
+  <span class="opt settings-wrap">
+    <button class="btn-ghost" id="btnSettings">⚙ 设置 ▾</button>
+    <div class="settings-menu" id="settingsMenu">
+      <button class="sm-item" data-act="app">🖥 应用与工作区</button>
+      <button class="sm-item" data-act="model" id="smModel"><span class="llm-dot" id="llmDot"></span>模型设置</button>
+      <button class="sm-item" data-act="inflight" id="smInflight"
+              title="同时执行的用例上限，点开可改（1–20）">
+        <span>⚡ 并发数</span>
+        <b class="sm-val" id="smInflightVal">5</b>
+      </button>
+      <button class="sm-item" data-act="autoclick" id="smAutoClick"
+              title="开启后，平台会替你点击确认卡片、作答选项卡（拒绝/取消类按钮永不点）">
+        <span>⚡ 自动点击确认</span>
+        <span class="sw" id="swAutoClick"><i></i></span>
+      </button>
+      <div class="im-panel" id="inflightPanel">
+        <div class="im-hd">同时执行的用例上限（1–20）</div>
+        <div class="im-row">
+          <input type="number" id="inflightInput" min="1" max="20" step="1" value="5"
+                 inputmode="numeric" autocomplete="off"/>
+          <span class="im-unit">条</span>
+        </div>
+        <div class="im-ft">1 = 一条跑完再跑下一条</div>
+      </div>
+    </div>
+    <span class="q" data-tip="设置二级菜单：
+- 应用与工作区：被测应用路径 / 会话日志目录 / 用户工作区目录，
+  每个路径旁的 📁 按钮可在访达（macOS）/ 资源管理器（Windows）中打开当前生效路径
+- 模型设置：供应商地址与 API Key（用于质量评估）
+- 自动点击确认：替你点确认卡片、作答选项卡，只对下次运行生效
+- 并发数：同时执行的用例上限
+工作区内含预设用例、附件库、轮次归档与 config.yaml。">?</span>
+  </span>
+  <button class="btn-run" id="btnRun" title="也可以直接按回车运行">▶ 运行测试</button>
+  <button class="btn-stop" id="btnStop" style="display:none" title="终止当前测试（本轮不产出报告）">■ 终止测试</button>
+</div></header>
+
+<!-- ============ 首页：运行台（只有运行日志 + 当前用例） ============ -->
+<section class="page on" id="pageHome">
+<div class="wrap">
+  <div class="console-wrap compact" id="consoleWrap">
+    <div class="console-hd">
+      <span class="ch-t">运行日志</span>
+      <span class="ch-new" id="consoleNew"></span>
+      <span class="console-live" id="consoleLive" style="display:none"><span class="live-dot"></span>实时输出</span>
+      <span class="spacer"></span>
+      <button class="console-btn" id="btnConsoleH" title="点击循环切换高度（140px / 240px / 450px）">210px</button>
+      <button class="console-btn" id="btnConsole" title="收起或展开运行日志">收起</button>
+    </div>
+    <div class="console" id="console"><span class="ln-none">暂无日志。点右上角的「▶ 运行测试」后，这里会实时显示每一步的输出。</span></div>
+    <div class="console-resizer" id="consoleResizer" title="按住拖拽调整高度，双击重置默认高度">
+      <span class="resizer-bar"></span>
+    </div>
+  </div>
+
+  <div class="home-sec">当前用例<span id="queueCount" class="cnt"></span>
+    <span class="spacer"></span>
+    <button class="home-link" onclick="switchPage('cases')">去管理用例 →</button>
+  </div>
+  <div class="card" id="runCasesCard">
+    <div id="runCases"></div>
+  </div>
+</div>
+</section>
+
+<!-- ============ 测试用例：预设用例库（可上千条） + 本轮要跑的队列 ============ -->
+<section class="page" id="pageCases" hidden>
+<div class="wrap">
+  <div class="card">
+    <div class="case-tabs">
+      <button class="ctab on" id="ctabLib" onclick="setCaseTab('lib')">预设用例库</button>
+      <button class="ctab" id="ctabQueue" onclick="setCaseTab('queue')">本轮要跑的<span id="tabQueueCount" class="cnt"></span></button>
+    </div>
+
+    <!-- ---- 预设用例库：服务端分页 + 筛选，支持批量删除 / 批量加入本轮 ---- -->
+    <div id="paneLib">
+      <div class="lib-bar">
+        <input class="lib-kw" id="libKw" placeholder="搜索提问 / 名称 / 编号（回车即查）"/>
+        <div class="spacer"></div>
+        <button class="btn-ghost" id="btnLibImport"
+                title="从 Excel（.xlsx / .xlsm）或 CSV 批量导入用例">📄 从 Excel 导入</button>
+        <button class="btn-ghost" id="btnLibAdd">+ 新增用例</button>
+        <button class="btn-ghost" id="btnLibReload" title="重新从工作区读取">刷新</button>
+        <input type="file" id="libFile" accept=".xlsx,.xlsm,.csv,.txt" style="display:none"/>
+      </div>
+      <div class="lib-filters">
+        <div class="mf-row"><span class="mf-label">场景</span><span id="libScenes" class="chips"></span></div>
+        <div class="mf-row"><span class="mf-label">测试目标</span><span id="libTargets" class="chips"></span></div>
+        <div class="mf-row"><span class="mf-label">附件</span><span id="libAtt" class="chips"></span></div>
+      </div>
+
+      <div class="padd-body" id="paddBody">
+        <div class="padd-card">
+          <div class="fld">
+            <label for="paddPrompt">提问 <span style="color:var(--p0)">*</span></label>
+            <textarea id="paddPrompt" rows="3" placeholder="填入要加入预设的问题原文（必填）…"></textarea>
+          </div>
+          <div class="padd-row">
+            <div class="fld" style="flex:0 0 180px">
+              <label for="paddScene">场景（选填）</label>
+              <input id="paddScene" list="paddScenes" placeholder="如：备课" autocomplete="off"/>
+              <datalist id="paddScenes"></datalist>
+            </div>
+            <div class="fld" style="flex:1 1 260px">
+              <label>测试目标（选填，可多选）</label>
+              <span class="padd-chips" id="paddTargets">
+                <label><input type="checkbox" value="word"/>word</label>
+                <label><input type="checkbox" value="ppt"/>ppt</label>
+                <label><input type="checkbox" value="html"/>html</label>
+                <label><input type="checkbox" value="pdf"/>pdf</label>
+                <label><input type="checkbox" value="excel"/>excel</label>
+                <label><input type="checkbox" value="network"/>network</label>
+              </span>
+            </div>
+            <div class="fld" style="flex:0 0 auto;margin-left:auto">
+              <label>&nbsp;</label>
+              <button class="btn-primary" id="paddOk">保存为新预设</button>
+            </div>
+          </div>
+          <div class="fhint" id="paddMsg"></div>
+        </div>
+      </div>
+
+      <div class="lib-table" id="libTable"></div>
+
+      <div class="lib-ft">
+        <span class="mcount" id="libSel">
+          <button class="home-link" id="libAll">全选本页</button>
+          <button class="home-link" id="libNone">取消选择</button>
+        </span>
+        <span class="spacer"></span>
+        <span class="lib-page" id="libPage"></span>
+        <button class="btn-ghost" id="libPrev">上一页</button>
+        <button class="btn-ghost" id="libNext">下一页</button>
+        <button class="btn-ghost" id="libDel" title="删除所选预设（不可恢复）">删除所选</button>
+        <button class="btn-primary" id="libToQueue" title="把所选用例加入「本轮要跑的」">加入本轮</button>
+      </div>
+    </div>
+
+    <!-- ---- 本轮要跑的队列：可改提问 / 挂附件 / 删行，再去首页运行 ---- -->
+    <div id="paneQueue" hidden>
+      <div class="lib-bar">
+        <span class="fhint">队列里的用例会按顺序执行，每条单独开一个会话；附件在运行时投递给被测应用。</span>
+        <div class="spacer"></div>
+        <button class="btn-ghost" id="btnAddQueueRow">+ 添加一行</button>
+        <button class="btn-ghost" id="btnClearCases">清空队列</button>
+        <button class="btn-run" id="btnRunQueue" onclick="doRun()">▶ 运行测试</button>
+      </div>
+      <div id="caseRows"></div>
+      <div class="hint" id="caseHint">队列还是空的。到「预设用例库」勾选用例后点「加入本轮」，或直接「+ 添加一行」。</div>
+    </div>
+  </div>
+</div>
+</section>
+
+<!-- ============ 历史记录：顶部筛选 + 服务端分页 + 双栏独立滚动 ============ -->
+<section class="page" id="pageHistory" hidden>
+<div class="wrap hist-wrap">
+  <!-- 顶部：筛选表单栏 -->
+  <div class="card hist-filter-bar">
+    <div class="hist-filter-row">
+      <div class="hf-item">
+        <label class="hf-label" for="histFrom">日期</label>
+        <input type="date" id="histFrom"/>
+        <span class="hf-sep">至</span>
+        <input type="date" id="histTo"/>
+      </div>
+      <div class="hf-item hf-kw-item">
+        <label class="hf-label" for="histKw">关键字</label>
+        <input id="histKw" placeholder="轮次号 / 提问内容，回车即查"/>
+      </div>
+      <div class="hist-btns">
+        <button class="btn-primary" id="histQuery">查询</button>
+        <button class="btn-ghost" id="histToday">今天</button>
+        <button class="btn-ghost" id="histWeek">近 7 天</button>
+        <button class="btn-ghost" id="histClear">清空</button>
+      </div>
+      <div class="hist-sum-wrap">
+        <span class="fhint" id="histSum"></span>
+      </div>
+    </div>
+  </div>
+
+  <!-- 下方：左侧轮次列表 + 右侧详情 -->
+  <div class="grid hist-grid">
+    <!-- 左：轮次列表 + 固定底部分页 -->
+    <div class="card hist-rounds-card">
+      <div class="hist-rounds-hd">
+        <h3 class="sec" style="margin-bottom:0">测试轮次<span id="roundCount" class="cnt"></span></h3>
+      </div>
+      <div id="roundList" class="hist-rounds-list">
+        <div class="round-empty">暂无轮次</div>
+      </div>
+      <div class="round-pager">
+        <button class="btn-ghost" id="roundPrev">上一页</button>
+        <span class="lib-page" id="roundPage"></span>
+        <button class="btn-ghost" id="roundNext">下一页</button>
+      </div>
+    </div>
+
+    <!-- 右：详情（独立滚动） -->
+    <div id="detailPane" class="hist-detail-pane">
+      <div class="card"><div class="empty">选择左侧的轮次回看结果</div></div>
+    </div>
+  </div>
+</div>
+</section>
+
+</div><!-- .main -->
+</div><!-- .app -->
+
+<!-- ============ Excel 导入确认弹窗（预览 + 改列映射） ============ -->
+<div class="modal-mask" id="impxMask">
+  <div class="modal impx-modal" role="dialog" aria-label="从 Excel 导入用例">
+    <div class="modal-hd">
+      <h3>从 Excel 导入用例</h3>
+      <span class="msub" id="impxSub"></span>
+      <button class="mclose" id="impxClose" title="关闭（不导入）">✕</button>
+    </div>
+    <div class="impx-body">
+      <div class="impx-cols" id="impxCols"></div>
+      <div class="impx-note" id="impxNote"></div>
+      <div class="impx-preview"><table id="impxTable"></table></div>
+    </div>
+    <div class="modal-ft">
+      <span class="mcount" id="impxCount"></span>
+      <button class="btn-ghost" id="impxCancel">取消</button>
+      <button class="btn-primary" id="impxOk">加入用例库</button>
+    </div>
+  </div>
+</div>
+
+<!-- ============ 附件库弹窗（为某条用例挑选已上传的附件） ============ -->
+<div class="modal-mask" id="libMask">
+  <div class="modal lib-modal" role="dialog" aria-label="附件库">
+    <div class="modal-hd">
+      <h3>附件库</h3>
+      <span class="msub" id="libSub"></span>
+      <button class="mclose" id="libClose" title="关闭">✕</button>
+    </div>
+    <div class="modal-list" id="libList"></div>
+    <div class="modal-ft">
+      <span class="mcount" id="libCount"></span>
+      <button class="btn-primary" id="libDone">完成</button>
+    </div>
+  </div>
+</div>
+
+<!-- ============ 模型设置弹窗（大模型接入） ============ -->
+<div class="modal-mask" id="llmMask">
+  <div class="modal llm-modal" role="dialog" aria-label="模型设置">
+    <div class="modal-hd">
+      <h3>模型设置</h3>
+      <span class="msub">配置仅保存在本机浏览器</span>
+      <button class="mclose" id="llmClose" title="关闭">✕</button>
+    </div>
+    <div class="llm-body">
+      <div class="fld">
+        <label for="llmBase">供应商地址 <span style="color:var(--p0)">*</span></label>
+        <input id="llmBase" type="text" placeholder="https://api.example.com/v1" autocomplete="off" spellcheck="false"/>
+      </div>
+      <div class="fld">
+        <label for="llmKey">API Key <span style="color:var(--p0)">*</span></label>
+        <div class="pw-row">
+          <input id="llmKey" type="password" placeholder="sk-…" autocomplete="new-password" spellcheck="false"/>
+          <button class="btn-ghost" id="llmKeyToggle" type="button" title="显示 / 隐藏">显示</button>
+        </div>
+        <span class="fhint">打开本弹窗时自动回显服务端已保存的 Key（默认密码态隐藏，点「显示」查看）；未改动 Key 可直接保存，留空保存则沿用服务端 Key。</span>
+      </div>
+      <div class="fld">
+        <label for="llmModel">模型名 <span style="color:var(--p0)">*</span></label>
+        <input id="llmModel" type="text" placeholder="gpt-4o-mini / qwen-plus / ep-xxxxxxxx …" autocomplete="off" spellcheck="false"/>
+        <span class="fhint">必填：留空会让判分请求带上占位模型名而失败（TokenHub 等需填模型名或端点 ID）</span>
+      </div>
+      <button class="adv-toggle" id="llmAdvToggle" type="button">▸ 高级：自定义探活路径</button>
+      <div class="fld adv" id="llmAdvWrap">
+        <label for="llmPath">探活路径（选填）</label>
+        <input id="llmPath" type="text" placeholder="/models，留空则自动探测" autocomplete="off" spellcheck="false"/>
+        <span class="fhint">填写后覆盖默认探测（默认先 GET /models，再回退 POST /chat/completions）</span>
+      </div>
+      <div class="probe-box" id="llmProbe">填写后点击「测试连接」进行校验</div>
+    </div>
+    <div class="modal-ft">
+      <span class="mcount" id="llmState"></span>
+      <button class="btn-ghost" id="llmClear" title="清除已保存的配置与本机存储">清空</button>
+      <button class="btn-ghost" id="llmCancel">取消</button>
+      <button class="btn-ghost" id="llmTest">测试连接</button>
+      <button class="btn-primary" id="llmSave" disabled>保存</button>
+    </div>
+  </div>
+</div>
+
+<!-- ============ 应用设置弹窗（被测应用路径 / 会话日志目录） ============ -->
+<div class="modal-mask" id="appMask">
+  <div class="modal llm-modal" role="dialog" aria-label="应用设置">
+    <div class="modal-hd">
+      <h3>应用设置</h3>
+      <span class="msub">不配置则使用内置默认地址</span>
+      <button class="mclose" id="appCfgClose" title="关闭">✕</button>
+    </div>
+    <div class="llm-body">
+      <div class="fld">
+        <label for="appBinInp">被测应用可执行文件路径（选填）</label>
+        <div class="inp-row">
+          <!-- placeholder / 提示由 /api/app-settings 按本机平台回填（见 openAppCfg）：
+               写死 macOS 的 .app/Contents/MacOS/... 会让 Windows 用户以为默认值是错的 -->
+          <input id="appBinInp" type="text" autocomplete="off" spellcheck="false" placeholder=""/>
+          <button class="reveal-btn" id="appBinReveal" onclick="revealCfgPath('binary')"
+                  title="在文件管理器中打开当前生效的应用路径">📁</button>
+        </div>
+        <span class="fhint" id="appBinHint">留空使用本机内置默认路径</span>
+      </div>
+      <div class="fld">
+        <label for="appLogInp">会话日志根目录（选填）</label>
+        <div class="inp-row">
+          <input id="appLogInp" type="text" autocomplete="off" spellcheck="false"
+                 placeholder="~/.srtclaw/workspace/session"/>
+          <button class="reveal-btn" id="appLogReveal" onclick="revealCfgPath('session_root')"
+                  title="在文件管理器中打开当前生效的日志目录">📁</button>
+        </div>
+        <span class="fhint" id="appLogHint">被测应用产生的日志地址（sess_* 会话目录的父目录）。留空使用本机内置默认路径</span>
+      </div>
+      <div class="fld">
+        <label for="wsInp">用户工作区目录（选填）</label>
+        <div class="inp-row">
+          <input id="wsInp" type="text" autocomplete="off" spellcheck="false"/>
+          <button class="reveal-btn" id="wsReveal" onclick="revealCfgPath('workspace')"
+                  title="在文件管理器中打开当前生效的工作区目录">📁</button>
+        </div>
+        <span class="fhint">非功能性数据（预设用例 testcases.db、附件库 uploads/、轮次归档 rounds/、config.yaml）的存放目录。留空使用 ~/.ruiyun-autotest；改动后旧数据自动迁移到新目录</span>
+      </div>
+      <div class="probe-box" id="appCfgState" style="display:none"></div>
+    </div>
+    <div class="modal-ft">
+      <span class="mcount" id="appCfgSrc"></span>
+      <button class="btn-ghost" id="appCfgReset" title="删除本机覆盖，回退 config.yaml / 内置默认">恢复默认</button>
+      <button class="btn-ghost" id="appCfgCancel">取消</button>
+      <button class="btn-primary" id="appCfgSave">保存</button>
+    </div>
+  </div>
+</div>
+
+<script type="module" src="/js/main.js"></script>
+</body>
+</html>

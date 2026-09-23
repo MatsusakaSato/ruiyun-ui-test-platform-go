@@ -22,6 +22,7 @@ import (
 	"ruiyun-ui-test-platform-go/internal/llm"
 	"ruiyun-ui-test-platform-go/internal/logparser"
 	"ruiyun-ui-test-platform-go/internal/models"
+	"ruiyun-ui-test-platform-go/internal/pyre"
 	"ruiyun-ui-test-platform-go/internal/rubric"
 	"ruiyun-ui-test-platform-go/internal/safetyscan"
 	"ruiyun-ui-test-platform-go/internal/testcasedb"
@@ -40,7 +41,10 @@ const (
 	RedlineOverrideDefault = true
 )
 
-var whitespaceRegex = regexp.MustCompile(`\s+`)
+// ⚠️ 不能写 Go 的 `\s`：它只认 5 个字符，Python 的 `\s` 认 29 个。
+// 这是 prompt 去重键与预设索引键的**唯一**归一化函数 —— 一旦与
+// 索引构建侧语义不一致，重复问题就检测不出来、预设标签也查不到。
+var whitespaceRegex = regexp.MustCompile(`[` + pyre.SpaceClass + `]+`)
 
 func normPrompt(s string) string {
 	return whitespaceRegex.ReplaceAllString(s, "")
@@ -647,9 +651,11 @@ func factsPayload(caseItem map[string]interface{}, trace *models.ExecutionTrace,
 		sort.Strings(prodKinds)
 		for _, a := range arts.Items {
 			artItems = append(artItems, map[string]interface{}{
-				"类型":   a.Kind,
-				"文件":   a.RelPath,
-				"绝对路径": artifacts.ResolveAbsPath(a.RelPath, wsRoot),
+				"类型": a.Kind,
+				"文件": a.RelPath,
+				// 必须用带存在性校验的 DisplayAbsPath：Python 侧是 resolve_abs_path，
+				// 解析不到要返回空串让界面显示「本机未找到」，而不是猜一个路径
+				"绝对路径": artifacts.DisplayAbsPath(a, wsRoot),
 			})
 		}
 	}
@@ -757,8 +763,8 @@ func parseJSONRobust(text string) map[string]interface{} {
 	}
 	s := strings.TrimSpace(text)
 	if strings.HasPrefix(s, "```") {
-		s = regexp.MustCompile("^```[a-zA-Z]*\\s*").ReplaceAllString(s, "")
-		s = regexp.MustCompile("\\s*```$").ReplaceAllString(s, "")
+		s = regexp.MustCompile("^```[a-zA-Z]*["+pyre.SpaceClass+"]*").ReplaceAllString(s, "")
+		s = regexp.MustCompile("["+pyre.SpaceClass+"]*```$").ReplaceAllString(s, "")
 		s = strings.TrimSpace(s)
 	}
 	var obj map[string]interface{}
@@ -1450,8 +1456,10 @@ func evaluateCase(runID string, caseItem map[string]interface{}, bundle *RoundBu
 			}
 		}
 	}
-	sources := safetyscan.BuildSources(finalAns, arts.Texts(), toolCalls)
-	hits := safetyscan.Scan(sources)
+	// 必须用有序版本：Python 的 build_sources 返回有序 dict，scan() 按 **来源优先**
+	// 遍历；用 map 版本会让 hits / redlines 每次运行顺序都不同。
+	sources := safetyscan.BuildSourcesOrdered(finalAns, arts.Texts(), toolCalls)
+	hits := safetyscan.ScanOrdered(sources)
 	red := safetyscan.Redlines(hits)
 	notedHits := safetyscan.ExemptHits(hits)
 
@@ -1728,7 +1736,7 @@ func evaluateCase(runID string, caseItem map[string]interface{}, bundle *RoundBu
 				"kind":     a.Kind,
 				"path":     a.RelPath,
 				"note":     a.Note,
-				"abs_path": artifacts.ResolveAbsPath(a.RelPath, wsRoot),
+				"abs_path": artifacts.DisplayAbsPath(a, wsRoot),
 			})
 		}
 	}

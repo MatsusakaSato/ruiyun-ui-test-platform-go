@@ -12,6 +12,8 @@ import (
 	"time"
 
 	"gopkg.in/yaml.v3"
+
+	"ruiyun-ui-test-platform-go/internal/pyre"
 )
 
 var (
@@ -477,7 +479,7 @@ func WriteEnvProfile(profile string) (bool, string) {
 	}
 	text := string(data)
 
-	reEnv := regexp.MustCompile(`(?m)^(\s*)env_profile:.*$`)
+	reEnv := regexp.MustCompile(`(?m)^([` + pyre.SpaceClass + `]*)env_profile:.*$`)
 	if reEnv.MatchString(text) {
 		text = reEnv.ReplaceAllString(text, fmt.Sprintf(`${1}env_profile: "%s"`, key))
 	} else {

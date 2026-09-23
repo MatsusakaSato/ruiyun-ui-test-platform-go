@@ -10,8 +10,10 @@ import (
 	"regexp"
 	"strings"
 	"time"
+	"unicode/utf8"
 
 	"ruiyun-ui-test-platform-go/internal/config"
+	"ruiyun-ui-test-platform-go/internal/pyre"
 )
 
 const (
@@ -32,8 +34,8 @@ const (
 )
 
 var (
-	reBearer = regexp.MustCompile(`(?i)(bearer\s+)[A-Za-z0-9._\-]{6,}`)
-	reAPIKey = regexp.MustCompile(`(?i)(["']?(?:api[_-]?key|apikey|authorization|access[_-]?token)["']?\s*[:=]\s*["']?)[^"'\s,}]{4,}`)
+	reBearer = regexp.MustCompile(`(?i)(bearer[` + pyre.SpaceClass + `]+)[A-Za-z0-9._\-]{6,}`)
+	reAPIKey = regexp.MustCompile(`(?i)(["']?(?:api[_-]?key|apikey|authorization|access[_-]?token)["']?[` + pyre.SpaceClass + `]*[:=][` + pyre.SpaceClass + `]*["']?)[^"'` + pyre.SpaceClass + `,}]{4,}`)
 )
 
 // Redact 抹去敏感凭证
@@ -104,7 +106,7 @@ func NewLLMClient(timeout time.Duration) *LLMClient {
 // ProbeProvider 供应商探活
 func ProbeProvider(baseURL, apiKey, model, probePath string, timeoutS float64) *ProbeResult {
 	bURL := strings.TrimRight(strings.TrimSpace(baseURL), "/")
-	key := strings.TrimSpace(apiKey)
+	key := pyre.Strip(apiKey) // Python 是 (api_key or "").strip()
 	mName := strings.TrimSpace(model)
 
 	if timeoutS <= 0 {
@@ -123,6 +125,21 @@ func ProbeProvider(baseURL, apiKey, model, probePath string, timeoutS float64) *
 			Stage:     "input",
 			Category:  CatInvalid,
 			Message:   "供应商地址与 API Key 均不能为空",
+			LatencyMs: elapsedMs(),
+		}
+	}
+
+	// API Key 绝不含空白。把「Key + 模型名/地址」一起粘进来是最常见的坑：
+	// 直接判入参错误，比发出去换回一个含义模糊的 401 更容易定位。
+	// 对应 core/llm_client.py:242（原文逐字保留）。
+	if pyre.ContainsSpace(key) {
+		return &ProbeResult{
+			OK:       false,
+			Stage:    "preflight",
+			Category: CatInvalid,
+			Message: fmt.Sprintf("API Key 中不能含空格或换行（当前 %d 字符）——"+
+				"很可能把「模型名」一起粘进来了。请只填 Key 原文，模型名填到「模型名」字段",
+				utf8.RuneCountInString(key)),
 			LatencyMs: elapsedMs(),
 		}
 	}
@@ -319,6 +336,20 @@ func Chat(baseURL, apiKey, model string, messages []map[string]string, timeoutS 
 	elapsedMs := func() int {
 		return int(time.Since(t0).Milliseconds())
 	}
+
+	// ⚠️ 原实现**完全没有**这两个前置校验（Python 有，见 core/llm_client.py:406-414）。
+	// 缺了它们，把「模型名」一起粘进 Key 时会白跑一次网络请求，
+	// 换回一句与真实原因无关的 401。原文逐字保留。
+	key := pyre.Strip(apiKey)
+	if key == "" {
+		return ChatResult{OK: false, Error: "未配置 API Key", Stage: "preflight",
+			LatencyMs: elapsedMs()}
+	}
+	if pyre.ContainsSpace(key) {
+		return ChatResult{OK: false, Error: "API Key 含空格或换行，请检查是否粘贴了多余内容",
+			Stage: "preflight", LatencyMs: elapsedMs()}
+	}
+
 	client := NewLLMClient(time.Duration(timeoutS * float64(time.Second)))
 
 	reqPayload := map[string]any{
@@ -344,7 +375,7 @@ func Chat(baseURL, apiKey, model string, messages []map[string]string, timeoutS 
 		return ChatResult{OK: false, Error: err.Error(), Stage: "preflight", LatencyMs: elapsedMs()}
 	}
 	req.Header.Set("User-Agent", UserAgent)
-	req.Header.Set("Authorization", "Bearer "+apiKey)
+	req.Header.Set("Authorization", "Bearer "+key)
 	req.Header.Set("Content-Type", "application/json")
 
 	resp, err := client.httpClient.Do(req)
