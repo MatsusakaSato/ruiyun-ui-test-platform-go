@@ -2,12 +2,12 @@ package metrics
 
 import (
 	"fmt"
-	"math"
 	"sort"
 	"unicode/utf8"
 
 	"ruiyun-ui-test-platform-go/internal/assertor"
 	"ruiyun-ui-test-platform-go/internal/models"
+	"ruiyun-ui-test-platform-go/internal/pyre"
 	"ruiyun-ui-test-platform-go/internal/trajectory"
 )
 
@@ -71,7 +71,7 @@ func ReproBlock(recipes []*models.Recipe) ([]map[string]any, map[string]any) {
 
 	var avgRate *float64
 	if len(rows) > 0 {
-		v := math.Round(rateSum/float64(len(rows))*1000) / 1000
+		v := pyre.Round(rateSum/float64(len(rows)), 3) // Python: round(x, 3)
 		avgRate = &v
 	}
 
@@ -274,7 +274,7 @@ func BuildMetrics(caseResults []*models.CaseResult, cfg map[string]any, recipes 
 		for _, v := range firstResponses {
 			sum += v
 		}
-		v := math.Round(sum/float64(len(firstResponses))*100) / 100
+		v := pyre.Round(sum/float64(len(firstResponses)), 2) // Python: round(x, 2)
 		avgFirstResponse = &v
 	}
 

@@ -3,7 +3,6 @@ package trajectory
 import (
 	"fmt"
 	"math"
-	"math/big"
 	"sort"
 	"strings"
 	"time"
@@ -11,6 +10,7 @@ import (
 
 	"ruiyun-ui-test-platform-go/internal/artifacts"
 	"ruiyun-ui-test-platform-go/internal/models"
+	"ruiyun-ui-test-platform-go/internal/pyre"
 )
 
 var RuleImpact = map[string]string{
@@ -93,38 +93,14 @@ func EstTokens(text string) int {
 	return int(float64(cjk)/1.6 + float64(other)/4.0)
 }
 
-// PyRound 复刻 Python 的 round(x, nd)：**银行家舍入**（ties-to-even），
-// 且以浮点数的二进制精确值为准正确舍入。
+// PyRound 复刻 Python 的 round(x, nd)：银行家舍入（ties-to-even）。
 //
-// 必须如此：math.Round 是「四舍五入、远离零」，31.25 会得到 31.3，
-// 而 Python 的 round(31.25, 1) 得到 31.2 —— 这是实打实的跨语言数值差异。
+// 实现已统一搬到 pyre.Round —— 全项目只保留一份 Python 舍入语义，
+// 这里保留公开名只是为了不动既有调用点。
 func PyRound(x float64, nd int) float64 {
-	if math.IsNaN(x) || math.IsInf(x, 0) {
-		return x
-	}
-	r := new(big.Rat).SetFloat64(x)
-	if r == nil {
-		return x
-	}
-	pow := new(big.Int).Exp(big.NewInt(10), big.NewInt(int64(nd)), nil)
-	r.Mul(r, new(big.Rat).SetInt(pow))
-	num, den := r.Num(), r.Denom()
-	q, rem := new(big.Int).QuoRem(num, den, new(big.Int))
-	rem.Abs(rem)
-	rem.Mul(rem, big.NewInt(2))
-	switch cmp := rem.Cmp(den); {
-	case cmp > 0 || (cmp == 0 && q.Bit(0) == 1):
-		if num.Sign() < 0 {
-			q.Sub(q, big.NewInt(1))
-		} else {
-			q.Add(q, big.NewInt(1))
-		}
-	}
-	res, _ := new(big.Rat).SetFrac(q, pow).Float64()
-	return res
+	return pyre.Round(x, nd)
 }
 
-// RoundToOneDecimal 保留 1 位小数（Python: round(v, 1)）
 func RoundToOneDecimal(v float64) float64 {
 	return PyRound(v, 1)
 }

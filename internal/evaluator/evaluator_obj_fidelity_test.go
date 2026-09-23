@@ -3,6 +3,7 @@ package evaluator
 import (
 	"encoding/json"
 	"math"
+	"reflect"
 	"strings"
 	"testing"
 
@@ -398,4 +399,148 @@ func equalStr(a, b []string) bool {
 		}
 	}
 	return true
+}
+
+// ---------- calcMean / overall_score_100 / pyFloatValue（§3.13） ----------
+
+// Python: _mean = round(sum(vals)/len(vals), 2) —— 银行家舍入。
+// 🔴 可达反例只用**合法整数分值**：correctness(1-5)=1 → nv 0.0；completeness(1-5)=2 → nv 0.25。
+//
+//	mean = 0.125 → Python 0.12 / 旧的 math.Round(0.125*100)/100 = 0.13。
+func TestCalcMeanUsesBankersRounding(t *testing.T) {
+	got := calcMean([]float64{0.0, 0.25})
+	if got == nil {
+		t.Fatal("不应为 nil")
+	}
+	if *got != 0.12 {
+		t.Errorf("calcMean([0.0 0.25]) 期望 0.12（Python round(0.125,2)），实际 %v", *got)
+	}
+	// 另一组：3×0.25 + 1×0.5 → mean 0.3125；round(0.3125,2)=0.31（ties-to-even 取奇数侧？不，0.31 是偶）
+	if g := calcMean([]float64{0.25, 0.25, 0.25, 0.5}); g == nil || *g != 0.31 {
+		t.Errorf("calcMean 期望 0.31，实际 %v", g)
+	}
+	// 空集 → nil
+	if g := calcMean(nil); g != nil {
+		t.Errorf("空集应返回 nil，实际 %v", g)
+	}
+	// 单个元素原样
+	if g := calcMean([]float64{0.6}); g == nil || *g != 0.6 {
+		t.Errorf("单元素期望 0.6，实际 %v", g)
+	}
+}
+
+// Python: round(overall_mean * 100, 1)
+// 🔴 可达反例：3 个 1-5 档维度 =2（nv 0.25）+ 1 个 =3（nv 0.5）
+//
+//	mean = 0.3125 → Python 31.2 / 旧的 math.Round(0.3125*1000)/10 = 31.3。
+func TestAggregateOverallScore100UsesPyRound(t *testing.T) {
+	// ⚠️ aggregateResults 用的是 `row["scores"].([]map[string]interface{})` ——
+	// **具体类型**断言，且把 ok 丢掉了（`scores, _ := ...`）。
+	// 传 []interface{} 会静默变成空切片、聚合结果全 nil、不报错。
+	// 这里必须按真实形状构造。
+	mkRow := func(scores ...interface{}) map[string]interface{} {
+		list := []map[string]interface{}{}
+		keys := []string{"correctness", "completeness", "relevance", "actionability"}
+		for i, sc := range scores {
+			list = append(list, map[string]interface{}{"key": keys[i], "score": sc})
+		}
+		return map[string]interface{}{"scores": list, "judge_error": ""}
+	}
+	// 4 个维度：2,2,2,3 → nv 0.25,0.25,0.25,0.5 → mean 0.3125
+	agg := aggregateResults([]map[string]interface{}{mkRow(2, 2, 2, 3)})
+	got := agg["overall_score_100"]
+	if got == nil {
+		t.Fatal("overall_score_100 不应为 nil")
+	}
+	// Python 的真实计算链是：
+	//   overall_mean = _mean(overall)              # round(0.3125, 2) == 0.31
+	//   overall_score_100 = round(overall_mean*100, 1)   # round(0.31*100,1) == 31.0
+	// 注意 ties-to-even 的**tie 点是 x.xx5**，而 0.3125 的第三位是 2、其尾数只到 0.5
+	// 个第三位 → 低于 tie → 0.31（不是 0.32）。这里曾经算错过一次，记下来。
+	if v, ok := got.(*float64); ok {
+		if v == nil {
+			t.Fatalf("overall_score_100 是 nil —— 说明维度没匹配上（scores 形状/维度 key 不对）")
+		}
+		if *v != 31 {
+			t.Errorf("overall_score_100 期望 31，实际 %v", *v)
+		}
+	} else if v, ok := got.(float64); ok {
+		if v != 31 {
+			t.Errorf("overall_score_100 期望 31，实际 %v", v)
+		}
+	} else {
+		t.Errorf("overall_score_100 类型异常：%T", got)
+	}
+	// overall_normalized = _mean(overall) = round(0.3125, 2) = 0.31
+	if on, ok := agg["overall_normalized"].(*float64); ok && on != nil && *on != 0.31 {
+		t.Errorf("overall_normalized 期望 0.31，实际 %v", *on)
+	}
+	// group_means 存的是**归一化后 ×5**（0-5 刻度）：nv*5 = {1.25,1.25,1.25,2.5}
+	// 均值 1.5625 → round(1.5625, 2) = 1.56
+	gm, _ := agg["group_means"].(map[string]interface{})
+	if gm == nil {
+		t.Fatal("group_means 缺失")
+	}
+	gv, _ := gm["result_quality"].(*float64)
+	if gv == nil {
+		t.Fatalf("result_quality 组均分为 nil（类型 %T）", gm["result_quality"])
+	}
+	if *gv != 1.56 {
+		t.Errorf("result_quality 组均分期望 1.56，实际 %v", *gv)
+	}
+}
+
+// ⚠️ 可达性说明（诚实记录）：
+// overall_score_100 的入参 overall_mean **已被 calcMean 取整到 2 位**，
+// 在 2 位小数输入上 round(m*100,1) 与旧的 math.Round(m*1000)/10 **恒等**
+// （实测 k/100 k=0..100 与 1001 个 2 位小数共 0 例分歧）。
+// 所以这行改动是**语义统一**，不是可达的行为修复。
+// 本文件真正可达的修复是 TestCalcMeanUsesBankersRounding。
+// Python 侧 _aggregate 走的是 normalize(score, ...)，而 normalize 内部 float(score)
+// 捕获 TypeError/ValueError —— 所以字符串与布尔也合法。
+func TestPyFloatValueMatchesPythonFloat(t *testing.T) {
+	ok := []struct {
+		in   interface{}
+		want float64
+	}{
+		{float64(3), 3}, {int(3), 3}, {true, 1}, {false, 0},
+		{"3", 3}, {"3.5", 3.5}, {" 3 ", 3}, // Python float() 会 strip
+	}
+	for _, c := range ok {
+		got, good := pyFloatValue(c.in)
+		if !good || got != c.want {
+			t.Errorf("pyFloatValue(%#v) 期望 (%v,true)，实际 (%v,%v)", c.in, c.want, got, good)
+		}
+	}
+	bad := []interface{}{nil, "3分", "3abc", "abc", "", []interface{}{1}}
+	for _, in := range bad {
+		if _, good := pyFloatValue(in); good {
+			t.Errorf("pyFloatValue(%#v) 期望不可用，实际可用", in)
+		}
+	}
+}
+
+// judge_errors 并列时必须保持**首次出现顺序**（Python 的 sorted 是稳定排序）。
+func TestAggregateJudgeErrorsStableOrderOnTies(t *testing.T) {
+	oneScore := []map[string]interface{}{{"key": "correctness", "score": 3}}
+	// 每个错误各出现 1 次 → 完全并列；期望按首次出现顺序 a, b, c
+	rows := []map[string]interface{}{
+		{"scores": oneScore, "judge_error": "a"},
+		{"scores": oneScore, "judge_error": "b"},
+		{"scores": oneScore, "judge_error": "c"},
+	}
+	agg := aggregateResults(rows)
+	// judge_errors 的元素类型是 aggregateResults 内部定义的 errPair，包外无法直接断言，
+	// 用反射读 Reason 字段。
+	rv := reflect.ValueOf(agg["judge_errors"])
+	if rv.Kind() != reflect.Slice || rv.Len() != 3 {
+		t.Fatalf("judge_errors 期望长度 3 的切片，实际 %T len=%d", agg["judge_errors"], rv.Len())
+	}
+	want := []string{"a", "b", "c"}
+	for i := 0; i < rv.Len(); i++ {
+		got := rv.Index(i).FieldByName("Reason").String()
+		if got != want[i] {
+			t.Errorf("judge_errors[%d] 期望 %q（首次出现顺序），实际 %q", i, want[i], got)
+		}
+	}
 }

@@ -23,6 +23,8 @@
 package pyre
 
 import (
+	"math"
+	"math/big"
 	"strings"
 	"unicode"
 )
@@ -101,4 +103,42 @@ func IsSpace(r rune) bool {
 		return true
 	}
 	return unicode.IsSpace(r)
+}
+
+// Round 复刻 Python 的 round(x, nd)：**银行家舍入**（ties-to-even），
+// 且以浮点数的**二进制精确值**为准正确舍入。
+//
+// 为什么必须自己实现：Go 的 math.Round 是「四舍五入、远离零」，
+// 而且常见写法 `math.Round(x*10)/10` 还会引入**二次舍入**：
+//
+//	Python round(31.25, 1)          == 31.2
+//	Go     math.Round(31.25*10)/10  == 31.3
+//	Python round(0.35, 1)           == 0.3   （0.35 真实值 ≈ 0.34999…）
+//	Go     math.Round(0.35*10)/10   == 0.4   （*10 后 ≈ 3.5000000000000004）
+//
+// 凡 Python 原文写 `round(...)` 的地方，Go 一律用本函数。
+func Round(x float64, nd int) float64 {
+	if math.IsNaN(x) || math.IsInf(x, 0) {
+		return x
+	}
+	r := new(big.Rat).SetFloat64(x)
+	if r == nil {
+		return x
+	}
+	pow := new(big.Int).Exp(big.NewInt(10), big.NewInt(int64(nd)), nil)
+	r.Mul(r, new(big.Rat).SetInt(pow))
+	num, den := r.Num(), r.Denom()
+	q, rem := new(big.Int).QuoRem(num, den, new(big.Int))
+	rem.Abs(rem)
+	rem.Mul(rem, big.NewInt(2))
+	switch cmp := rem.Cmp(den); {
+	case cmp > 0 || (cmp == 0 && q.Bit(0) == 1):
+		if num.Sign() < 0 {
+			q.Sub(q, big.NewInt(1))
+		} else {
+			q.Add(q, big.NewInt(1))
+		}
+	}
+	res, _ := new(big.Rat).SetFrac(q, pow).Float64()
+	return res
 }

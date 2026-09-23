@@ -3,7 +3,6 @@ package logparser
 import (
 	"encoding/json"
 	"fmt"
-	"math"
 	"os"
 	"path/filepath"
 	"strings"
@@ -11,6 +10,7 @@ import (
 	"unicode/utf8"
 
 	"ruiyun-ui-test-platform-go/internal/models"
+	"ruiyun-ui-test-platform-go/internal/pyre"
 )
 
 var wrapperKeys = []string{"event_type", "tool_name", "tool_call_id"}
@@ -153,10 +153,11 @@ func pyStr(m map[string]any, key string) string {
 	return fmt.Sprintf("%v", v)
 }
 
-// round2 复刻 Python 的 round(x, 2)。
+// round2 复刻 Python 的 round(x, 2)（银行家舍入）。
 // Python 侧所有派生耗时都做了 2 位小数取整，Go 侧不做就会全量不一致。
+// 已委托 pyre.Round —— 原写法 math.Round(x*100)/100 在 ties 上方向相反且多一次舍入。
 func round2(x float64) float64 {
-	return math.Round(x*100) / 100
+	return pyre.Round(x, 2)
 }
 
 func parseTime(tsStr string) (time.Time, bool) {

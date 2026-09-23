@@ -1,9 +1,10 @@
 package rubric
 
 import (
-	"math"
 	"sort"
 	"strconv"
+
+	"ruiyun-ui-test-platform-go/internal/pyre"
 )
 
 const (
@@ -375,10 +376,12 @@ func Normalize(score *float64, scale string) *float64 {
 	}
 	s := *score
 	var norm float64
+	// Python 是 round((s-1)/4, 4) / round(s/5, 4) —— 银行家舍入。
+	// 原写成 math.Round(x*10000)/10000 既有 ties 方向错误，又多了二次舍入。
 	if scale == Scale1To5 {
-		norm = math.Round((s-1)/4*10000) / 10000
+		norm = pyre.Round((s-1)/4, 4)
 	} else if scale == Scale035 || scale == Scale50 || scale == ScaleRatio {
-		norm = math.Round(s/5*10000) / 10000
+		norm = pyre.Round(s/5, 4)
 	} else {
 		return nil
 	}

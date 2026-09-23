@@ -60,7 +60,7 @@ GetPresetLabelsIndex / CaseSeq
 | `internal/metrics/metrics.go` | **本轮大改**：排序稳定性、`skill_rows`、`sessions_closed`、`pct`（见 §3.8） |
 | `internal/evaluator/evaluator.go` | **2 处产物路径**改用 `DisplayAbsPath`；**本轮 3 处空白语义**：`whitespaceRegex`（`normPrompt`）、两处代码围栏剥离（见 §3.11） |
 | `internal/rubric/rubric.go` | 删除未使用的 `fmt` import（曾导致全模块编译失败） |
-| `internal/pyre/pyre.go` | **【新增包】** Python `\s` / `str.strip()` 的语义等价实现（见 §3.10 第 42、47 条）；**本轮补 `CleanSpace` / `ContainsSpace`**（见 §3.11） |
+| `internal/pyre/pyre.go` | **【新增包】** Python 语义的叶子工具包：`SpaceClass` / `IsSpace` / `Strip`（见 §3.10 第 42、47 条）、`CleanSpace` / `ContainsSpace`（见 §3.11）、**`Round(x,nd)` —— 全项目唯一的 Python 银行家舍入实现（见 §3.13）** |
 | `internal/llm/llm.go` | **本轮 3 处空白语义**（`reBearer` / `reAPIKey`）+ **补上 Python 有而 Go 完全缺失的 API Key 前置校验（空值 + 含空白）**（见 §3.11 第 60、63 条）⚠️ 这是你在改的文件 |
 | `internal/config/settings.go` | **本轮 1 处**：`WriteEnvProfile` 的 `reEnv` 空白语义（见 §3.11 第 61 条）⚠️ 这是你在改的文件 |
 
@@ -96,7 +96,7 @@ docs/P0-差分验证报告.md                          完整发现与证据
 
 ## 3. 已修复的真实缺陷（**请勿回退，全部有回归测试保护**）
 
-累计 **70 处**（最近三轮新增 29 处）。都不是风格问题，
+累计 **82 处**（最近四轮新增 41 处）。都不是风格问题，
 而是**用真实生产数据差分出来的行为偏差**。
 
 ### 3.1 `internal/xlsx/`（3 处）
@@ -568,6 +568,104 @@ Go 的 `encoding/json` 把 JSON 的 `3` 与 `3.0` **都解成 `float64(3)`**，
 现实语料里 `expect_tools` **全是工具名字符串**，此路径不可达；已在测试里显式记录，
 以免以后有人误以为"已经完全对齐"。这与 §3.4 第 18 条的残留边界同源。
 
+### 3.13 `round()` 全局归一（**12 处，本轮新增**）
+
+**这一轮的主题是 Python `round()` 与 Go `math.Round` 的系统性差异。**
+上一轮查 `objDeliveryEfficiency` 时只修了一个点；这轮把**全仓**的
+`math.Round(x*N)/N` 写法扫了一遍，逐处对照 Python 原文。
+
+> ⚠️ **本节按「可达性」分层写**，因为其中一部分改动经实测**在当前代码路径上不可达** ——
+> 我没有把它们说成"修了 bug"，请按标注理解。
+
+#### A. ✅ 唯一**已证可达**的行为修复：`calcMean`（第 71 条）
+
+`_aggregate` 的组均分/综合分走 `_mean = round(sum(vals)/len(vals), 2)`。
+Go 原写 `math.Round(mean*100)/100`。**反例只需要两个合法整数分值**：
+
+| 维度 | 分值 | nv |
+|---|---|---|
+| `correctness`(1-5) | **1** | 0.0 |
+| `completeness`(1-5) | **2** | 0.25 |
+
+`mean = 0.125` → Python `round(0.125, 2)` = **0.12**，Go 旧 = `math.Round(12.5)/100` = **0.13**。
+
+这不是理论风险：穷举 nv 取值池、n=2..5 共 **313 组**不一致；
+20 万随机组合里 **9534 组**（≈4.8%）不一致。
+**用户看到的分组均分与 Python 版就是不同的数字。**
+
+→ 改为 `pyre.Round(sum/len, 2)`。
+
+#### B. ✅ 顺序确定性修复：`judge_errors` 并列时的顺序（第 72 条）
+
+Python 是 `sorted(judge_errors.items(), key=lambda kv: -kv[1])` —— **稳定排序**，
+并列时保持 dict 的插入序（= 首次出现顺序）。Go 用的是 `sort.Slice`（不稳定）。
+→ `sort.SliceStable`。与 §3.5 第 20/21 条、§3.8 第 36–38 条同族。
+
+#### C. ⚠️ `round(x, nd)` 站点统一（第 73–78 条）：语义正确，但**219 份语料未触发**
+
+这些站点的入参都是**任意浮点**（耗时、比率、均值），理论上 `.xx5` 会踩到 ties；
+但它们**此前就已经通过差分**（0 差异），说明当前 219 份真实会话没有触发。
+改完差分**仍然 0 差异** —— 所以这属于"消除潜在风险"，不是"修了一个正在发作的 bug"。
+
+| 位置 | Python 原文 | 原 Go 写法 |
+|---|---|---|
+| `evaluator` `"耗时秒"` | `round(elapsed, 1)` | `math.Round(elapsed*10)/10` |
+| `evaluator` 进度 `elapsed_s` | `round(self.elapsed_s, 1)` | `math.Round(...*10)/10` |
+| `evaluator` `round_close_rate` | `round(closed/len, 3)` | `math.Round(...*1000)/1000` |
+| `metrics` `avg_rate` | `round(x, 3)` | `math.Round(...*1000)/1000` |
+| `metrics` `avg_first_response_s` | `round(x, 2)` | `math.Round(...*100)/100` |
+| `logparser` `round2`（覆盖 4 个耗时派生点） | `round(x, 2)` | `math.Round(x*100)/100` |
+
+> 全仓自检：`grep -rn 'math.Round(.*\*[0-9]*[0-9]) */' --include='*.go' internal/`
+> 现在**只剩注释**（记录"原先这么写错在哪"），没有活的调用。
+
+#### D. ⚠️ 三处经实测**在当前路径上不可达**，改的是「语义统一」而非行为（第 79–81 条）
+
+**必须说清**，否则以后有人会以为这里修掉了线上 bug：
+
+| 位置 | 为什么不可达 |
+|---|---|
+| `rubric.Normalize`（`round(x, 4)`） | 合法分值都是**整数**（1-5 / 0,3,5 / 0,5），而 `(s-1)/4`、`s/5` 对整数 s 是**二进制精确**的（0,.25,.5,.75 / 0,.2,.4,.6,.8,1）→ `round(x,4) ≡ x`。50 万随机样本 0 分歧 |
+| `groupAcc`（`round(nv*5, 2)`） | 同上，`nv*5` 只取 10 个精确值 → 穷举 0 分歧 |
+| `overall_score_100`（`round(m*100, 1)`） | 入参 `overall_mean` **已被 `calcMean` 取整到 2 位**；在 2 位小数输入上 `round(m*100,1)` 与旧写法**恒等**（k/100, k=0..100 与 1001 个 2 位小数共 0 分歧） |
+
+改成 `pyre.Round` 之后**行为完全不变**，但全项目只剩**一套** Python 舍入语义，
+以后不会再有人拿 `math.Round(x*N)/N` 去凑。
+
+> 📌 顺带纠正我自己上一轮的一个计算错误（已写进回归测试注释）：
+> **ties-to-even 的 tie 点是 `x.xx5`，不是 `x.xxx5`。**
+> `round(0.3125, 2)` 的第三位是 2、尾数只到半个第三位 → 低于 tie → **0.31**，不是 0.32。
+> 我第一版把它当成 tie 算成了 0.32，测试直接把我拦下来了。
+
+#### E. `float(score)` 兼容：`_aggregate` 现在也认字符串/布尔（第 82 条）
+
+Python 侧是 `normalize(score, ...)`，而 `normalize` 内部 `float(score)` 捕获
+`TypeError/ValueError` —— 所以 **`"3"` / `True` / `False` 都是合法分值**。
+Go 原实现只认 `int`/`float64`，其余静默 `continue`。→ 新增 `pyFloatValue()` 复刻
+`float(v)`（含 `pyre.Strip` 后的整串解析）。`"3分"` 两边都判不可用。
+
+#### F. 🔧 `pyre.Round`：舍入语义收敛到一处
+
+`trajectory.PyRound` 的实现搬到 `pyre.Round`（Python 语义的叶子包），
+`trajectory.PyRound` 保留公开名并**委托**过去 —— 现有调用点一行不用改。
+`rubric` 因此不必依赖 `trajectory`（避免潜在环）。
+
+#### G. ⚠️ 顺带发现一个**静默陷阱**（未改，仅记录）
+
+`aggregateResults` 读分值时是：
+
+```go
+scores, _ := row["scores"].([]map[string]interface{})   // ← 具体类型，且把 ok 丢了
+```
+
+传 `[]interface{}`（JSON 解码后的**自然**形状）会**静默变成空切片** →
+`group_means` / `overall_score_100` 全为 nil，**不报错、不 panic**。
+我在写测试时先踩了一次（聚合结果全 nil）。
+
+Python 侧是鸭子类型，不会有这个问题。**你写 `pipeline` / `server` 拼 `case_rows` 时
+务必用 `[]map[string]interface{}`**，并且在端到端差分里专门断言
+`overall_score_100 != null` —— 否则整轮评估会安静地变成一堆空值。
+
 ---
 
 ## 4. 差分工装 —— 请把它当作验收门禁
@@ -617,7 +715,8 @@ python3 tools/diff/run_eval_diff.py       # 评估前置层：667 用例 × (for
 | 断言层（`internal/assertor`） | 同上，**229 条 Finding** | ✅ **9 类规则计数逐类相同，零真实差异** |
 | 指标层（`internal/trajectory` / `metrics`） | 219 用例全链路（parse→assert→CaseDetail→RoundDetail→Metrics） | ✅ **逐用例 detail 219/219 一致；round_detail 一致；metrics 零真实差异** |
 | **评估前置层**（`internal/formatcheck` / `safetyscan` / `intent`） | 219 会话 × 3 变体 + 10 对抗 = **667 用例** | ✅ **formatcheck 0 差异；intent 0 差异；safetyscan 仅剩 282 处「JSON 对象键序」（归一化后 0 真实差异）** |
-| 评估层的**客观纯函数**（`_obj_*` / `_coerce_score` / `_workspace_root` / `_scope_note`） | 无需 LLM，已逐个对照实测 | ✅ **7 处偏差已修（§3.12），18 个回归测试** |
+| 评估层的**客观纯函数**（`_obj_*` / `_coerce_score` / `_workspace_root` / `_scope_note`） | 无需 LLM，已逐个对照实测 | ✅ **7 处偏差已修（§3.12）** |
+| 评估层的**聚合纯函数**（`calcMean` / `aggregateResults`） | 无需 LLM，已逐个对照实测 | ✅ **`calcMean` 是已证可达的行为修复（§3.13 A）；另有 11 处舍入/顺序归一** |
 | 评估层的 **judge / rubric 主流程**（`_judge_case` / `evaluate_round`） | 需 stub OpenAI | 🔶 产物路径已对齐（2 处）；安全扫描已改用**有序 API**；judge 主流程尚未差分 |
 | 驱动层（`internal/driver` = ui_driver.py 1849 行） | — | 🔄 **你正在做**（最高风险） |
 | 服务层（`internal/pipeline` / `server` / `report`） | — | 🔄 你正在做（当前可编译） |
@@ -745,9 +844,12 @@ oracle 与端口保持一致。
 5. **🔴 银行家舍入（本轮已被真实数据打脸，务必重视）** —— Python `round()` 是
    **half-to-even**，Go 的 `math.Round` 是 **half-away-from-zero**。
    实测 `round(31.25, 1)`：Python **31.2** / `math.Round` **31.3**。
-   已实现 `trajectory.PyRound(x, nd)`（基于 `math/big.Rat`，对浮点数的
-   **二进制精确值**做 ties-to-even），`RoundToOneDecimal` 与 `metrics.pct` 均已转调它。
-   **凡 Python 侧写 `round(...)` 的地方，一律用 `PyRound`，不要用 `math.Round`。**
+   已实现 `pyre.Round(x, nd)`（基于 `math/big.Rat`，对浮点数的
+   **二进制精确值**做 ties-to-even）；`trajectory.PyRound` 保留旧名并**委托**过去。
+   **凡 Python 侧写 `round(...)` 的地方，一律用 `pyre.Round`，不要用 `math.Round`。**
+   ⚠️ 还要小心**二次舍入**：`math.Round(x*100)/100` 连**非精确 tie** 都会错
+   （`round(0.35,1)`：Python `0.3` / 上面那种写法 `0.4`）。见 §3.13。
+   ⚠️ 且 tie 点是 `x.xx5`，不是 `x.xxx5` —— `round(0.3125, 2) == 0.31`（低于 tie），不是 0.32。
 6. **naive datetime 时区** —— 另注意 **Python 3.9 的 `fromisoformat` 不接受 `Z` 后缀**
    （会抛异常 → -1），而 Go 的 RFC3339 接受 —— 当前语料无 `Z`，未暴露。
 7. **`null` vs 零值** —— 前端靠 `?? 0`、`=== false`、`!= null` 判断。
@@ -778,7 +880,7 @@ oracle 与端口保持一致。
 
 - **`go build ./...` ✅**、**`go test ./...` ✅**、**`go vet ./...` ✅** 全绿
 - **六层差分全部 ✅ 退出码 0**：xlsx / DB / 分析层 / 断言层 / 指标层 / **评估前置层**
-- 累计修复 **70 处**真实保真度缺陷；回归测试 **11 个文件 151 个用例**
+- 累计修复 **82 处**真实保真度缺陷；回归测试 **13 个文件 162 个用例**
 - 你新增了 `internal/repro`、`internal/driver`、`internal/sysutil`、`internal/pipeline`、
   `internal/llm`、`internal/server` 👍
 
@@ -820,6 +922,9 @@ Go 原先调的是只做字符串拼接的 `ResolveAbsPath` —— 会给出**�
    - 产物路径那两处我已对齐（见 §7.2）；**安全扫描已改用有序 API**
      （`BuildSourcesOrdered` + `ScanOrdered`，见 §3.10 第 51/56 条，请勿用回 map 版本）。
    - **剩下的是 `_judge_case` / `evaluate_round` 主流程**（需要 stub OpenAI server）。
+   - ~~聚合层纯函数（`calcMean` / `aggregateResults`）~~ —— **✅ 本轮已做完**（§3.13）。
+     ⚠️ 写 `pipeline` 拼 `case_rows` 时 `scores` 必须是 **`[]map[string]interface{}`**，
+     否则 `aggregateResults` 会**静默**吐出全 nil（见 §3.13 G）。
    - `formatcheck` / `safetyscan` / `intent` 三层**已经差分完毕**，可以直接当已验收的黑盒。
 2. **`internal/driver`** —— 最难差分（依赖 Electron + CDP 调试端口），
    建议先做**纯函数部分**（`internal/driver/scripts.go` 里的 JS 注入脚本、

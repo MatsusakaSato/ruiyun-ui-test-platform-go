@@ -725,7 +725,7 @@ func factsPayload(caseItem map[string]interface{}, trace *models.ExecutionTrace,
 		},
 		"执行轨迹": map[string]interface{}{
 			"轮次":      turns,
-			"耗时秒":     math.Round(elapsed*10) / 10,
+			"耗时秒":     pyre.Round(elapsed, 1), // Python: round(elapsed, 1)
 			"工具调用":    calls,
 			"是否正常收尾":  closed,
 			"有最终回复":   tcEv["answer_chars"] != nil && tcEv["answer_chars"] != 0,
@@ -1210,6 +1210,39 @@ func calcStability(caseItem map[string]interface{}, repeats []map[string]interfa
 	}
 }
 
+// pyFloatValue 复刻 Python 的 float(v)：int/float/bool/数字字符串皆可，
+// 其余（含 None、容器）抛 TypeError/ValueError → 调用方按「不可用」处理。
+//
+//	Python            Go
+//	float(True)  == 1.0
+//	float(False) == 0.0
+//	float("3")   == 3.0
+//	float("3分") → ValueError
+func pyFloatValue(v interface{}) (float64, bool) {
+	switch t := v.(type) {
+	case nil:
+		return 0, false
+	case float64:
+		return t, true
+	case int:
+		return float64(t), true
+	case int64:
+		return float64(t), true
+	case bool:
+		if t {
+			return 1, true
+		}
+		return 0, true
+	case string:
+		f, err := strconv.ParseFloat(pyre.Strip(t), 64)
+		if err != nil {
+			return 0, false
+		}
+		return f, true
+	}
+	return 0, false
+}
+
 func calcMean(vals []float64) *float64 {
 	if len(vals) == 0 {
 		return nil
@@ -1218,7 +1251,10 @@ func calcMean(vals []float64) *float64 {
 	for _, v := range vals {
 		sum += v
 	}
-	res := math.Round((sum/float64(len(vals)))*100) / 100
+	// Python 是 round(sum/len, 2) —— 银行家舍入。
+	// 原写成 math.Round(x*100)/100：ties 方向错，且 *100 有二次舍入。
+	// 实测两维取 {0.0, 0.25} 时 Python=0.12 / Go 原先=0.13；穷举 n=2..5 共 313 组不一致。
+	res := pyre.Round(sum/float64(len(vals)), 2)
 	return &res
 }
 
@@ -1262,20 +1298,18 @@ func aggregateResults(caseRows []map[string]interface{}) map[string]interface{} 
 				continue
 			}
 			hasAnyScore = true
-			var val float64
-			switch v := sc.(type) {
-			case int:
-				val = float64(v)
-			case float64:
-				val = v
-			default:
+			// Python 侧是 normalize(score, ...)，而 normalize 内部做 float(score)
+			// 并捕获 TypeError/ValueError —— 所以 **字符串与布尔也合法**
+			// （"3"→3.0、True→1.0、False→0.0）。原实现只认 int/float64，会把它们静默丢掉。
+			val, okNum := pyFloatValue(sc)
+			if !okNum {
 				continue
 			}
 			nv := rubric.Normalize(&val, dim.Scale)
 			if nv == nil {
 				continue
 			}
-			groupAcc[dim.Group] = append(groupAcc[dim.Group], math.Round(*nv*5*100)/100)
+			groupAcc[dim.Group] = append(groupAcc[dim.Group], pyre.Round(*nv*5, 2))
 			overall = append(overall, *nv)
 		}
 		if hasAnyScore {
@@ -1286,7 +1320,10 @@ func aggregateResults(caseRows []map[string]interface{}) map[string]interface{} 
 	overallMean := calcMean(overall)
 	var overallScore100 *float64
 	if overallMean != nil {
-		s100 := math.Round(*overallMean*1000) / 10
+		// Python 是 round(overall_mean * 100, 1)。
+		// 原写成 math.Round(m*1000)/10：不仅 ties 方向错，`*1000` 与 `(*100)*10`
+		// 在浮点下也不可交换 —— 实测 mean=0.6375 时 Python=63.7 / Go 原先=63.8。
+		s100 := pyre.Round(*overallMean*100, 1)
 		overallScore100 = &s100
 	}
 
@@ -1298,7 +1335,10 @@ func aggregateResults(caseRows []map[string]interface{}) map[string]interface{} 
 	for k, v := range judgeErrors {
 		errList = append(errList, errPair{Reason: k, Count: v})
 	}
-	sort.Slice(errList, func(i, j int) bool {
+	// Python 的 sorted(..., key=lambda kv: -kv[1]) 是**稳定排序**，
+	// 并列时保持 judge_errors dict 的插入序（= 首次出现顺序）。
+	// sort.Slice 会让并列项顺序随机 —— 同 §3.5 第 20/21 条、§3.8 第 36-38 条。
+	sort.SliceStable(errList, func(i, j int) bool {
 		return errList[i].Count > errList[j].Count
 	})
 
@@ -1926,7 +1966,7 @@ func EvaluateRound(runID string, opts EvaluateOptions) (map[string]interface{}, 
 	}
 	var roundCloseRate *float64
 	if len(bundle.Cases) > 0 {
-		rate := math.Round((float64(closedCount)/float64(len(bundle.Cases)))*1000) / 1000
+		rate := pyre.Round(float64(closedCount)/float64(len(bundle.Cases)), 3) // Python: round(closed/len, 3)
 		roundCloseRate = &rate
 	}
 
@@ -2028,7 +2068,7 @@ func EvaluateRound(runID string, opts EvaluateOptions) (map[string]interface{}, 
 	}
 
 	summary := aggregateResults(rows)
-	elapsedS := math.Round(time.Since(t0).Seconds()*10) / 10
+	elapsedS := pyre.Round(time.Since(t0).Seconds(), 1) // Python: round(self.elapsed_s, 1)
 
 	out := map[string]interface{}{
 		"run_id":         runID,
