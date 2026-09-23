@@ -820,7 +820,7 @@ Go 原先调的是只做字符串拼接的 `ResolveAbsPath` —— 会给出**�
    - 产物路径那两处我已对齐（见 §7.2）；**安全扫描已改用有序 API**
      （`BuildSourcesOrdered` + `ScanOrdered`，见 §3.10 第 51/56 条，请勿用回 map 版本）。
    - **剩下的是 `_judge_case` / `evaluate_round` 主流程**（需要 stub OpenAI server）。
-   `formatcheck` / `safetyscan` / `intent` 三层**已经差分完毕**，可以直接当已验收的黑盒。
+   - `formatcheck` / `safetyscan` / `intent` 三层**已经差分完毕**，可以直接当已验收的黑盒。
 2. **`internal/driver`** —— 最难差分（依赖 Electron + CDP 调试端口），
    建议先做**纯函数部分**（`internal/driver/scripts.go` 里的 JS 注入脚本、
    URL/端口解析、重试与退避策略），把 CDP 交互留到最后。
