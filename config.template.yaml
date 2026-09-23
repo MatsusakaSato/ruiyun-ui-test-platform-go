@@ -1,0 +1,170 @@
+# 睿云智能工作台 · 全自动 UI 测试平台配置
+# 目标：检测应用硬性 bug（工具调用失败/死循环/重复调用/内容截断等），不评判输出内容质量。
+#
+# 本文件是**内置配置模版**：全新环境（克隆仓库后工作区里还没有 config.yaml）时，
+# core/settings.config_path() 会自动把它复制成 <用户工作区>/config.yaml
+# （macOS ~/.ruiyun-autotest/、Windows %USERPROFILE%\.ruiyun-autotest\），
+# 保证「环境档案切换」等依赖配置的界面功能开箱可用。
+# 之后所有修改请改工作区里的 config.yaml —— 本文件只作为初始值，不会被回写。
+
+app:
+  name: "睿云智能工作台"
+  bundle_id: "com.yanxiu.srtclaw"
+  # 被测应用可执行文件路径。留空 "" 使用系统内置默认：
+  #   - macOS:   /Applications/睿云智能工作台.app/Contents/MacOS/睿云智能工作台
+  #   - Windows: C:\Program Files\srtclaw\睿云智能工作台.exe
+  # 也可在仪表盘「设置 → 应用与工作区」中自定义（写入 .app_settings.json，优先级更高）。
+  binary: ""
+  # Electron 渲染进程调试端口，UI 驱动通过 CDP 协议接入
+  debug_port: 9222
+  # 启动后等待 UI 就绪的最长秒数
+  launch_timeout_s: 60
+  # 等待「主界面真正渲染完成」的最长秒数（端口就绪 ≠ 界面可用）。
+  # Windows dev 环境实测：应用启动会先弹登录窗（ruiyun-dev.3ren.cn），
+  # 主界面要等登录流程走完才渲染正文，60s 常常不够 ——
+  # 表现为「9222 上有页面，但正文为空、接不进去（无法接入渲染进程）」。
+  ui_ready_timeout_s: 180
+  # ----------------------------------------------------------------
+  # 应用生命周期策略：平台永不主动关闭应用。
+  #   false（默认）→ 运行结束后应用保持运行，下次运行探测到调试端口直接复用；
+  #                  未运行时才启动（按需唤醒）。
+  #   true         → 运行结束后关闭「由平台启动的」实例（复用的实例不受影响）。
+  # 需要手动关掉应用时用 kill_app() 或 launch_app_dev.sh / launch_app_dev.ps1 --stop。
+  # ----------------------------------------------------------------
+  # 自动确认：agent 大任务常会先列计划/请求命令授权，等用户点确认，
+  # 若无人干预会静默产出「假通过」（答复=计划书，任务未执行）。
+  # true 时平台在等待会话期间用 CDP 轮询主对话区自动点击。
+  # 界面「⚙ 设置 → 自动点击确认」是同一开关的入口（只影响本次运行，不写回本文件）；
+  # 这里填写的值就是界面开关的初始状态。
+  # 拒绝/取消/关闭/停止类选项永不点击（保证流程跑完）；
+  # 通用路径冷却 confirm_cooldown_s；累计 confirm_max_clicks 熔断。
+  auto_confirm: true
+  confirm_interval_s: 0.5
+  confirm_cooldown_s: 3.0
+  confirm_max_clicks: 200
+  # 自动确认单轮驱动周期（秒）：每隔该时间切回会话 0 扫描并点击一次。
+  auto_confirm_cycle_s: 6
+  # ---------------- 选项卡（agent-question-composer）阈值 ----------------
+  qcard_min_click_interval_s: 0.4
+  qcard_same_card_limit: 6
+  qcard_stall_s: 30
+  qcard_card_clicks_limit: 12
+  qcard_card_max_s: 120
+  qcard_fill_text: "请你按最合理的方式继续，不用再问我"
+  close_app_after_run: false
+  # 检测到「应用已在运行、但没有调试端口」（例如用户从开始菜单手动启动）时：
+  #   true（默认）→ 先关掉这些实例，再以调试模式重启。
+  #     Electron 是单实例应用：旧实例存活时新进程的 argv 会被转交给旧实例然后自己退出，
+  #     调试端口永远不会打开（实测 Windows：新进程 code=0 秒退、端口始终不监听）。
+  #     环境档案也只在启动时注入，所以必须重启才对所选环境生效。
+  #   false → 不自动关闭，直接报错并提示用界面「✕ 关闭实例」。
+  # 应用里正跑着重要任务、不希望被测试打断时置 false。
+  restart_if_no_debug_port: true
+  # ----------------------------------------------------------------
+  # 启动时自动应用的环境档案：每次启动注入对应环境变量，免去手动跑切换脚本。
+  #   dev        → 注入下方 env_profiles.dev
+  #   production → 空档案，走应用内置默认值（即生产环境）
+  #   留空 ""    → 不注入任何变量（界面「环境」下拉里的「不注入」项）
+  # 优先级：调用方已显式 export 的 SRTCLAW_* 变量 > 此处档案 > 应用内置默认，
+  # 因此 launch_app_dev.sh / launch_app_dev.ps1 等手动切换方式不受影响。
+  #
+  # 界面「环境」下拉的选项**完全来自这里**：key 即下拉值，dev / production 两个
+  # 保留 key 会显示成中文标签，其余 key 按原样显示为自定义档案。
+  # 环境变量只在应用**启动时**注入，所以运行中的实例不能改环境（界面会自动置灰）。
+  # ----------------------------------------------------------------
+  env_profile: "dev"
+  env_profiles:
+    dev:
+      SRTCLAW_APP_ENV: "dev"
+      SRTCLAW_LOGIN_URL: "https://ruiyun-dev.3ren.cn/wisdom/commonLogin?"
+      VITE_SRTCLAW_LOGIN_URL: "https://ruiyun-dev.3ren.cn/wisdom/commonLogin?"
+      SRTCLAW_MANAGE_SERVICE_BASE_URL: "https://api-dev.3ren.cn/claw-manage-service"
+      SRTCLAW_INSTITUTION_API_BASE_URL: "https://ruiyun-api-dev.3ren.cn"
+      SRTCLAW_TEACHING_API_BASE_URL: "https://api-dev.3ren.cn"
+      SRTCLAW_UPDATE_API_URL: "https://appadmin-test.yanxiu.com/app/log/uploadDeviceLog/release.do"
+      # 与 launch_app_dev.sh / launch_app_dev.ps1 保持一致的旧名（应用可能读其中任一）
+      JIUWENCLAW_UPDATE_API_URL: "https://appadmin-test.yanxiu.com/app/log/uploadDeviceLog/release.do"
+    production: {}   # 空档案 = 使用应用内置默认（生产域名）
+
+paths:
+  # agent 调用链路日志根目录（每次会话一个会话文件夹）。留空 "" 使用内置默认：
+  #   macOS:   ~/.srtclaw/workspace/session
+  #   Windows: %USERPROFILE%\.srtclaw\workspace\session
+  # 也可在仪表盘「设置 → 应用与工作区」中自定义（写入 .app_settings.json，优先级更高）。
+  session_root: ""
+  # agent 工作区根目录：质量评估据此把产物相对路径解析成绝对路径，
+  # 供界面「查看产物」按钮在文件管理器中定位。留空 "" 取 session_root 的父目录。
+  workspace_root: ""
+  # agent 运行期配置（用于读取 max_iterations 等基线）。留空 "" 表示不读取。
+  agent_config: ""
+  artifacts: "artifacts"
+  reports: "report"
+  logs: "logs"
+
+# 单个用例从发送到等待落盘的最长秒数（20 分钟）。
+# 语义是「等待上限」而非「超时判异常」：平台不对模型的工作时长做限制，
+# 只在等满这个上限后停止等待、解析已落盘的日志照常出结果。
+# 达到上限本身不写入 ui_error，也不影响通过性判定。
+case_timeout_s: 1200
+# 发送后等待「新会话目录出现」的秒数（与应用生成时长无关，通常几秒内）
+new_session_timeout_s: 90
+# 流水线模式：同时在途的会话数上限。
+# 发送串行（一条发送并确认会话目录出现后才发下一条，绑定明确），
+# 生成并行 —— 实测应用支持多任务同时生成，且生成中「新建任务」可点。
+# 设为 1 则退化为完全串行。
+max_inflight: 5
+# 轮询日志目录的间隔
+poll_interval_s: 1.0
+
+# ---------------- 断言规则阈值（硬 bug 判定） ----------------
+rules:
+  # 最终答复完结率判定用的截断上限候选值（长度落在上限 ±2% 内且无自然收尾）
+  truncation_caps: [500, 1000, 2000, 4000, 8000, 16000]
+  # 同一工具连续调用达到该次数 → 死循环
+  loop_consecutive_threshold: 5
+  # 单会话内同一工具调用总数达到该次数 → 高频循环嫌疑
+  loop_total_threshold: 8
+  # 工具调用失败的错误特征词
+  error_markers:
+    - "[ERROR]"
+    - "[error]"
+    - "failed to"
+    - "traceback"
+    - "timed out"
+    - "timeout"
+    - "connection aborted"
+    - "max retries exceeded"
+    - "tool_call_failed"
+    - "exception:"
+  # 判定为「自然收尾」的结尾字符（截断检测用）
+  natural_endings: ["。", "！", "？", "；", "：", "\n", ")", "）", "]", "】",
+                    "”", "’", ".", "!", "?", ";", ":", "…", "—", "～", "~",
+                    "😊", "😄", "🙂", "😉", "🌙", "✅", "🎉", "👍", "🙏"]
+
+  # ---------------- 输出截断判定（思考内容 / 最终答案） ----------------
+  output_truncation:
+    min_len_for_dangling: 300
+    dangling_tails: [",", "，", "、", "：", ":", ";", "；", "(", "（", "[", "【", "{",
+                     "-", "—", "“", "‘", "\"", "'", "和", "与", "或", "及", "以",
+                     "的", "是", "在", "对", "为", "把", "被", "从", "向", "将", "由",
+                     "则", "而", "但", "如果", "因为", "所以", "例如", "包括", "如下"]
+    cap_tolerance: 0.02
+
+expected_tools:
+  - todo_create
+  - todo_complete
+  - mcp_paid_search
+  - mcp_write_workspace_file
+  - read_memory
+
+# ---------------- 大模型接入（质量评估用） ----------------
+llm:
+  timeout_s: 60
+  temperature: 0.0
+  eval_concurrency: 3
+  max_tokens: 0
+  redline_override: true
+
+format_weights:
+  type: 0.5
+  coverage: 0.5

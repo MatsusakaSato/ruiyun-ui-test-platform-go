@@ -1,0 +1,79 @@
+/* ---------- 测试用例页选项卡 ---------- */
+.case-tabs{display:flex;gap:6px;margin-bottom:14px;border-bottom:1px solid var(--line2);padding-bottom:10px}
+.ctab{padding:6px 14px;border-radius:8px;background:transparent;border:1px solid var(--line);
+  font-size:12.5px;font-weight:600;color:var(--tx2);font-family:inherit}
+.ctab.on{background:var(--accent);border-color:var(--accent);color:#fff}
+
+/* ---------- 预设用例库 ---------- */
+.lib-bar{display:flex;align-items:center;gap:8px;flex-wrap:wrap}
+.lib-kw{flex:0 1 320px;border:1px solid var(--line);border-radius:8px;padding:6px 10px;
+  font-size:12.5px;font-family:inherit;color:var(--tx)}
+.lib-kw:focus{outline:none;border-color:var(--accent)}
+
+.lib-filters{display:flex;flex-direction:column;gap:7px;margin-top:9px}
+.chips{display:flex;gap:5px;flex-wrap:wrap;align-items:center;min-height:20px}
+
+.lib-table{margin-top:11px;border:1px solid var(--line);border-radius:10px;
+  overflow:auto;max-height:min(58vh,620px)}
+.lib-table table{width:100%;min-width:760px}
+.lib-table th{position:sticky;top:0;z-index:1}
+.lib-table td{padding:7px 10px}
+.lib-table .lp{max-width:520px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;
+  color:var(--tx2)}
+.lib-ft{display:flex;align-items:center;gap:8px;margin-top:11px;flex-wrap:wrap}
+.lib-page{font-size:11.5px;color:var(--tx3)}
+.tbl-empty{color:var(--tx3);font-size:12px;text-align:center;padding:26px 0}
+
+/* ---------- 新增用例表单 ---------- */
+.padd{padding:10px 14px;border-bottom:1px solid var(--line);background:#fafbfd}
+.padd-hd{display:flex;align-items:center;gap:10px;flex-wrap:wrap}
+.padd-body{display:none;margin-top:10px}
+.padd-body.show{display:block}
+.padd-card{background:#fff;border:1px solid var(--line);border-radius:10px;padding:13px;
+  display:flex;flex-direction:column;gap:12px;box-shadow:0 1px 2px rgba(15,23,42,.04)}
+.fld textarea{border:1px solid var(--line);border-radius:9px;padding:9px 11px;font-size:12.5px;
+  color:var(--tx);background:#fff;font-family:inherit;line-height:1.6;resize:vertical;min-height:70px;
+  transition:border-color .15s,box-shadow .15s}
+.fld textarea:focus{outline:none;border-color:var(--accent);box-shadow:0 0 0 3px rgba(37,99,235,.12)}
+.padd-row{display:flex;gap:14px;align-items:flex-end;flex-wrap:wrap;margin-top:4px}
+.padd-chips{display:flex;gap:6px;flex-wrap:wrap;min-height:32px;align-items:center}
+.padd-chips label{display:inline-flex;align-items:center;gap:4px;font-size:11.5px;color:var(--tx2);
+  border:1px solid var(--line);border-radius:999px;padding:5px 11px;cursor:pointer;user-select:none;
+  transition:border-color .15s,background .15s,color .15s}
+.padd-chips label input{accent-color:var(--accent);margin:0;cursor:pointer}
+.padd-chips label:hover{border-color:var(--accent)}
+.padd-chips label:has(input:checked){border-color:var(--accent);background:#eff6ff;
+  color:var(--accent);font-weight:600}
+.prow .pdel{margin-left:auto;color:#b91c1c;cursor:pointer;font-size:11.5px;padding:2px 8px;
+  border-radius:8px;flex-shrink:0;opacity:.75}
+.prow .pdel:hover{background:#fee2e2;opacity:1}
+
+/* ---------- 本轮要跑的队列（用例编辑） ---------- */
+#caseEditor h3.sec{margin-bottom:12px}
+.cnt{margin-left:8px;font-weight:500;color:var(--tx3);font-size:11.5px}
+.case-row{display:flex;gap:9px;align-items:flex-start;margin-bottom:9px}
+.case-row .no{flex-shrink:0;width:30px;height:32px;display:flex;align-items:center;justify-content:center;
+  font-size:11.5px;color:var(--tx3);font-family:ui-monospace,Menlo,monospace}
+.case-row .fields{flex:1;display:flex;gap:8px;flex-wrap:wrap}
+.case-row input.prompt{flex:1;min-width:280px}
+.case-row input{border:1px solid var(--line);border-radius:8px;padding:7px 10px;font-size:12.5px;
+  color:var(--tx);background:#fff;font-family:inherit}
+.case-row input:focus{outline:none;border-color:var(--accent)}
+.case-row .del{flex-shrink:0;width:32px;height:32px;background:#fef2f2;color:#b91c1c;border-radius:8px;font-size:15px;line-height:1}
+.case-row .del:hover{background:#fee2e2}
+.hint{font-size:11.5px;color:var(--tx3);margin-top:4px}
+.hint.warn{color:var(--warn)}
+.case-ft{display:flex;align-items:center;gap:12px;margin-top:14px;padding-top:13px;
+  border-top:1px solid var(--line2);flex-wrap:wrap}
+.case-ft-hint{font-size:11.5px;color:var(--tx3)}
+
+/* 用例行操作 & 附件 */
+.cl-tags{display:flex;gap:4px;flex-wrap:wrap;margin-top:4px;align-items:center}
+.cl-acts{display:flex;gap:6px;margin-top:5px}
+.cl-att{font-size:11px;padding:2px 9px;border:1px solid var(--line);border-radius:8px;
+  background:#fff;color:var(--tx2);cursor:pointer;font-family:inherit}
+.cl-att:hover{border-color:var(--accent);color:var(--accent)}
+.cl-att.cl-save:hover{border-color:var(--ok);color:var(--ok)}
+.cl-att:disabled{opacity:.45;cursor:not-allowed}
+.cl-att:disabled:hover{border-color:var(--line);color:var(--tx2)}
+.cl-save.saved{border-color:#bbf7d0;background:#f0fdf4;color:var(--ok)}

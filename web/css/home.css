@@ -1,0 +1,134 @@
+/* ---------- 控制台 ---------- */
+.console-wrap{margin-bottom:16px}
+.console-hd{display:flex;align-items:center;gap:8px;padding:6px 10px 6px 12px;
+  background:#0f172a;color:#94a3b8;border-radius:10px 10px 0 0;
+  font-size:11.5px;font-family:ui-monospace,Menlo,monospace}
+.console-hd .ch-t{font-weight:600;color:#cbd5e1}
+.console-hd .ch-new{color:#fbbf24}
+.console-hd .spacer{flex:1}
+.console-btn{border:1px solid #334155;background:#1e293b;color:#cbd5e1;
+  border-radius:7px;padding:3px 9px;font-size:11px;font-weight:500;font-family:inherit}
+.console-btn:hover{background:#334155;color:#fff}
+.console{background:#0f172a;color:#cbd5e1;font-family:ui-monospace,Menlo,monospace;font-size:11.5px;
+  border-radius:0;padding:12px 14px;height:210px;min-height:70px;max-height:85vh;overflow-y:auto;
+  white-space:pre-wrap;word-break:break-all}
+.console-wrap.compact .console{height:96px}
+.console-wrap.collapsed .console,
+.console-wrap.collapsed .console-resizer{display:none}
+.console .ln-time{color:#64748b}
+.console .ln-none{color:#475569}
+
+/* 控制台拖拽手柄 */
+.console-resizer{height:10px;background:#0f172a;border-radius:0 0 10px 10px;
+  border-top:1px solid #1e293b;display:flex;align-items:center;justify-content:center;
+  cursor:row-resize;user-select:none;transition:background .15s}
+.console-resizer:hover,.console-resizer.is-dragging{background:#1e293b}
+.resizer-bar{width:36px;height:3px;background:#334155;border-radius:2px;transition:all .15s}
+.console-resizer:hover .resizer-bar,.console-resizer.is-dragging .resizer-bar{background:#94a3b8;width:48px}
+
+/* 控制台实时输出标志 */
+.console-live {
+  display:inline-flex;align-items:center;gap:5px;font-size:11px;
+  color:#38bdf8;background:rgba(56,189,248,.12);border:1px solid rgba(56,189,248,.3);
+  padding:1px 7px;border-radius:12px;font-family:ui-monospace,Menlo,monospace;
+}
+.console-live .live-dot {
+  width:5px;height:5px;border-radius:50%;background:#38bdf8;
+  animation:pulseDot 1s ease-in-out infinite;
+}
+
+/* ---------- 首页：当前用例 ---------- */
+.home-sec{display:flex;align-items:center;gap:8px;font-size:13px;font-weight:600;
+  color:var(--tx2);margin:18px 0 10px}
+.home-sec::before{content:"";width:3px;height:13px;background:var(--accent);border-radius:2px}
+.home-sec .spacer{flex:1}
+.home-link{font-size:11.5px;font-weight:500;color:var(--accent);cursor:pointer;
+  background:none;border:none;font-family:inherit;padding:0}
+.home-link:hover{text-decoration:underline}
+.run-row{display:flex;align-items:center;gap:10px;padding:7px 2px;font-size:12.5px;
+  border-bottom:1px solid var(--line2);transition:background .2s, border .2s}
+.run-row:last-child{border-bottom:none}
+.run-row .rr-no{flex:0 0 34px;font-family:ui-monospace,Menlo,monospace;font-size:11px;color:var(--tx3)}
+.run-row .rr-prompt{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.run-row .rr-time{flex:0 0 auto;font-size:11px;color:var(--tx3)}
+.run-empty{color:var(--tx3);font-size:12.5px;padding:10px 2px}
+
+.run-row.is-executing {
+  background:#f8faff;border-left:3px solid var(--accent);
+  padding-left:8px;border-radius:4px;
+  animation:subtleGlow 2.5s ease-in-out infinite;
+}
+
+/* 运行进度条卡片 */
+.run-progress-box {
+  background:#f8fafc;border:1px solid var(--line);border-radius:8px;
+  padding:10px 14px;margin-bottom:12px;
+}
+.rpb-header {
+  display:flex;align-items:center;justify-content:space-between;
+  font-size:12px;color:var(--tx2);margin-bottom:7px;
+}
+.rpb-title {
+  display:flex;align-items:center;gap:7px;color:var(--tx);font-weight:600;
+}
+.spinner-blue {
+  display:inline-block;width:13px;height:13px;
+  border:2px solid rgba(37,99,235,.25);border-top-color:#2563eb;
+  border-radius:50%;animation:spin .75s linear infinite;
+}
+.rpb-pct {
+  font-family:ui-monospace,Menlo,monospace;font-weight:700;
+  color:var(--accent);font-size:13px;
+}
+.rpb-track {
+  height:7px;background:#e2e8f0;border-radius:99px;overflow:hidden;
+}
+.rpb-bar {
+  height:100%;background-color:var(--accent);
+  background-image:linear-gradient(45deg,rgba(255,255,255,.25) 25%,transparent 25%,transparent 50%,rgba(255,255,255,.25) 50%,rgba(255,255,255,.25) 75%,transparent 75%,transparent);
+  background-size:20px 20px;border-radius:99px;transition:width .3s ease;
+  animation:progressStripes 1s linear infinite;
+}
+
+/* 首页用例全部测试完成 Banner */
+.run-done-banner {
+  display:flex;align-items:center;justify-content:space-between;
+  gap:14px;border-radius:10px;padding:11px 16px;margin-bottom:12px;
+  box-shadow:0 2px 6px rgba(15,23,42,.04);
+}
+.run-done-banner.banner-ok {
+  background:linear-gradient(135deg, #f0fdf4 0%, #ecfdf5 100%);
+  border:1px solid #bbf7d0;
+}
+.run-done-banner.banner-warn {
+  background:linear-gradient(135deg, #fffbeb 0%, #fef3c7 100%);
+  border:1px solid #fde68a;
+}
+.rdb-left { display:flex;flex-direction:column;gap:3px; }
+.rdb-title {
+  display:flex;align-items:center;gap:8px;font-size:13.5px;font-weight:700;
+}
+.banner-ok .rdb-title { color:#15803d; }
+.banner-warn .rdb-title { color:#b45309; }
+.rdb-stats { font-size:12px;color:var(--tx2); }
+.banner-warn .rdb-stats { color:#92400e; }
+.rdb-stats .t-pass { color:#15803d;font-weight:600; }
+.rdb-stats .t-fail { color:#b91c1c;font-weight:600; }
+.rdb-btn {
+  display:inline-flex;align-items:center;justify-content:center;
+  color:#fff;padding:6px 18px;border-radius:8px;
+  font-size:12.5px;font-weight:600;text-decoration:none;cursor:pointer;
+  border:none;white-space:nowrap;transition:all .15s ease;
+}
+.banner-ok .rdb-btn {
+  background:#16a34a;box-shadow:0 1px 3px rgba(22,163,74,.25);
+}
+.banner-ok .rdb-btn:hover {
+  background:#15803d;box-shadow:0 3px 8px rgba(22,163,74,.35);transform:translateY(-1px);
+}
+.banner-warn .rdb-btn {
+  background:#d97706;box-shadow:0 1px 3px rgba(180,83,9,.25);
+}
+.banner-warn .rdb-btn:hover {
+  background:#b45309;box-shadow:0 3px 8px rgba(180,83,9,.35);transform:translateY(-1px);
+}

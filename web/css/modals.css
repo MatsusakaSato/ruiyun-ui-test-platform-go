@@ -1,0 +1,120 @@
+/* ---------- 模态弹窗基础 ---------- */
+.modal-mask{position:fixed;inset:0;background:rgba(15,23,42,.45);z-index:50;display:none;
+  align-items:flex-start;justify-content:center;padding:38px 16px}
+.modal-mask.on{display:flex}
+.modal{background:var(--card);border-radius:14px;width:min(900px,100%);
+  max-height:calc(100vh - 76px);display:flex;flex-direction:column;
+  box-shadow:0 18px 50px rgba(15,23,42,.32);overflow:hidden}
+.modal-hd{display:flex;align-items:center;gap:10px;padding:13px 18px;border-bottom:1px solid var(--line)}
+.modal-hd h3{font-size:14.5px;font-weight:700}
+.modal-hd .msub{font-size:11.5px;color:var(--tx3)}
+.modal-hd .mclose{margin-left:auto;width:28px;height:28px;border-radius:8px;background:#f1f5f9;
+  color:var(--tx2);font-size:14px;line-height:1}
+.modal-hd .mclose:hover{background:#e2e8f0}
+
+/* 筛选区 */
+.modal-filters{padding:11px 18px 12px;border-bottom:1px solid var(--line);display:flex;flex-direction:column;gap:7px}
+.mf-row{display:flex;align-items:center;gap:7px;flex-wrap:wrap}
+.mf-label{flex-shrink:0;font-size:11.5px;color:var(--tx3);width:58px}
+.mf-kw{flex:1;min-width:180px;border:1px solid var(--line);border-radius:8px;padding:5px 10px;
+  font-size:12.5px;color:var(--tx);background:#fff;font-family:inherit}
+.mf-kw:focus{outline:none;border-color:var(--accent)}
+
+/* 列表区 */
+.modal-list{flex:1;overflow-y:auto;padding:4px 10px;min-height:200px}
+.prow{display:flex;align-items:center;gap:10px;padding:6px 8px;border-radius:8px;cursor:pointer;border-bottom:1px solid var(--line2)}
+.prow:hover{background:#f8fafc}
+.prow.sel{background:#f0f6ff}
+.prow input[type=checkbox]{flex-shrink:0;accent-color:var(--accent);margin:0}
+.prow .pid{flex-shrink:0;width:76px;font-family:ui-monospace,Menlo,monospace;font-size:10.5px;color:var(--tx3)}
+.prow .pprompt{flex:1;font-size:12.5px;color:var(--tx);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.prow .ptags{flex-shrink:0;display:flex;gap:4px}
+.tag{font-size:10px;padding:1px 7px;border-radius:10px;background:#f1f5f9;color:var(--tx2);white-space:nowrap}
+.tag.t-scene{background:#eff6ff;color:#1d4ed8}
+.tag.t-att{background:#fef3c7;color:#92400e}
+.modal-empty{color:var(--tx3);font-size:12px;text-align:center;padding:40px 0}
+
+/* 底部操作区 */
+.modal-ft{display:flex;align-items:center;gap:8px;padding:12px 18px;border-top:1px solid var(--line);flex-wrap:wrap}
+.modal-ft .mcount{font-size:12px;color:var(--tx2);margin-right:auto}
+.modal-ft .mcount b{color:var(--accent)}
+
+/* ---------- Excel 导入确认弹窗 ---------- */
+.modal.impx-modal{width:min(1000px,96vw)}
+.impx-body{padding:12px 18px 4px;overflow-y:auto;max-height:min(64vh,620px)}
+.impx-cols{display:flex;gap:12px;flex-wrap:wrap;align-items:center;background:var(--bg-sub, #f8fafc);padding:10px 14px;border-radius:10px;border:1px solid var(--line)}
+.impx-cols .fld{display:flex;flex-direction:column;gap:4px}
+.impx-cols label{font-size:11px;color:var(--tx3);font-weight:600}
+.impx-cols select{border:1px solid var(--line);border-radius:8px;padding:5px 8px;
+  font-size:12.5px;font-family:inherit;color:var(--tx);background:#fff;min-width:140px}
+.impx-note{font-size:12px;color:var(--tx2);margin:10px 0 8px;line-height:1.7}
+.impx-note b{color:var(--tx)}
+.impx-note .warn{color:var(--p1)}
+.impx-preview{border:1px solid var(--line);border-radius:10px;overflow:auto;
+  max-height:340px;margin-bottom:10px}
+.impx-preview table{width:100%;min-width:600px}
+.impx-preview th{position:sticky;top:0;z-index:1}
+.impx-preview td{max-width:420px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;
+  color:var(--tx2)}
+.impx-preview td.imp-prompt{color:var(--tx)}
+
+/* ---------- 附件库弹窗 ---------- */
+.modal.lib-modal{width:min(720px,92vw)}
+.lib-del{color:#b91c1c;cursor:pointer;font-size:11.5px;padding:2px 8px;border-radius:8px;opacity:.75}
+.lib-del:hover{background:#fee2e2;opacity:1}
+.lib-row{display:flex;align-items:center;gap:12px;padding:9px 10px;border-radius:8px;
+  cursor:pointer;border-bottom:1px solid var(--line2)}
+.lib-row:last-child{border-bottom:none}
+.lib-row:hover{background:#f8fafc}
+.lib-row.used{cursor:default;opacity:.6}
+.lib-row.used:hover{background:transparent}
+.lib-main{flex:1 1 auto;min-width:0;display:flex;flex-direction:column;gap:2px}
+.lib-name{font-size:12.5px;color:var(--tx);
+  overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.lib-path{font-size:10.5px;color:var(--tx3);font-family:ui-monospace,Menlo,monospace;
+  overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.lib-meta{flex:0 0 auto;display:flex;align-items:center;gap:9px}
+.lib-size{font-size:10.5px;color:var(--tx3);white-space:nowrap}
+.lib-add{font-size:10.5px;color:var(--accent);border:1px solid var(--line);border-radius:8px;
+  padding:2px 8px;background:#fff;white-space:nowrap}
+.lib-row:hover .lib-add{border-color:var(--accent)}
+.lib-row.used .lib-add{color:var(--tx3);border-color:transparent;background:transparent}
+.tag.t-att{border-color:#bfdbfe;background:#eff6ff;color:#1d4ed8;max-width:280px;
+  overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.tag-x{margin-left:5px;color:var(--tx3);cursor:pointer;font-weight:700}
+.tag-x:hover{color:var(--p0)}
+
+/* ---------- 模型设置弹窗 ---------- */
+.llm-dot{width:7px;height:7px;border-radius:50%;background:#cbd5e1;flex-shrink:0}
+.llm-dot.on{background:var(--ok)}
+.modal.llm-modal{width:min(560px,92vw)}
+.llm-body{padding:16px 18px;display:flex;flex-direction:column;gap:13px;overflow-y:auto}
+.fld{display:flex;flex-direction:column;gap:5px}
+.fld label{font-size:12px;color:var(--tx2);font-weight:600}
+.fld input{border:1px solid var(--line);border-radius:9px;padding:8px 11px;font-size:12.5px;
+  color:var(--tx);background:#fff;font-family:inherit;
+  transition:border-color .15s,box-shadow .15s}
+.fld input:focus{outline:none;border-color:var(--accent);box-shadow:0 0 0 3px rgba(37,99,235,.12)}
+.fld .fhint{font-size:11px;color:var(--tx3)}
+.fld.adv{display:none}
+.fld.adv.show{display:flex}
+.pw-row{display:flex;gap:7px}
+.pw-row input{flex:1;min-width:0}
+.pw-row .btn-ghost{flex-shrink:0;padding:0 11px}
+.adv-toggle{align-self:flex-start;background:none;border:none;padding:0;cursor:pointer;
+  font-size:11.5px;color:var(--accent);font-family:inherit;text-align:left}
+.adv-toggle:hover{text-decoration:underline}
+.probe-box{border:1px solid var(--line2);border-radius:10px;padding:10px 12px;font-size:12px;
+  background:#f8fafc;color:var(--tx2);line-height:1.65;word-break:break-word}
+.probe-box.ok{background:#f0fdf4;border-color:#bbf7d0;color:#15803d}
+.probe-box.err{background:#fef2f2;border-color:#fecaca;color:#b91c1c}
+.probe-box.busy{background:#eff6ff;border-color:#bfdbfe;color:#1d4ed8}
+.probe-box .pb-detail{margin-top:6px;font-family:ui-monospace,Menlo,monospace;font-size:11px;
+  color:var(--tx3);max-height:120px;overflow-y:auto;white-space:pre-wrap;word-break:break-all}
+
+/* ---------- 应用设置与路径定位 ---------- */
+.inp-row{display:flex;gap:6px;align-items:center}
+.inp-row input{flex:1 1 auto}
+.reveal-btn{flex:0 0 auto;font-size:13.5px;line-height:1;padding:7px 9px;
+  border:1px solid var(--line);border-radius:8px;background:#fff;cursor:pointer}
+.reveal-btn:hover{border-color:var(--accent);background:#f0f6ff}

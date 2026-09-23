@@ -1,0 +1,242 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>睿云智能工作台 · 本轮测试评估报告</title>
+<style>
+  :root{
+    --bg:#f5f7fb; --card:#ffffff; --line:#e3e8f0; --line2:#eef2f7;
+    --tx:#1e293b; --tx2:#64748b; --tx3:#94a3b8;
+    --accent:#2563eb; --p0:#dc2626; --p1:#ea580c; --p2:#ca8a04;
+    --ok:#16a34a; --warn:#d97706; --skill:#7c3aed;
+  }
+  *{box-sizing:border-box;margin:0;padding:0}
+  body{
+    background:var(--bg); color:var(--tx);
+    font-family:"PingFang SC","Microsoft YaHei","Helvetica Neue",Arial,sans-serif;
+    font-size:14px; line-height:1.6; padding:28px 20px 60px;
+  }
+  .wrap{max-width:1240px;margin:0 auto}
+  header{border-bottom:2px solid var(--line);padding-bottom:18px;margin-bottom:24px}
+  h1{font-size:24px;font-weight:700;letter-spacing:-.3px}
+  .sub{color:var(--tx2);font-size:13px;margin-top:6px}
+  .meta{display:flex;gap:18px;flex-wrap:wrap;margin-top:10px;font-size:12px;color:var(--tx3)}
+  .meta b{color:var(--tx2);font-weight:600}
+
+  h2{font-size:17px;font-weight:700;margin:34px 0 14px;display:flex;align-items:center;gap:9px}
+  h2 .no{display:inline-flex;align-items:center;justify-content:center;width:22px;height:22px;
+     background:var(--accent);color:#fff;border-radius:6px;font-size:13px}
+  h3{font-size:13px;font-weight:600;color:var(--tx2);margin:16px 0 10px}
+
+  .kpis{display:grid;grid-template-columns:repeat(auto-fit,minmax(160px,1fr));gap:14px}
+  .kpi{background:var(--card);border:1px solid var(--line);border-radius:12px;padding:15px 17px}
+  .kpi .label{font-size:12px;color:var(--tx2)}
+  .kpi .value{font-size:27px;font-weight:700;margin-top:6px;letter-spacing:-1px}
+  .kpi .foot{font-size:11px;color:var(--tx3);margin-top:4px;line-height:1.45}
+  .v-ok{color:var(--ok)} .v-bad{color:var(--p0)} .v-warn{color:var(--warn)} .v-acc{color:var(--accent)}
+
+  .card{background:var(--card);border:1px solid var(--line);border-radius:12px;padding:18px}
+  .grid2{display:grid;grid-template-columns:1fr 1fr;gap:16px}
+  @media(max-width:900px){.grid2{grid-template-columns:1fr}}
+
+  table{width:100%;border-collapse:collapse;font-size:12.5px;background:var(--card)}
+  th{text-align:left;font-weight:600;color:var(--tx2);background:#f8fafc;
+     padding:9px 12px;border-bottom:1px solid var(--line);white-space:nowrap;font-size:12px}
+  td{padding:9px 12px;border-bottom:1px solid var(--line2);vertical-align:top}
+  tr:last-child td{border-bottom:none}
+  tbody tr:hover{background:#fafbfd}
+  .tbl-wrap{background:var(--card);border:1px solid var(--line);border-radius:12px;overflow:hidden}
+
+  .badge{display:inline-block;padding:1px 8px;border-radius:20px;font-size:11px;font-weight:600;line-height:18px}
+  .b-pass{background:#dcfce7;color:#15803d}
+  .b-fail{background:#fee2e2;color:#b91c1c}
+  .b-uifail{background:#fef3c7;color:#92400e}
+  .b-p0{background:#fee2e2;color:#b91c1c}
+  .b-p1{background:#ffedd5;color:#c2410c}
+  .b-p2{background:#fef9c3;color:#a16207}
+  .b-skill{background:#ede9fe;color:#6d28d9}
+  .chip{display:inline-block;padding:1px 7px;border-radius:5px;background:#eef2f7;
+        color:var(--tx2);font-size:11px;margin:1px 3px 1px 0;font-family:ui-monospace,Menlo,monospace}
+  .mono{font-family:ui-monospace,Menlo,monospace;font-size:11.5px;color:var(--tx2)}
+  .evi{font-family:ui-monospace,Menlo,monospace;font-size:11px;color:var(--tx3);
+       background:#f8fafc;border:1px solid var(--line2);border-radius:6px;padding:6px 8px;
+       margin-top:6px;word-break:break-all;max-height:80px;overflow:hidden}
+  .empty{color:var(--tx3);font-size:12.5px;padding:14px 0;text-align:center}
+  .note{font-size:12px;color:var(--tx2);background:#f0f6ff;border-left:3px solid var(--accent);
+        padding:10px 14px;border-radius:0 8px 8px 0;margin-top:12px}
+  .note.warn{background:#fffbeb;border-left-color:var(--warn)}
+
+  .none-banner{background:var(--card);border:1px solid #bbf7d0;border-radius:12px;
+    padding:34px 20px;text-align:center}
+  .none-banner .big{font-size:21px;font-weight:700;color:var(--ok)}
+  .none-banner .sm{font-size:12.5px;color:var(--tx2);margin-top:8px}
+
+  .finding{background:var(--card);border:1px solid var(--line);border-radius:12px;padding:14px 16px;margin-bottom:11px}
+  .finding .f-hd{display:flex;gap:9px;align-items:center;flex-wrap:wrap}
+  .finding .f-detail{font-size:13px;margin-top:7px}
+  .finding .f-impact{font-size:12.5px;color:var(--tx2);margin-top:5px;
+     background:#fff7ed;border-left:3px solid var(--p1);padding:7px 11px;border-radius:0 7px 7px 0}
+  .finding .f-impact b{color:#9a3412}
+  .repro{margin-top:9px;border:1px solid var(--line2);border-radius:8px;padding:10px 12px;background:#fbfcfe;font-size:12px;color:var(--tx2)}
+  .repro b{color:var(--tx)}
+  .chain{font-family:ui-monospace,Menlo,monospace;font-size:11px;color:var(--tx2);line-height:1.9;word-break:break-all}
+  .chain .ct{color:var(--accent);font-weight:600}
+
+  /* ---------- 逐用例区块 ---------- */
+  .case-block{background:var(--card);border:1px solid var(--line);border-radius:12px;
+    padding:18px 20px;margin-bottom:18px}
+  .case-hd{display:flex;gap:10px;align-items:center;flex-wrap:wrap;
+    padding-bottom:12px;border-bottom:1px solid var(--line2)}
+  .case-hd b{font-size:16px}
+  .case-block h3{font-size:13px;font-weight:600;color:var(--tx2);margin:18px 0 9px}
+  .case-block h3:first-of-type{margin-top:14px}
+  .case-prompt{font-size:12.5px;color:var(--tx2);background:#f8fafc;border-left:3px solid var(--accent);
+    padding:9px 13px;border-radius:0 8px 8px 0;margin-top:12px;word-break:break-word}
+</style>
+</head>
+<body>
+<div class="wrap">
+
+<header>
+  <h1>睿云智能工作台 · 本轮测试评估报告</h1>
+  <div class="sub">评估口径：仅统计本轮测试对话产生的新数据，不追溯历史日志。报告按用例逐个展示其调用链路、客观信息与问题发现。</div>
+  <div class="meta">
+    <span><b>应用版本</b> {{ app_version }}</span>
+    <span><b>Bundle</b> {{ bundle_id }}</span>
+    <span><b>运行模式</b> {{ run_mode }}</span>
+    <span><b>生成时间</b> {{ generated_at }}</span>
+    <span><b>总耗时</b> {{ total_elapsed }}s</span>
+  </div>
+</header>
+
+<!-- ================================================= 本轮概览 -->
+<h2><span class="no">1</span>本轮概览</h2>
+
+<div class="kpis">
+  <div class="kpi">
+    <div class="label">本轮用例</div>
+    <div class="value v-acc">{{ s.cases }}</div>
+    <div class="foot">{{ s.passed }} 通过 / {{ s.failed }} 断言失败 / {{ s.ui_failed }} UI 失败</div>
+  </div>
+  <div class="kpi">
+    <div class="label">问题发现</div>
+    <div class="value {{ 'v-ok' if s.findings == 0 else 'v-bad' }}">{{ s.findings }}</div>
+    <div class="foot">P0 阻断 {{ s.p0 }} · P1 严重 {{ s.p1 }}</div>
+  </div>
+</div>
+
+<div class="note">
+  <b>评估范围</b><br/>
+  · 本轮共 {{ s.cases }} 条用例，逐条独立会话执行，评估只覆盖这些用例自身产生的日志。<br/>
+  · 判定基于 {{ rule_rows | length }} 条硬性缺陷断言规则（阈值见 config.yaml），不对生成内容的质量做评价。<br/>
+  · 下方第 2 节按用例逐个展示；每条用例只呈现它自己的调用链路、耗时用量与命中的问题，不做跨用例汇总。
+</div>
+
+<!-- ================================================= 逐用例详情 -->
+<h2><span class="no">2</span>逐用例详情</h2>
+
+{% if not case_rows %}
+<div class="card"><div class="empty">本轮无用例执行记录</div></div>
+{% endif %}
+
+{% for c in case_rows %}
+{% set co = case_objective.get(c.case_id, {}) %}
+{% set tk = (co.get('volume') or {}) %}
+{% set tr = (co.get('timing') or {}) %}
+{% set rq = (co.get('requests') or {}) %}
+{% set stt = (co.get('status') or {}) %}
+{% set cfind = case_findings.get(c.case_id, []) %}
+
+<div class="case-block">
+  <div class="case-hd">
+    <span class="badge {{ 'b-pass' if c.status == 'PASS' else ('b-fail' if c.status == 'FAIL' else 'b-uifail') }}">
+      {{ '通过' if c.status == 'PASS' else ('断言失败' if c.status == 'FAIL' else 'UI 失败') }}
+    </span>
+    <b>{{ c.name }}</b>
+    <span class="mono">{{ c.case_id }}</span>
+    <span class="mono" style="color:var(--tx3)">{{ c.session_id or '—' }}</span>
+  </div>
+
+  <div class="case-prompt"><b>提示词：</b>{{ c.prompt }}</div>
+  {% if c.ui_error %}<div style="color:var(--p0);font-size:12.5px;margin-top:6px">UI 异常：{{ c.ui_error }}</div>{% endif %}
+  {% if c.waited_limit %}<div style="color:var(--tx2);font-size:12.5px;margin-top:6px">· {{ c.wait_note }}</div>{% endif %}
+
+  <!-- 调用链路 -->
+  <h3>调用链路（执行顺序）</h3>
+  {% if c.tools %}
+    <div class="chain">{% for t in c.tools %}<span class="ct">{{ t }}</span>{% if not loop.last %} → {% endif %}{% endfor %}</div>
+    <div class="mono" style="color:var(--tx3);margin-top:4px">{{ c.tool_calls }} 次调用 · {{ c.thinking_steps }} 步思考 · 答复 {{ c.answer_chars }} 字</div>
+  {% else %}
+    <div class="mono" style="color:var(--tx3)">纯文本应答，无工具调用</div>
+  {% endif %}
+
+  <!-- 客观信息 -->
+  <h3>客观信息</h3>
+  <div class="tbl-wrap">
+  <table>
+    <tr><td>平台实测耗时</td><td style="text-align:right"><b>{{ c.elapsed_s }}s</b></td></tr>
+    <tr><td>首响延迟（提问 → 模型响应）</td><td style="text-align:right"><b>{{ tr.get('first_response_s', '—') }}{% if tr.get('first_response_s') is not none and tr.get('first_response_s') >= 0 %}s{% endif %}</b></td></tr>
+    <tr><td>生成时长</td><td style="text-align:right"><b>{{ tr.get('generation_s', '—') }}{% if tr.get('generation_s') is not none and tr.get('generation_s') >= 0 %}s{% endif %}</b></td></tr>
+    <tr><td>会话时长</td><td style="text-align:right"><b>{{ tr.get('session_s', '—') }}{% if tr.get('session_s') is not none and tr.get('session_s') >= 0 %}s{% endif %}</b></td></tr>
+    <tr><td>对话轮次 / 工具调用 / 思考步</td><td style="text-align:right"><b>{{ rq.get('turns', 0) }} / {{ rq.get('tool_calls', 0) }} / {{ rq.get('thinking_steps', 0) }}</b></td></tr>
+    <tr><td>调用成功 / 失败 / 截断</td><td style="text-align:right"><b>{{ stt.get('tool_ok', 0) }} / {{ stt.get('tool_fail', 0) }} / {{ stt.get('tool_truncated', 0) }}</b></td></tr>
+    <tr><td>调用链路一致性</td>
+        <td style="text-align:right"><span class="badge {{ 'b-pass' if stt.get('chain_consistent', True) else 'b-fail' }}">
+          {{ '一致' if stt.get('chain_consistent', True) else '存在不一致' }}</span></td></tr>
+    <tr><td>会话收尾</td>
+        <td style="text-align:right"><span class="badge {{ 'b-pass' if stt.get('session_closed') else 'b-fail' }}">
+          {{ stt.get('closed_desc', '—') }}</span></td></tr>
+    <tr><td>token 估算（入 / 出 / 合计）</td><td style="text-align:right"><b>{{ tk.get('input_tokens_est', 0) }} / {{ tk.get('output_tokens_est', 0) }} / <span class="v-acc">{{ tk.get('total_tokens_est', 0) }}</span></b></td></tr>
+  </table>
+  </div>
+
+  <!-- 该用例问题发现 -->
+  <h3>问题发现</h3>
+  {% if not cfind %}
+    <div class="none-banner" style="padding:22px 18px">
+      <div class="big" style="font-size:17px">✓ 该用例未发现问题</div>
+      <div class="sm">已按全部硬性缺陷规则检查该用例的调用链路，未命中任何规则。</div>
+    </div>
+  {% else %}
+    {% for f in cfind %}
+    <div class="finding">
+      <div class="f-hd">
+        <span class="badge b-{{ f.severity|lower }}">{{ f.severity }}</span>
+        <b>{{ f.name }}</b>
+        <span class="mono">{{ f.rule }}</span>
+        {% if f.tool %}<span class="mono">{{ f.tool }}</span>{% endif %}
+        {% if f.step_index is not none %}<span class="mono" style="color:var(--tx3)">步骤 #{{ f.step_index }}</span>{% endif %}
+      </div>
+      <div class="f-detail"><b>具体表现：</b>{{ f.detail }}</div>
+      {% if f.impact %}<div class="f-impact"><b>影响：</b>{{ f.impact }}</div>{% endif %}
+      {% if f.evidence %}<div class="evi">{{ f.evidence }}</div>{% endif %}
+      {% if f.repro %}
+      <div class="repro">
+        <b>复现方法</b>（提示词取自{{ '本轮原始提问' if f.repro.prompt_source == 'original' else '触发工具合成' }}）
+        <div class="mono" style="margin-top:5px;color:var(--tx)">{{ f.repro.prompt }}</div>
+        <div style="margin-top:5px"><b>验证标准：</b>{{ f.repro.verify_desc }}</div>
+        {% if f.repro.attempts %}
+          <div style="margin-top:5px"><b>自动化验证：</b>重复 {{ f.repro.attempts }} 次命中 {{ f.repro.hits }} 次 =
+            <b style="color:var(--accent)">{{ (f.repro.rate * 100)|round(0) }}%</b>
+            <span class="badge {{ 'b-p0' if f.repro.stability == '必现' else ('b-p1' if f.repro.stability == '高概率复现' else 'b-p2') }}">{{ f.repro.stability }}</span></div>
+        {% endif %}
+      </div>
+      {% endif %}
+    </div>
+    {% endfor %}
+  {% endif %}
+</div>
+{% endfor %}
+
+<div class="note" style="margin-top:26px">
+  <b>判定与口径说明</b><br/>
+  · 本报告全部数据来自本轮 {{ s.cases }} 条用例产生的会话日志，不含任何历史数据。<br/>
+  · 「问题发现」基于 {{ rule_rows | length }} 条硬性缺陷断言规则（阈值见 config.yaml），不对生成内容的质量做评价。<br/>
+  · token 为字符量折算的估算值（应用日志未记录官方 usage）；步骤级耗时日志未记录，耗时仅到会话/消息级。<br/>
+  · 复现率由 UI 自动化重复执行同一配方统计，&lt;3 次样本的结论仅供参考。
+</div>
+
+</div>
+</body>
+</html>
