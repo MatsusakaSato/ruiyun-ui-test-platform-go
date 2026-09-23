@@ -717,8 +717,11 @@ Go 原先调的是只做字符串拼接的 `ResolveAbsPath` —— 会给出**�
 - `.gitignore` 原先只列了 `/xlsxdiff` 与 `/dbdiff` 两个探针二进制，
   `/tracediff`、`/assertdiff`、`/metricsdiff`、`/evaldiff` 四个漏了
   —— 曾出现根目录残留 `evaldiff` 编译产物的风险。**已补全**。
-- `internal/xlsx/xlsx_test.go:11` 硬编码了 `/Users/amano/WorkSpace/工作台测试集1000.xlsx`，
-  换机器即静默 skip（最强的 oracle 会失效）。建议改环境变量或放进 `testdata/`。
+- ~~`internal/xlsx/xlsx_test.go:11` 硬编码了绝对路径，换机器即静默 skip~~
+  —— **✅ 已修**：改为按优先级回落
+  `RUIYUN_XLSX_TEST` 环境变量 → `testdata/` → 上级目录 → `$HOME/WorkSpace/` → 当前开发机绝对路径；
+  全都不存在时 skip 提示会列出**所有已尝试路径与配置方法**。
+  （这条危险在于「最强的 oracle 静默失效」本身不报错 —— 现在至少喊得出来。）
 - `rowToCase` 里 `rows.Scan` 失败会**静默跳过该行**（`if err == nil` 才 append）。
   某列出现 NULL 时 Python 返回 `""` 而 Go 会丢行 —— 当前真实库无 NULL 未暴露。
 - 部分文件未 `gofmt`（当前是 `internal/driver/driver.go`、`internal/pipeline/pipeline.go`，
