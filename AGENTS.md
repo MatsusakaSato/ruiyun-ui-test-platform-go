@@ -1,7 +1,7 @@
 # AGENTS.md — Go 重写项目协作说明
 
 > 本文件由**另一个 AI 代理**（DSH）写入，用于与正在做 Go 重写的 **gemini** 协作。
-> 最后更新：2026-09-23（清完 `\s` / `.strip()` 遗留站点；六层差分仍全绿）
+> 最后更新：2026-09-23（Python oracle 的两处问题已获授权修复/提交；六层差分仍全绿）
 > 对应 Python 原版：`../ruiyun-ui-test-platform`（**只读，任何情况下都不要修改它**）
 
 ---
@@ -543,7 +543,7 @@ python3 tools/diff/run_eval_diff.py       # 评估前置层：667 用例 × (for
 **好消息**：分析层与断言层已验证**无此问题**（229 条 Finding 的规则、
 顺序、计数完全确定）。做后续层差分前仍请先确认顺序稳定性。
 
-### 5.1 🐞 发现 oracle 自身的一个**确定性缺陷**：`issues` 恒为空
+### 5.1 ✅ 已修复：oracle 的 `issues` 恒为空（原为确定性缺陷）
 
 `core/trajectory.py:401`：
 
@@ -561,18 +561,46 @@ python3 tools/diff/run_eval_diff.py       # 评估前置层：667 用例 × (for
 
 **影响**：详情页每个工具步骤的「问题」徽标从来没显示过。
 
-**我的处理**：**Go 侧按正确语义实现**（用 `sessionID:stepIndex` 复合键），
-即 Go 的输出是 Python **修好之后**的样子。差分器把这类差异单独标记为
-`oracle缺陷`（判据：Python 为 `[]`、Go 为已排序的非空列表），**不计入真实差异**，
-但也**不掩盖** —— 每次运行都会打印计数。
+**处理**：Go 侧一直按正确语义实现（用 `sessionID:stepIndex` 复合键），
+即 Go 的输出本就等于 Python **修好之后**的样子。差分器把这类差异单独标记为
+`oracle缺陷`（判据：Python 为 `[]`、Go 为已排序的非空列表），不计入真实差异，
+但也不掩盖 —— 每次运行都会打印计数。
 
-**待你/用户决策**：是否修 Python 这一行（1 行改动）。
-**在得到明确授权前，不要改 `../ruiyun-ui-test-platform`。**
+**✅ 2026-09-23 已获用户授权并修复 Python 侧**（提交 `12b7ba3`，1 行）：
 
-### 5.2 ⚠️ oracle 目前有**未提交**的改动（请留意）
+```python
+- "issues": sorted({f.rule for f in findings_by_step.get(tc.index, [])}),
++ "issues": sorted({f.rule for f in findings_by_step.get((trace.session_id, tc.index), [])}),
+```
 
-`../ruiyun-ui-test-platform` 的 `drivers/ui_driver.py` **有工作区改动尚未 commit**
-（`M drivers/ui_driver.py`，+9/−2，mtime 17:09）：
+修复后**六层差分全部仍为退出码 0**，且指标层的 `oracle缺陷` 计数
+**由 159 降为 0** —— 说明两侧现在从"语义等价靠豁免"变成了"逐字段真等价"。
+
+#### ⚠️ 顺带查出的一个 Go 侧潜在差异（**已证不可达，故意未改**）
+
+Python 是**集合推导** `{f.rule for f in ...}`（**会去重**），
+而 Go 是 `for _, f := range findingsByStep[stepKey] { issueRules = append(...) }`
+（**不去重**），且 `nonNilSlices` 也只做 nil→`[]`。
+
+修好 Python 后这本应立刻暴露成差异，但实测**没有** —— 因为
+**每条规则在每个 (session, step) 上最多只产生一条 finding**：
+
+| 规则 | 为何不可能重复 |
+|---|---|
+| `LOOP_TOTAL` | `_mk(...)` **不带 `step=`** → `step_index` 为 None，根本不进 `issues` |
+| `DUPLICATE_CALL` | `step=items[1].index`，不同签名组的 `items[1]` 必为不同对象 → index 唯一 |
+| `LOOP_CONSECUTIVE` | `run == th` 每次连续段只成立一次，且 index 唯一 |
+| 其余规则 | 都是 `for t in tool_calls` 里每次调用 ≤1 条 |
+
+实测 219 会话 / **229 条 finding**，按 `(session_id, step_index)` 分组后
+**重复 rule 的组数为 0**。故 Go 少一次去重**当前完全不可达**，
+**没有改 Go**（避免为一个不可达路径去动已验证的 `trajectory`）。
+若将来新增的规则可能对同一步产生多条，**届时应给 Go 补去重**。
+
+### 5.2 ✅ 已提交：`drivers/ui_driver.py` 的 `clickEl` 修复
+
+原先 `../ruiyun-ui-test-platform` 的 `drivers/ui_driver.py` 有**未提交**的工作区改动
+（+9/−2）。**✅ 2026-09-23 已获用户授权并提交**（提交 `e0bd234`，内容原样未改）。
 
 > 新增 `clickEl(el)`：点击前先判 `el.disabled` / `aria-disabled === 'true'`，
 > 禁用按钮（如「提交中」）不再被点，避免白吃一次尝试次数而误触发人工介入；
@@ -582,12 +610,11 @@ python3 tools/diff/run_eval_diff.py       # 评估前置层：667 用例 × (for
 我确认 `internal/driver/scripts.go:97-133` **已经逐字同步**了这个改动 —— 👍 做得好，
 oracle 与端口保持一致。
 
-**但要小心**：该改动**没有 commit**。一旦在 Python 仓库执行
-`git checkout .` / `git stash`，oracle 会**静默回退**，而 Go 侧仍然带着修复
-→ 差分会出现**看起来莫名其妙**的差异，且真实运行行为会退化。
-**建议尽快在 Python 仓库提交这次修复**（用中文 Conventional Commits）。
+**当时为什么要紧**：该改动未 commit 时，一次 `git checkout .` / `git stash`
+就会让 oracle **静默回退**，而 Go 侧仍带着修复 → 差分会出现**看起来莫名其妙**的差异，
+真实运行行为也会退化。**现已 commit，这个隐患解除。**
 
-> 我这边只做只读检查，未对 Python 项目做任何写入。
+> 提交历史：`e0bd234`（本改动，作者记为 gemini）、`12b7ba3`（§5.1 的 oracle 修复）。
 
 ---
 
@@ -734,5 +761,10 @@ Go 原先调的是只做字符串拼接的 `ResolveAbsPath` —— 会给出**�
 
 - **提交信息必须用中文**，遵循 Conventional Commits：`<type>: <中文描述>`
   （来自 `../ruiyun-ui-test-platform/.agents/rules/git.md`）。
-- **绝对不要修改 `../ruiyun-ui-test-platform`**（Python oracle）—— 它是差分验证的基准。
+- **未经用户明确授权，绝对不要修改 `../ruiyun-ui-test-platform`**（Python oracle）
+  —— 它是差分验证的基准。
+  **授权例外（2026-09-23，用户已明确批准两处，均已提交）**：
+  `e0bd234` 提交了 `drivers/ui_driver.py` 的 `clickEl` 修复；
+  `12b7ba3` 修复了 `core/trajectory.py:401` 的 `issues` 键形态笔误（见 §5.1）。
+  除此之外**仍一律只读**；任何新的 oracle 改动都必须先拿到明确授权。
 - 改动实现后，请跑 §4 的差分作为门禁；新增行为请补回归测试。
