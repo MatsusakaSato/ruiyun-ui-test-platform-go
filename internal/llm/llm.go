@@ -89,13 +89,20 @@ type LLMClient struct {
 	httpClient *http.Client
 }
 
+// CustomTransport 可选的自定义 RoundTripper，供单元测试模拟网络使用
+var CustomTransport http.RoundTripper
+
 func NewLLMClient(timeout time.Duration) *LLMClient {
+	var tr http.RoundTripper = &http.Transport{
+		Proxy: http.ProxyFromEnvironment,
+	}
+	if CustomTransport != nil {
+		tr = CustomTransport
+	}
 	// 使用系统代理设置 (http.ProxyFromEnvironment)
 	return &LLMClient{
 		httpClient: &http.Client{
-			Transport: &http.Transport{
-				Proxy: http.ProxyFromEnvironment,
-			},
+			Transport: tr,
 			CheckRedirect: func(req *http.Request, via []*http.Request) error {
 				return http.ErrUseLastResponse
 			},

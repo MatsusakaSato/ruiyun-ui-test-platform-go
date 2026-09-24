@@ -6,6 +6,7 @@ import (
 	"html/template"
 	"os"
 	"path/filepath"
+	"strings"
 	"time"
 )
 
@@ -72,10 +73,50 @@ func RenderReport(metrics map[string]any, outPath string, appVersion, bundleID, 
 	tmplStr := reportTemplateHTML
 	tmpl, err := template.New("report").Funcs(template.FuncMap{
 		"lower": func(s any) string {
-			return fmt.Sprintf("%v", s)
+			return strings.ToLower(fmt.Sprintf("%v", s))
 		},
-		"round": func(f float64, decimals int) string {
-			return fmt.Sprintf(fmt.Sprintf("%%.%df", decimals), f)
+		"round": func(f any, decimals int) string {
+			var val float64
+			switch v := f.(type) {
+			case float64:
+				val = v
+			case int:
+				val = float64(v)
+			}
+			return fmt.Sprintf(fmt.Sprintf("%%.%df", decimals), val)
+		},
+		"mult": func(a any, b float64) float64 {
+			var val float64
+			switch v := a.(type) {
+			case float64:
+				val = v
+			case int:
+				val = float64(v)
+			}
+			return val * b
+		},
+		"getObjective": func(m map[string]map[string]any, caseID string) map[string]any {
+			if m == nil {
+				return nil
+			}
+			return m[caseID]
+		},
+		"getFindings": func(m map[string][]map[string]any, caseID string) []map[string]any {
+			if m == nil {
+				return nil
+			}
+			return m[caseID]
+		},
+		"mapGet": func(m any, key string, fallback any) any {
+			if m == nil {
+				return fallback
+			}
+			if dict, ok := m.(map[string]any); ok {
+				if val, exists := dict[key]; exists && val != nil {
+					return val
+				}
+			}
+			return fallback
 		},
 	}).Parse(tmplStr)
 	if err != nil {

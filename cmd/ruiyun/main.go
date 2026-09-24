@@ -18,6 +18,7 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 
 	"ruiyun-ui-test-platform-go/internal/config"
@@ -26,13 +27,34 @@ import (
 	"ruiyun-ui-test-platform-go/internal/testcasedb"
 )
 
+var (
+	// Version 版本号，可通过构建参数 -ldflags "-X main.Version=..." 注入
+	Version = "1.0.0-dev"
+	// Commit Git 提交哈希
+	Commit = "none"
+	// BuildTime 构建时间戳
+	BuildTime = "unknown"
+)
+
 func main() {
 	args := os.Args[1:]
 	cmd := "serve"
-	// 与 Python 的 argparse 子命令式入口对齐：首个非选项参数即子命令
-	if len(args) > 0 && !strings.HasPrefix(args[0], "-") {
-		cmd = args[0]
-		args = args[1:]
+
+	if len(args) > 0 {
+		switch args[0] {
+		case "help", "--help", "-h":
+			usage()
+			os.Exit(0)
+		case "version", "--version", "-v":
+			printVersion()
+			os.Exit(0)
+		default:
+			// 首个非选项参数即子命令
+			if !strings.HasPrefix(args[0], "-") {
+				cmd = args[0]
+				args = args[1:]
+			}
+		}
 	}
 
 	initRootDir()
@@ -46,7 +68,10 @@ func main() {
 		os.Exit(runRepro(args))
 	case "discover":
 		os.Exit(runDiscover(args))
-	case "help", "--help", "-h":
+	case "version":
+		printVersion()
+		os.Exit(0)
+	case "help":
 		usage()
 		os.Exit(0)
 	default:
@@ -54,6 +79,11 @@ func main() {
 		usage()
 		os.Exit(2)
 	}
+}
+
+func printVersion() {
+	fmt.Printf("ruiyun %s (commit: %s, built: %s, %s/%s, %s)\n",
+		Version, Commit, BuildTime, runtime.GOOS, runtime.GOARCH, runtime.Version())
 }
 
 func usage() {
@@ -64,11 +94,14 @@ func usage() {
   pipeline    执行三段式流水线（UI 自动化 → 日志校验 → 报告）
   repro       复现率验证器
   discover    UI 诊断工具：导出 DOM 中可交互元素
+  version     查看版本信息
+  help        查看帮助说明
 
 示例：
   ruiyun                              # 启动平台服务（127.0.0.1:8765）
   ruiyun serve --port 8765 --allow-lan
   ruiyun pipeline --cases 1 --run-id run_20260101_000000
+  ruiyun version
 `)
 }
 

@@ -1,16 +1,12 @@
 # 构建产物（不要提交）
-# ⚠️ 六个差分探针的二进制名都要列全，否则 `go build ./cmd/xxx` 会把
-# 编译产物留在仓库根目录并被误提交（曾漏掉 evaldiff）。
-/xlsxdiff
-/dbdiff
-/tracediff
-/assertdiff
-/metricsdiff
-/evaldiff
 *.test
 *.out
 /ruiyun-autotest
 /ruiyun-cli
+/bin/
+/dist/
+coverage.out
+coverage.html
 
 # 运行期数据（默认落在用户目录，此处兜底）
 /rounds/
