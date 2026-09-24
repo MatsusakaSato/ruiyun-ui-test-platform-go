@@ -28,6 +28,7 @@ build_ruiyun() {
 
 cross_compile() {
     local dist_dir="${ROOT_DIR}/dist"
+    rm -rf "${dist_dir}"
     mkdir -p "${dist_dir}"
     echo "==> 交叉编译 ruiyun CLI 到 ${dist_dir} ..."
 
@@ -42,17 +43,43 @@ cross_compile() {
     for target in "${targets[@]}"; do
         local os="${target%/*}"
         local arch="${target#*/}"
-        local suffix=""
+        local bin_name="ruiyun"
+        local archive_name="ruiyun-${VERSION}-${os}-${arch}"
         if [[ "${os}" == "windows" ]]; then
-            suffix=".exe"
+            bin_name="ruiyun.exe"
         fi
-        local out_name="ruiyun-${VERSION}-${os}-${arch}${suffix}"
-        echo "    编译目标: ${os}/${arch} -> ${out_name}"
+        
+        echo "    编译目标: ${os}/${arch} ..."
+        local tmp_pkg="${dist_dir}/tmp_${os}_${arch}"
+        mkdir -p "${tmp_pkg}"
+        
         CGO_ENABLED=0 GOOS="${os}" GOARCH="${arch}" \
             go build -trimpath -ldflags "${LDFLAGS}" \
-            -o "${dist_dir}/${out_name}" ./cmd/ruiyun
+            -o "${tmp_pkg}/${bin_name}" ./cmd/ruiyun
+            
+        cp "${ROOT_DIR}/config.template.yaml" "${tmp_pkg}/" 2>/dev/null || true
+        
+        cd "${tmp_pkg}"
+        if [[ "${os}" == "windows" ]]; then
+            zip -q -r "${dist_dir}/${archive_name}.zip" .
+        else
+            tar -czf "${dist_dir}/${archive_name}.tar.gz" *
+        fi
+        cd "${ROOT_DIR}"
+        rm -rf "${tmp_pkg}"
     done
-    echo "==> 交叉编译完成！"
+
+    echo "==> 计算校验和 (SHA-256) ..."
+    cd "${dist_dir}"
+    if command -v shasum >/dev/null 2>&1; then
+        shasum -a 256 ruiyun-* > checksums.txt
+    elif command -v sha256sum >/dev/null 2>&1; then
+        sha256sum ruiyun-* > checksums.txt
+    fi
+    cd "${ROOT_DIR}"
+
+    echo "==> 交叉编译与打包完成！"
+    ls -lh "${dist_dir}"
 }
 
 TARGET="${1:-build}"
