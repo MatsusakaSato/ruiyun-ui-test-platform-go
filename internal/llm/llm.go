@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"net/url"
 	"os"
 	"regexp"
 	"strings"
@@ -103,11 +104,35 @@ func NewLLMClient(timeout time.Duration) *LLMClient {
 	}
 }
 
+// normalizeBaseURL 校验并规范化 base_url，返回 (规范化地址, 错误信息)。
+//
+// 对应 Python `core/llm_client.py:normalize_base_url` —— 文案逐字保留，
+// 前端「测试连接」直接把它显示给用户。
+func normalizeBaseURL(baseURL string) (string, string) {
+	raw := strings.TrimRight(pyre.Strip(baseURL), "/")
+	if raw == "" {
+		return "", "请填写模型供应商地址"
+	}
+	u, err := url.Parse(raw)
+	if err != nil {
+		return "", "地址缺少主机名（例如 https://api.example.com/v1）"
+	}
+	if u.Scheme != "http" && u.Scheme != "https" {
+		return "", "地址必须以 http:// 或 https:// 开头"
+	}
+	if u.Hostname() == "" {
+		return "", "地址缺少主机名（例如 https://api.example.com/v1）"
+	}
+	if u.User != nil {
+		return "", "地址中不允许携带账号密码，请把凭证填入 API Key"
+	}
+	return raw, ""
+}
+
 // ProbeProvider 供应商探活
 func ProbeProvider(baseURL, apiKey, model, probePath string, timeoutS float64) *ProbeResult {
-	bURL := strings.TrimRight(strings.TrimSpace(baseURL), "/")
 	key := pyre.Strip(apiKey) // Python 是 (api_key or "").strip()
-	mName := strings.TrimSpace(model)
+	mName := pyre.Strip(model)
 
 	if timeoutS <= 0 {
 		timeoutS = DefaultTimeoutS
@@ -119,12 +144,25 @@ func ProbeProvider(baseURL, apiKey, model, probePath string, timeoutS float64) *
 		return int(time.Since(t0).Milliseconds())
 	}
 
-	if bURL == "" || key == "" {
+	// Python 先校验地址、再校验 Key，两条都是 stage="preflight"。
+	// （旧实现把两者合成一条 "供应商地址与 API Key 均不能为空" 且 stage="input"，
+	// 与 oracle 的文案和 stage 都不一致 —— HTTP 差分实测。）
+	bURL, errMsg := normalizeBaseURL(baseURL)
+	if errMsg != "" {
 		return &ProbeResult{
 			OK:        false,
-			Stage:     "input",
+			Stage:     "preflight",
 			Category:  CatInvalid,
-			Message:   "供应商地址与 API Key 均不能为空",
+			Message:   errMsg,
+			LatencyMs: elapsedMs(),
+		}
+	}
+	if key == "" {
+		return &ProbeResult{
+			OK:        false,
+			Stage:     "preflight",
+			Category:  CatInvalid,
+			Message:   "请填写 API Key",
 			LatencyMs: elapsedMs(),
 		}
 	}
@@ -503,7 +541,8 @@ type SecretsData struct {
 	SavedAt string `json:"saved_at,omitempty"`
 }
 
-// LoadConfig 读取存储的密钥
+// LoadConfig 读取存储的密钥。
+// Python `load_config` 会对每个字符串值做 `.strip()`，这里一致。
 func LoadConfig() SecretsData {
 	sp := config.SecretsPath()
 	data, err := os.ReadFile(sp)
@@ -512,6 +551,10 @@ func LoadConfig() SecretsData {
 	}
 	var s SecretsData
 	_ = json.Unmarshal(data, &s)
+	s.BaseURL = pyre.Strip(s.BaseURL)
+	s.APIKey = pyre.Strip(s.APIKey)
+	s.Model = pyre.Strip(s.Model)
+	s.SavedAt = pyre.Strip(s.SavedAt)
 	return s
 }
 
@@ -540,20 +583,31 @@ func ClearConfig() {
 	_ = os.Remove(config.SecretsPath())
 }
 
-// PublicConfig 返回脱敏公开配置
+// PublicConfig 返回脱敏公开配置。
+//
+// 字段名必须与 Python `core/llm_client.py:public_config` 完全一致：
+// 前端 `state.js` 的 `LLM_SRV` 读的是 `key_hint` / `saved_at`。
+// （原实现返回 `key_mask` 且漏了 `saved_at` —— 界面拿不到「已配置的 Key 提示」。）
 func PublicConfig() map[string]any {
 	cfg := LoadConfig()
-	configured := cfg.BaseURL != "" && cfg.APIKey != ""
-	keyMask := ""
-	if len(cfg.APIKey) > 8 {
-		keyMask = cfg.APIKey[:3] + "..." + cfg.APIKey[len(cfg.APIKey)-4:]
-	} else if len(cfg.APIKey) > 0 {
-		keyMask = "***"
+	baseURL := pyre.Strip(cfg.BaseURL)
+	key := pyre.Strip(cfg.APIKey)
+	configured := baseURL != "" && key != ""
+
+	// Python: len(key) 数码点
+	hint := ""
+	if utf8.RuneCountInString(key) >= 14 {
+		r := []rune(key)
+		hint = string(r[:7]) + "…" + string(r[len(r)-4:]) +
+			fmt.Sprintf("（%d 字符）", len(r))
+	} else if key != "" {
+		hint = "（已配置）"
 	}
 	return map[string]any{
 		"configured": configured,
-		"base_url":   cfg.BaseURL,
-		"model":      cfg.Model,
-		"key_mask":   keyMask,
+		"base_url":   baseURL,
+		"model":      pyre.Strip(cfg.Model),
+		"key_hint":   hint,
+		"saved_at":   pyre.Strip(cfg.SavedAt),
 	}
 }

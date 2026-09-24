@@ -27,7 +27,8 @@ func RevealTarget(target string) (bool, string) {
 		if pst, perr := os.Stat(parent); perr == nil && pst.IsDir() {
 			p = parent
 		} else {
-			return false, "路径不存在: " + target
+			// 全角冒号：与 Python `f"路径不存在：{target}"` 逐字一致（前端直接展示）
+			return false, "路径不存在：" + target
 		}
 	} else if !st.IsDir() {
 		// p 是文件

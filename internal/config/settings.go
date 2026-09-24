@@ -469,7 +469,13 @@ func Describe(cfg map[string]any) map[string]any {
 func WriteEnvProfile(profile string) (bool, string) {
 	key := strings.TrimSpace(profile)
 	if key != "dev" && key != "production" {
-		return false, fmt.Sprintf("未知环境档案：%s（只支持 dev / production）", key)
+		// Python: f"未知环境档案：{key or '(空)'}（只支持 dev / production）"
+		// 空值要显示为「(空)」，不能是空串。
+		shown := key
+		if shown == "" {
+			shown = "(空)"
+		}
+		return false, fmt.Sprintf("未知环境档案：%s（只支持 dev / production）", shown)
 	}
 
 	cp := ConfigPath()

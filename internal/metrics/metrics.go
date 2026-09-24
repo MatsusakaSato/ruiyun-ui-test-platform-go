@@ -8,6 +8,7 @@ import (
 	"ruiyun-ui-test-platform-go/internal/assertor"
 	"ruiyun-ui-test-platform-go/internal/models"
 	"ruiyun-ui-test-platform-go/internal/pyre"
+	"ruiyun-ui-test-platform-go/internal/repro"
 	"ruiyun-ui-test-platform-go/internal/trajectory"
 )
 
@@ -26,27 +27,40 @@ func pct(a, b int) float64 {
 	return trajectory.PyRound(float64(a)*100.0/float64(b), 1)
 }
 
-func ReproBlock(recipes []*models.Recipe) ([]map[string]any, map[string]any) {
-	var rows []map[string]any
+// ReproBlock 复刻 Python `core/metrics.py:repro_block(recipes)`。
+//
+// 输入是流水线产出的 ReproRecipe（**不是**旧的 models.Recipe）——
+// Python 侧读的是 rd["key"] / rd.get("rule_name") / rd.get("run_sessions")，
+// 用错类型会让报告里的「复现方法」整列错位。
+func ReproBlock(recipes []*repro.ReproRecipe) ([]map[string]any, map[string]any) {
+	rows := []map[string]any{}
 	for _, r := range recipes {
-		if r.TotalRuns == 0 {
+		if r == nil || r.Attempts == 0 {
 			continue
 		}
-		var sessions []string
-		for _, run := range r.Runs {
+		sessions := []string{}
+		for _, run := range r.RunSessions {
 			if run.SessionID != "" {
 				sessions = append(sessions, run.SessionID)
 			}
 		}
+		severity := r.Severity
+		if severity == "" {
+			severity = "P1"
+		}
+		var rate any = 0.0
+		if r.Rate != nil {
+			rate = *r.Rate
+		}
 		rows = append(rows, map[string]any{
-			"key":       fmt.Sprintf("%s:%s", r.Rule, r.Tool),
-			"severity":  r.Severity,
-			"name":      r.Detail,
+			"key":       r.Key,
+			"severity":  severity,
+			"name":      r.RuleName,
 			"tool":      r.Tool,
-			"attempts":  r.TotalRuns,
-			"hits":      r.FailedRuns,
-			"rate":      r.Rate,
-			"stability": r.Status,
+			"attempts":  r.Attempts,
+			"hits":      r.Hits,
+			"rate":      rate,
+			"stability": r.Stability,
 			"sessions":  sessions,
 		})
 	}
@@ -85,8 +99,36 @@ func ReproBlock(recipes []*models.Recipe) ([]map[string]any, map[string]any) {
 	return rows, summary
 }
 
+// ReproSubBlock 复刻 Python `findings_rows[].repro` 子块
+func ReproSubBlock(r *repro.ReproRecipe) map[string]any {
+	runSessions := []map[string]any{}
+	for _, s := range r.RunSessions {
+		item := map[string]any{"session_id": s.SessionID, "hit": s.Hit}
+		if s.Note != "" {
+			item["note"] = s.Note
+		}
+		runSessions = append(runSessions, item)
+	}
+	var rate any
+	if r.Rate != nil {
+		rate = *r.Rate
+	}
+	return map[string]any{
+		"prompt":        r.Prompt,
+		"prompt_source": r.PromptSource,
+		"verify_desc":   r.VerifyDesc,
+		"expected":      r.Expected,
+		"actual":        r.Actual,
+		"attempts":      r.Attempts,
+		"hits":          r.Hits,
+		"rate":          rate,
+		"stability":     r.Stability,
+		"run_sessions":  runSessions,
+	}
+}
+
 // BuildMetrics 生成测试报告与轮次归档所需的全部指标
-func BuildMetrics(caseResults []*models.CaseResult, cfg map[string]any, recipes []*models.Recipe, stageTimes map[string]float64) map[string]any {
+func BuildMetrics(caseResults []*models.CaseResult, cfg map[string]any, recipes []*repro.ReproRecipe, stageTimes map[string]float64) map[string]any {
 	var findings []*models.Finding
 	var uiFailed []*models.CaseResult
 	var passed []*models.CaseResult
@@ -415,6 +457,13 @@ func BuildMetrics(caseResults []*models.CaseResult, cfg map[string]any, recipes 
 
 	// 问题发现行列表
 	findingsRows := []map[string]any{}
+	// 复现配方索引：Python 的 key 恒为 f"{rule}:{tool or '-'}"
+	recipeByKey := map[string]*repro.ReproRecipe{}
+	for _, r := range recipes {
+		if r != nil {
+			recipeByKey[r.Key] = r
+		}
+	}
 	// 必须稳定排序：Python 的 sorted(...) 稳定，(severity, rule) 相同时保持原序。
 	// 用 sort.Slice 会让同严重度同规则的发现行随机换位。
 	sort.SliceStable(findings, func(i, j int) bool {
@@ -438,7 +487,7 @@ func BuildMetrics(caseResults []*models.CaseResult, cfg map[string]any, recipes 
 				break
 			}
 		}
-		findingsRows = append(findingsRows, map[string]any{
+		row := map[string]any{
 			"rule":       f.Rule,
 			"name":       ruleName,
 			"severity":   f.Severity,
@@ -449,7 +498,16 @@ func BuildMetrics(caseResults []*models.CaseResult, cfg map[string]any, recipes 
 			"evidence":   f.Evidence,
 			"step_index": f.StepIndex,
 			"case_id":    cID,
-		})
+		}
+		// Python: rep = recipe_by_key.get(f"{f.rule}:{f.tool or '-'}")
+		toolKey := f.Tool
+		if toolKey == "" {
+			toolKey = "-"
+		}
+		if rep, ok := recipeByKey[f.Rule+":"+toolKey]; ok {
+			row["repro"] = ReproSubBlock(rep)
+		}
+		findingsRows = append(findingsRows, row)
 	}
 
 	reproRows, reproSummary := ReproBlock(recipes)

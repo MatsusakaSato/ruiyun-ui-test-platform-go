@@ -148,12 +148,14 @@ func rowToCase(id, name, prompt, scene, targetsStr string, attachment int, expec
 		labels["attachment"] = true
 	}
 
+	// 字段集合必须与 Python `core/testcase_db.py` 完全一致：
+	// id / name / prompt / expect_tools / labels / attachments（+ 有附件时 attachment）。
+	// 旧实现多输出了顶层 scene / targets —— 前端只读 labels.scene / labels.targets，
+	// 属契约偏离（HTTP 差分实测确认），已删除。
 	res := map[string]any{
 		"id":           id,
 		"name":         name,
 		"prompt":       prompt,
-		"scene":        scene,
-		"targets":      targets,
 		"expect_tools": expectTools,
 		"labels":       labels,
 		"attachments":  attachments,
@@ -224,7 +226,7 @@ func QueryPresetCases(keyword, scene string, targets []string, attachment string
 
 	// 1. 全局筛选属性
 	scRows, err := db.Query("SELECT DISTINCT scene FROM testcases WHERE scene != '' ORDER BY scene")
-	var scenes []string
+	scenes := []string{} // Python 列表推导天然给 []；Go 的 nil 切片会序列化成 null
 	if err == nil {
 		for scRows.Next() {
 			var sc string
@@ -234,7 +236,7 @@ func QueryPresetCases(keyword, scene string, targets []string, attachment string
 		scRows.Close()
 	}
 
-	var allTargets []string
+	allTargets := []string{} // 同上：空集合必须是 []，不能是 null
 	tgRows, err := db.Query("SELECT DISTINCT value FROM testcases, json_each(testcases.targets) WHERE value != '' ORDER BY value")
 	if err == nil {
 		for tgRows.Next() {
@@ -349,7 +351,7 @@ func QueryPresetCases(keyword, scene string, targets []string, attachment string
 	}
 	defer rows.Close()
 
-	var cases []map[string]any
+	cases := []map[string]any{} // 空结果必须是 []，Python 的列表推导不会给 null
 	for rows.Next() {
 		var id, name, prompt, scene, targetsStr, expectToolsStr, attachmentsStr string
 		var attachment int
@@ -386,7 +388,7 @@ func AddPresetCase(item map[string]any, customPath string) (bool, string, map[st
 
 	prompt := strings.TrimSpace(fmt.Sprintf("%v", item["prompt"]))
 	if prompt == "" || prompt == "<nil>" {
-		return false, "用例 prompt 不能为空", nil
+		return false, "提问为必填", nil
 	}
 
 	tx, err := db.Begin()
@@ -489,7 +491,7 @@ func AddPresetCase(item map[string]any, customPath string) (bool, string, map[st
 // AddPresetCases 批量新增或覆盖预设用例
 func AddPresetCases(items []map[string]any, replace bool, customPath string) (bool, string, int) {
 	if len(items) == 0 {
-		return false, "导入用例列表为空", 0
+		return false, "没有可导入的用例（提问列全为空？）", 0
 	}
 
 	_, err := InitDB(customPath)

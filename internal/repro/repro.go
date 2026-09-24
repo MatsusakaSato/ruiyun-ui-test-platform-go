@@ -51,6 +51,58 @@ type SessionHit struct {
 	Note      string `json:"note,omitempty"`
 }
 
+// ToDict 复刻 Python `dataclasses.asdict(self)`。
+//
+// 键集合与顺序必须与 Python `core/repro.py:ReproRecipe` 的字段声明序一致 ——
+// 这份 dict 会落盘成 artifacts/repro_results.json 并喂给报告渲染器，
+// 也是 run_repro.py `--render-only` 回读的格式。
+func (r *ReproRecipe) ToDict() map[string]any {
+	runSessions := make([]map[string]any, 0, len(r.RunSessions))
+	for _, s := range r.RunSessions {
+		item := map[string]any{"session_id": s.SessionID, "hit": s.Hit}
+		if s.Note != "" {
+			item["note"] = s.Note
+		}
+		runSessions = append(runSessions, item)
+	}
+	triggerArgs := r.TriggerArgs
+	if triggerArgs == nil {
+		triggerArgs = map[string]any{}
+	}
+	steps := r.Steps
+	if steps == nil {
+		steps = []string{}
+	}
+	var rate any
+	if r.Rate != nil {
+		rate = *r.Rate
+	}
+	return map[string]any{
+		"key":            r.Key,
+		"rule":           r.Rule,
+		"rule_name":      r.RuleName,
+		"severity":       r.Severity,
+		"tool":           r.Tool,
+		"prompt":         r.Prompt,
+		"prompt_source":  r.PromptSource,
+		"source_session": r.SourceSession,
+		"trigger_args":   triggerArgs,
+		"evidence":       r.Evidence,
+		"verify_rule":    r.VerifyRule,
+		"verify_desc":    r.VerifyDesc,
+		"expected":       r.Expected,
+		"actual":         r.Actual,
+		"steps":          steps,
+		"attempts":       r.Attempts,
+		"hits":           r.Hits,
+		"rate":           rate,
+		"stability":      r.Stability,
+		"run_sessions":   runSessions,
+		"occurrences":    r.Occurrences,
+		"error":          r.Error,
+	}
+}
+
 // ToolPrompts 工具 -> 最易触发它的提示词（原始会话提问缺失时的兜底）
 var ToolPrompts = map[string]string{
 	"read_memory":                 "请读取你的记忆文件，然后告诉我里面当前有多少条记录。",

@@ -581,26 +581,9 @@ func RunPipeline(opts PipelineOptions) (int, error) {
 		"total":           float64(int(totalElapsed*10)) / 10.0,
 	}
 
-	var modelRecipes []*models.Recipe
-	for _, r := range recipes {
-		rateVal := 0.0
-		if r.Rate != nil {
-			rateVal = *r.Rate
-		}
-		modelRecipes = append(modelRecipes, &models.Recipe{
-			CaseID:     r.Key,
-			Rule:       r.Rule,
-			Severity:   r.Severity,
-			Detail:     r.Expected,
-			Tool:       r.Tool,
-			TotalRuns:  r.Attempts,
-			FailedRuns: r.Hits,
-			Rate:       rateVal,
-			Status:     r.Stability,
-		})
-	}
-
-	builtMetrics := metrics.BuildMetrics(results, cfg, modelRecipes, stageTimes)
+	// 直接把 ReproRecipe 交给指标层：Python 的 build_metrics(recipes=...) 收到的
+	// 就是 ReproRecipe 对象（findings_rows[].repro 与 repro_block 都按它的字段取值）。
+	builtMetrics := metrics.BuildMetrics(results, cfg, recipes, stageTimes)
 
 	reportName := opts.ReportName
 	if reportName == "" {
@@ -629,28 +612,25 @@ func RunPipeline(opts PipelineOptions) (int, error) {
 	bCases, _ := json.MarshalIndent(caseResultsDicts, "", "  ")
 	_ = os.WriteFile(filepath.Join(artDir, "case_results.json"), bCases, 0644)
 
+	// Python: 只有存在复现配方时才落盘 artifacts/repro_results.json
+	if len(recipes) > 0 {
+		var dicts []map[string]any
+		for _, r := range recipes {
+			dicts = append(dicts, r.ToDict())
+		}
+		bRepro, _ := json.MarshalIndent(dicts, "", "  ")
+		_ = os.WriteFile(filepath.Join(artDir, "repro_results.json"), bRepro, 0644)
+	}
+
 	// 轮次归档
 	if opts.RunID != "" {
 		roundDir := filepath.Join(config.RoundsDir(), opts.RunID)
 		_ = os.MkdirAll(roundDir, 0755)
 
-		var reproRows []map[string]any
+		// Python: build_round_detail(..., [r.to_dict() for r in recipes], ...)
+		reproRows := []map[string]any{}
 		for _, r := range recipes {
-			rateVal := 0.0
-			if r.Rate != nil {
-				rateVal = *r.Rate
-			}
-			reproRows = append(reproRows, map[string]any{
-				"key":       r.Key,
-				"rule":      r.Rule,
-				"severity":  r.Severity,
-				"tool":      r.Tool,
-				"prompt":    r.Prompt,
-				"attempts":  r.Attempts,
-				"hits":      r.Hits,
-				"rate":      rateVal,
-				"stability": r.Stability,
-			})
+			reproRows = append(reproRows, r.ToDict())
 		}
 
 		detail := trajectory.BuildRoundDetail(results, builtMetrics, reproRows, stageTimes, cfg)
