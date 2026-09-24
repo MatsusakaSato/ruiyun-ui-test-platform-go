@@ -7,6 +7,7 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
+	"sort"
 	"strconv"
 	"strings"
 	"sync"
@@ -370,7 +371,136 @@ func QueryPresetCases(keyword, scene string, targets []string, attachment string
 	}, nil
 }
 
-// AddPresetCase 单条新增预设用例
+// CaseDedupeKey 计算用例去重唯一键：prompt + scene + sorted(targets) + attachment
+func CaseDedupeKey(prompt, scene string, targets []string, hasAttachment bool) string {
+	normPrompt := strings.TrimSpace(prompt)
+	normScene := strings.TrimSpace(scene)
+
+	seen := make(map[string]bool)
+	var cleanTargets []string
+	for _, t := range targets {
+		ct := strings.TrimSpace(t)
+		if ct != "" && !seen[ct] {
+			seen[ct] = true
+			cleanTargets = append(cleanTargets, ct)
+		}
+	}
+	sort.Strings(cleanTargets)
+	tgStr := strings.Join(cleanTargets, ",")
+
+	attStr := "0"
+	if hasAttachment {
+		attStr = "1"
+	}
+	return fmt.Sprintf("%s||%s||%s||%s", normPrompt, normScene, tgStr, attStr)
+}
+
+func extractCaseFields(item map[string]any) (prompt, scene, name, caseID string, targets []string, hasAttachment int, expectTools, attachments []string) {
+	prompt = strings.TrimSpace(fmt.Sprintf("%v", item["prompt"]))
+	if prompt == "<nil>" {
+		prompt = ""
+	}
+
+	name = strings.TrimSpace(fmt.Sprintf("%v", item["name"]))
+	if name == "<nil>" {
+		name = ""
+	}
+
+	caseID = strings.TrimSpace(fmt.Sprintf("%v", item["id"]))
+	if caseID == "<nil>" {
+		caseID = ""
+	}
+
+	// 优先从 labels 提取
+	rawLabels, _ := item["labels"].(map[string]any)
+	if rawLabels != nil {
+		if s, ok := rawLabels["scene"]; ok && s != nil {
+			scene = strings.TrimSpace(fmt.Sprintf("%v", s))
+			if scene == "<nil>" {
+				scene = ""
+			}
+		}
+		if tg, ok := rawLabels["targets"].([]any); ok {
+			for _, t := range tg {
+				st := strings.TrimSpace(fmt.Sprintf("%v", t))
+				if st != "" && st != "<nil>" {
+					targets = append(targets, st)
+				}
+			}
+		} else if tg, ok := rawLabels["targets"].([]string); ok {
+			for _, st := range tg {
+				st = strings.TrimSpace(st)
+				if st != "" {
+					targets = append(targets, st)
+				}
+			}
+		}
+		if att, ok := rawLabels["attachment"].(bool); ok && att {
+			hasAttachment = 1
+		}
+	}
+
+	// 顶层覆盖/兜底
+	if scene == "" {
+		if s, ok := item["scene"]; ok && s != nil {
+			scene = strings.TrimSpace(fmt.Sprintf("%v", s))
+			if scene == "<nil>" {
+				scene = ""
+			}
+		}
+	}
+	if len(targets) == 0 {
+		if tg, ok := item["targets"].([]any); ok {
+			for _, t := range tg {
+				st := strings.TrimSpace(fmt.Sprintf("%v", t))
+				if st != "" && st != "<nil>" {
+					targets = append(targets, st)
+				}
+			}
+		} else if tg, ok := item["targets"].([]string); ok {
+			for _, st := range tg {
+				st = strings.TrimSpace(st)
+				if st != "" {
+					targets = append(targets, st)
+				}
+			}
+		}
+	}
+	if hasAttachment == 0 {
+		if item["attachment"] == true {
+			hasAttachment = 1
+		}
+	}
+
+	if att, ok := item["attachments"].([]any); ok {
+		for _, a := range att {
+			s := strings.TrimSpace(fmt.Sprintf("%v", a))
+			if s != "" && s != "<nil>" {
+				attachments = append(attachments, s)
+			}
+		}
+	} else if att, ok := item["attachments"].([]string); ok {
+		attachments = att
+	}
+	if len(attachments) > 0 {
+		hasAttachment = 1
+	}
+
+	if exp, ok := item["expect_tools"].([]any); ok {
+		for _, e := range exp {
+			s := strings.TrimSpace(fmt.Sprintf("%v", e))
+			if s != "" && s != "<nil>" {
+				expectTools = append(expectTools, s)
+			}
+		}
+	} else if exp, ok := item["expect_tools"].([]string); ok {
+		expectTools = exp
+	}
+
+	return
+}
+
+// AddPresetCase 单条新增预设用例（支持提问与标签完全一致自动去重）
 func AddPresetCase(item map[string]any, customPath string) (bool, string, map[string]any) {
 	_, err := InitDB(customPath)
 	if err != nil {
@@ -386,8 +516,8 @@ func AddPresetCase(item map[string]any, customPath string) (bool, string, map[st
 	}
 	defer db.Close()
 
-	prompt := strings.TrimSpace(fmt.Sprintf("%v", item["prompt"]))
-	if prompt == "" || prompt == "<nil>" {
+	prompt, scene, name, caseID, targets, hasAttachment, expectTools, attachments := extractCaseFields(item)
+	if prompt == "" {
 		return false, "提问为必填", nil
 	}
 
@@ -397,70 +527,58 @@ func AddPresetCase(item map[string]any, customPath string) (bool, string, map[st
 	}
 	defer tx.Rollback()
 
+	// 查重：提问和标签（scene, targets, attachment）完全一致的用例视为重复
+	currDedupeKey := CaseDedupeKey(prompt, scene, targets, hasAttachment == 1)
+	existingRows, err := tx.Query("SELECT id, prompt, scene, targets, attachment FROM testcases WHERE trim(prompt) = ?", prompt)
+	if err == nil {
+		defer existingRows.Close()
+		for existingRows.Next() {
+			var eid, eprompt, escene, etargetsStr string
+			var eattachment int
+			if err := existingRows.Scan(&eid, &eprompt, &escene, &etargetsStr, &eattachment); err == nil {
+				var etargets []string
+				if etargetsStr != "" {
+					_ = json.Unmarshal([]byte(etargetsStr), &etargets)
+				}
+				if CaseDedupeKey(eprompt, escene, etargets, eattachment == 1) == currDedupeKey {
+					return false, fmt.Sprintf("用例已存在（编号：%s），提问与标签完全一致，已自动去重", eid), nil
+				}
+			}
+		}
+	}
+
 	var maxSeq int
 	_ = tx.QueryRow("SELECT COALESCE(MAX(seq), 0) FROM testcases").Scan(&maxSeq)
+
+	// 同时扫描所有已有的 CASE-NNN 编号，确保序号永不冲突
+	idRows, err := tx.Query("SELECT id FROM testcases WHERE id LIKE 'CASE-%'")
+	if err == nil {
+		defer idRows.Close()
+		for idRows.Next() {
+			var cid string
+			if err := idRows.Scan(&cid); err == nil {
+				if s := CaseSeq(cid); s > maxSeq {
+					maxSeq = s
+				}
+			}
+		}
+	}
 	nextSeq := maxSeq + 1
 
-	caseID := strings.TrimSpace(fmt.Sprintf("%v", item["id"]))
-	if caseID == "" || caseID == "<nil>" {
+	if caseID == "" {
 		caseID = fmt.Sprintf("CASE-%03d", nextSeq)
 	}
 
-	scene := strings.TrimSpace(fmt.Sprintf("%v", item["scene"]))
-	if scene == "<nil>" {
-		scene = ""
-	}
-	name := strings.TrimSpace(fmt.Sprintf("%v", item["name"]))
-	if name == "" || name == "<nil>" {
+	if name == "" {
 		if scene != "" {
 			name = fmt.Sprintf("%s-%03d", scene, nextSeq)
 		} else {
-			name = fmt.Sprintf("用例-%03d", nextSeq)
+			name = fmt.Sprintf("自定义-%03d", nextSeq)
 		}
 	}
 
-	var targets []string
-	if tg, ok := item["targets"].([]any); ok {
-		for _, t := range tg {
-			s := strings.TrimSpace(fmt.Sprintf("%v", t))
-			if s != "" {
-				targets = append(targets, s)
-			}
-		}
-	} else if tg, ok := item["targets"].([]string); ok {
-		targets = tg
-	}
 	tgJSON, _ := json.Marshal(targets)
-
-	var attachments []string
-	if att, ok := item["attachments"].([]any); ok {
-		for _, a := range att {
-			s := strings.TrimSpace(fmt.Sprintf("%v", a))
-			if s != "" {
-				attachments = append(attachments, s)
-			}
-		}
-	} else if att, ok := item["attachments"].([]string); ok {
-		attachments = att
-	}
 	attJSON, _ := json.Marshal(attachments)
-
-	hasAttachment := 0
-	if len(attachments) > 0 || item["attachment"] == true {
-		hasAttachment = 1
-	}
-
-	var expectTools []string
-	if exp, ok := item["expect_tools"].([]any); ok {
-		for _, e := range exp {
-			s := strings.TrimSpace(fmt.Sprintf("%v", e))
-			if s != "" {
-				expectTools = append(expectTools, s)
-			}
-		}
-	} else if exp, ok := item["expect_tools"].([]string); ok {
-		expectTools = exp
-	}
 	expJSON, _ := json.Marshal(expectTools)
 
 	insertSQL := `
@@ -474,6 +592,7 @@ func AddPresetCase(item map[string]any, customPath string) (bool, string, map[st
 		attachment=excluded.attachment,
 		expect_tools=excluded.expect_tools,
 		attachments=excluded.attachments,
+		seq=excluded.seq,
 		updated_at=datetime('now', 'localtime')
 	`
 	if _, err := tx.Exec(insertSQL, caseID, name, prompt, scene, string(tgJSON), hasAttachment, string(expJSON), string(attJSON), nextSeq); err != nil {
@@ -488,7 +607,7 @@ func AddPresetCase(item map[string]any, customPath string) (bool, string, map[st
 	return true, fmt.Sprintf("已成功添加用例 %s", caseID), resCase
 }
 
-// AddPresetCases 批量新增或覆盖预设用例
+// AddPresetCases 批量新增或覆盖预设用例（支持自动去重已存在或批次内重复的用例）
 func AddPresetCases(items []map[string]any, replace bool, customPath string) (bool, string, int) {
 	if len(items) == 0 {
 		return false, "没有可导入的用例（提问列全为空？）", 0
@@ -519,8 +638,40 @@ func AddPresetCases(items []map[string]any, replace bool, customPath string) (bo
 		}
 	}
 
+	// 加载已有用例用于去重
+	existingMap := make(map[string]string)
+	if !replace {
+		rows, err := tx.Query("SELECT id, prompt, scene, targets, attachment FROM testcases")
+		if err == nil {
+			for rows.Next() {
+				var eid, eprompt, escene, etgStr string
+				var eatt int
+				if err := rows.Scan(&eid, &eprompt, &escene, &etgStr, &eatt); err == nil {
+					var etg []string
+					if etgStr != "" {
+						_ = json.Unmarshal([]byte(etgStr), &etg)
+					}
+					existingMap[CaseDedupeKey(eprompt, escene, etg, eatt == 1)] = eid
+				}
+			}
+			rows.Close()
+		}
+	}
+
 	var maxSeq int
 	_ = tx.QueryRow("SELECT COALESCE(MAX(seq), 0) FROM testcases").Scan(&maxSeq)
+	idRows, err := tx.Query("SELECT id FROM testcases WHERE id LIKE 'CASE-%'")
+	if err == nil {
+		for idRows.Next() {
+			var cid string
+			if err := idRows.Scan(&cid); err == nil {
+				if s := CaseSeq(cid); s > maxSeq {
+					maxSeq = s
+				}
+			}
+		}
+		idRows.Close()
+	}
 
 	stmt, err := tx.Prepare(`
 	INSERT INTO testcases (id, name, prompt, scene, targets, attachment, expect_tools, attachments, seq, created_at, updated_at)
@@ -533,6 +684,7 @@ func AddPresetCases(items []map[string]any, replace bool, customPath string) (bo
 		attachment=excluded.attachment,
 		expect_tools=excluded.expect_tools,
 		attachments=excluded.attachments,
+		seq=excluded.seq,
 		updated_at=datetime('now', 'localtime')
 	`)
 	if err != nil {
@@ -540,74 +692,38 @@ func AddPresetCases(items []map[string]any, replace bool, customPath string) (bo
 	}
 	defer stmt.Close()
 
+	seenInBatch := make(map[string]bool)
 	added := 0
+	skippedDup := 0
+
 	for _, it := range items {
-		prompt := strings.TrimSpace(fmt.Sprintf("%v", it["prompt"]))
-		if prompt == "" || prompt == "<nil>" {
+		prompt, scene, name, caseID, targets, hasAttachment, expectTools, attachments := extractCaseFields(it)
+		if prompt == "" {
 			continue
 		}
-		maxSeq++
 
-		caseID := strings.TrimSpace(fmt.Sprintf("%v", it["id"]))
-		if caseID == "" || caseID == "<nil>" {
+		dedupeKey := CaseDedupeKey(prompt, scene, targets, hasAttachment == 1)
+		if (len(existingMap) > 0 && existingMap[dedupeKey] != "") || seenInBatch[dedupeKey] {
+			skippedDup++
+			continue
+		}
+		seenInBatch[dedupeKey] = true
+
+		maxSeq++
+		if caseID == "" || !replace {
 			caseID = fmt.Sprintf("CASE-%03d", maxSeq)
 		}
 
-		scene := strings.TrimSpace(fmt.Sprintf("%v", it["scene"]))
-		if scene == "<nil>" {
-			scene = ""
-		}
-		name := strings.TrimSpace(fmt.Sprintf("%v", it["name"]))
-		if name == "" || name == "<nil>" {
+		if name == "" {
 			if scene != "" {
 				name = fmt.Sprintf("%s-%03d", scene, maxSeq)
 			} else {
-				name = fmt.Sprintf("用例-%03d", maxSeq)
+				name = fmt.Sprintf("导入-%03d", maxSeq)
 			}
 		}
 
-		var targets []string
-		if tg, ok := it["targets"].([]any); ok {
-			for _, t := range tg {
-				s := strings.TrimSpace(fmt.Sprintf("%v", t))
-				if s != "" {
-					targets = append(targets, s)
-				}
-			}
-		} else if tg, ok := it["targets"].([]string); ok {
-			targets = tg
-		}
 		tgJSON, _ := json.Marshal(targets)
-
-		var attachments []string
-		if att, ok := it["attachments"].([]any); ok {
-			for _, a := range att {
-				s := strings.TrimSpace(fmt.Sprintf("%v", a))
-				if s != "" {
-					attachments = append(attachments, s)
-				}
-			}
-		} else if att, ok := it["attachments"].([]string); ok {
-			attachments = att
-		}
 		attJSON, _ := json.Marshal(attachments)
-
-		hasAttachment := 0
-		if len(attachments) > 0 || it["attachment"] == true {
-			hasAttachment = 1
-		}
-
-		var expectTools []string
-		if exp, ok := it["expect_tools"].([]any); ok {
-			for _, e := range exp {
-				s := strings.TrimSpace(fmt.Sprintf("%v", e))
-				if s != "" {
-					expectTools = append(expectTools, s)
-				}
-			}
-		} else if exp, ok := it["expect_tools"].([]string); ok {
-			expectTools = exp
-		}
 		expJSON, _ := json.Marshal(expectTools)
 
 		if _, err := stmt.Exec(caseID, name, prompt, scene, string(tgJSON), hasAttachment, string(expJSON), string(attJSON), maxSeq); err != nil {
@@ -626,7 +742,14 @@ func AddPresetCases(items []map[string]any, replace bool, customPath string) (bo
 	if replace {
 		modeText = "覆盖"
 	}
-	return true, fmt.Sprintf("已%s导入 %d 条（预设共 %d 条）", modeText, added, total), added
+
+	var msg string
+	if skippedDup > 0 {
+		msg = fmt.Sprintf("已%s导入 %d 条，自动去重跳过 %d 条（预设共 %d 条）", modeText, added, skippedDup, total)
+	} else {
+		msg = fmt.Sprintf("已%s导入 %d 条（预设共 %d 条）", modeText, added, total)
+	}
+	return true, msg, added
 }
 
 // DeletePresetCases 批量删除预设用例

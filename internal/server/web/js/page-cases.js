@@ -185,6 +185,13 @@ export async function savePreset(i) {
       btn.classList.add('saved');
       setTimeout(() => { btn.textContent = '☆ 存为预设'; btn.classList.remove('saved'); }, 2200);
     }
+    state.LIB.keyword = '';
+    state.LIB.scene = '';
+    state.LIB.targets = [];
+    state.LIB.attachment = '';
+    state.LIB.offset = 0;
+    const kwEl = $('libKw');
+    if (kwEl) kwEl.value = '';
     await loadPresetLib();
   } catch (e) {
     alert('请求失败：' + e.message);
@@ -210,7 +217,8 @@ export function renderCases() {
       <div class="no">${String(i + 1).padStart(2, '0')}</div>
       <div class="fields">
         <input class="prompt" placeholder="输入提示词，例如：请读取你的记忆文件并告诉我记录条数"
-               value="${esc(c.prompt)}" oninput="CASES[${i}].prompt=this.value; syncCaseState()"/>
+               value="${esc(c.prompt)}" oninput="CASES[${i}].prompt=this.value; syncCaseState()"
+               onchange="CASES[${i}].prompt=this.value; syncCaseState()"/>
         <div class="cl-acts">
           <button class="cl-att" onclick="pickAttach(${i})" title="上传附件：运行时会被投递给被测应用">📎 附件</button>
           <button class="cl-att" onclick="openLib(${i})" title="打开附件库，点击即加入本用例">库${state.UPLOADS.length ? '(' + state.UPLOADS.length + ')' : ''}</button>
@@ -514,8 +522,10 @@ export function initCases() {
     btnLibAdd.onclick = () => {
       const b = $('paddBody');
       if (b) {
-        b.classList.add('show');
-        $('paddPrompt')?.focus();
+        b.classList.toggle('show');
+        if (b.classList.contains('show')) {
+          $('paddPrompt')?.focus();
+        }
       }
     };
   }
@@ -574,13 +584,34 @@ export function initCases() {
         if ($('paddPrompt')) $('paddPrompt').value = '';
         if ($('paddScene')) $('paddScene').value = '';
         $('paddTargets')?.querySelectorAll('input').forEach(i => { i.checked = false; });
-        if (msg) { msg.textContent = '✓ ' + (j.message || '已保存'); msg.style.color = ''; }
+        if (msg) { msg.textContent = '✓ ' + (j.message || '已成功添加'); msg.style.color = '#059669'; }
+
+        // 重置筛选条件与搜索关键字，确保新增用例直接在第一行立即可见，不被既有过滤条件过滤隐藏
+        state.LIB.keyword = '';
+        state.LIB.scene = '';
+        state.LIB.targets = [];
+        state.LIB.attachment = '';
         state.LIB.offset = 0;
+        const kwEl = $('libKw');
+        if (kwEl) kwEl.value = '';
+
         await loadPresetLib();
+
+        // 闪烁高亮新添加的用例行
+        const addedId = j.case && j.case.id;
+        if (addedId) {
+          const row = document.querySelector(`tr[data-id="${addedId}"]`);
+          if (row) {
+            row.classList.add('just-added');
+            row.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+            setTimeout(() => row.classList.remove('just-added'), 3000);
+          }
+        }
       } catch (e) {
         if (msg) { msg.textContent = '请求失败：' + e.message; msg.style.color = '#b91c1c'; }
+      } finally {
+        paddOk.disabled = false;
       }
-      paddOk.disabled = false;
     };
   }
 

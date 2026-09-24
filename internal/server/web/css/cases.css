@@ -96,3 +96,9 @@
 .cl-att:disabled{opacity:.45;cursor:not-allowed}
 .cl-att:disabled:hover{border-color:var(--line);color:var(--tx2)}
 .cl-save.saved{border-color:#bbf7d0;background:#f0fdf4;color:var(--ok)}
+
+tr.just-added {
+  background-color: rgba(16, 185, 129, 0.18) !important;
+  transition: background-color 2.5s ease;
+}
+
