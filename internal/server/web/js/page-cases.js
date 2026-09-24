@@ -280,11 +280,11 @@ export function renderLibTable() {
   const tbl = $('libTable');
   if (tbl) {
     tbl.innerHTML = '<table><thead><tr>'
-      + '<th style="width:38px"><input type="checkbox" id="libAllBox" tabindex="-1"/></th>'
+      + '<th class="th-chk" style="width:38px" title="全选 / 取消全选"><input type="checkbox" id="libAllBox" tabindex="-1"/></th>'
       + '<th style="width:104px">编号</th><th>提问</th><th style="width:210px">标签</th>'
       + '<th style="width:64px"></th></tr></thead><tbody>'
       + (rows.length ? rows.map(c => `<tr data-id="${esc(c.id || '')}">
-          <td><input type="checkbox" ${state.PSEL.has(c.id) ? 'checked' : ''} tabindex="-1"/></td>
+          <td class="td-chk"><input type="checkbox" ${state.PSEL.has(c.id) ? 'checked' : ''} tabindex="-1"/></td>
           <td class="mono">${esc(c.id || '')}</td>
           <td class="lp" title="${esc(c.prompt || '')}">${esc(c.prompt || '')}</td>
           <td>${libSelTags(c)}</td>
@@ -308,15 +308,25 @@ export function renderLibTable() {
 }
 
 export function syncLibSel() {
+  const countEl = $('libSelCount');
+  if (countEl) countEl.innerHTML = `已选 <b>${state.PSEL.size}</b> 条`;
   const selEl = $('libSel');
-  if (selEl && selEl.firstChild) selEl.firstChild.textContent = `已选 ${state.PSEL.size} 条`;
+  if (selEl && !countEl && selEl.firstChild) selEl.firstChild.textContent = `已选 ${state.PSEL.size} 条`;
+
   const toQueue = $('libToQueue');
   if (toQueue) toQueue.disabled = state.PSEL.size === 0;
   const del = $('libDel');
   if (del) del.disabled = state.PSEL.size === 0;
+  const btnNone = $('libNone');
+  if (btnNone) btnNone.disabled = state.PSEL.size === 0;
 
   const box = $('libAllBox');
-  if (box) box.checked = !!state.LIB_ROWS.length && state.LIB_ROWS.every(c => state.PSEL.has(c.id));
+  if (box) {
+    const total = state.LIB_ROWS.length;
+    const selected = total ? state.LIB_ROWS.filter(c => state.PSEL.has(c.id)).length : 0;
+    box.checked = total > 0 && selected === total;
+    box.indeterminate = selected > 0 && selected < total;
+  }
 }
 
 export async function loadPresetLib() {
@@ -468,6 +478,19 @@ export function initCases() {
   const libTable = $('libTable');
   if (libTable) {
     libTable.onclick = e => {
+      // 1. 点击表头的复选框或表头单元格，切换全选/取消全选
+      if (e.target.id === 'libAllBox' || e.target.closest('.th-chk')) {
+        if (!state.LIB_ROWS.length) return;
+        const allSelected = state.LIB_ROWS.every(c => state.PSEL.has(c.id));
+        if (allSelected) {
+          state.LIB_ROWS.forEach(c => state.PSEL.delete(c.id));
+        } else {
+          state.LIB_ROWS.forEach(c => state.PSEL.add(c.id));
+        }
+        renderLibTable();
+        return;
+      }
+
       const del = e.target.closest('.lib-del');
       if (del) { delPresetOne(del.dataset.id); return; }
       const row = e.target.closest('tr[data-id]');

@@ -178,10 +178,13 @@
       <div class="lib-table" id="libTable"></div>
 
       <div class="lib-ft">
-        <span class="mcount" id="libSel">
-          <button class="home-link" id="libAll">全选本页</button>
-          <button class="home-link" id="libNone">取消选择</button>
-        </span>
+        <div class="lib-sel-wrap" id="libSel">
+          <span class="lib-sel-count" id="libSelCount">已选 <b>0</b> 条</span>
+          <div class="lib-sel-btns">
+            <button type="button" class="btn-sel" id="libAll" title="选择当前页全部用例">全选本页</button>
+            <button type="button" class="btn-sel" id="libNone" title="清空所选用例">取消选择</button>
+          </div>
+        </div>
         <span class="spacer"></span>
         <span class="lib-page" id="libPage"></span>
         <button class="btn-ghost" id="libPrev">上一页</button>

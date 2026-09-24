@@ -18,9 +18,28 @@
 .lib-table table{width:100%;min-width:760px}
 .lib-table th{position:sticky;top:0;z-index:1}
 .lib-table td{padding:7px 10px}
+.lib-table th.th-chk{cursor:pointer;user-select:none;text-align:center}
+.lib-table th.th-chk input{cursor:pointer}
+.lib-table td.td-chk{text-align:center}
+.lib-table td input[type="checkbox"]{cursor:pointer}
+.lib-table input[type="checkbox"]{accent-color:var(--accent)}
 .lib-table .lp{max-width:520px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;
   color:var(--tx2)}
-.lib-ft{display:flex;align-items:center;gap:8px;margin-top:11px;flex-wrap:wrap}
+
+.lib-ft{display:flex;align-items:center;gap:10px;margin-top:12px;flex-wrap:wrap}
+.lib-sel-wrap{display:inline-flex;align-items:center;gap:10px}
+.lib-sel-count{font-size:12px;color:var(--tx2);font-weight:500;user-select:none}
+.lib-sel-count b{color:var(--accent);font-weight:700;margin:0 1px}
+.lib-sel-btns{display:inline-flex;align-items:center;gap:6px}
+.btn-sel{
+  display:inline-flex;align-items:center;justify-content:center;
+  padding:4px 11px;font-size:12px;font-weight:500;color:var(--tx2);
+  background:#fff;border:1px solid var(--line);border-radius:6px;
+  cursor:pointer;line-height:1.4;transition:all .15s ease;user-select:none;
+}
+.btn-sel:hover{color:var(--accent);border-color:#93c5fd;background:#f0f7ff}
+.btn-sel:active{background:#e0edfe;transform:translateY(1px)}
+.btn-sel:disabled{opacity:.45;cursor:not-allowed;border-color:var(--line);color:var(--tx3);background:#f8fafc;transform:none}
 .lib-page{font-size:11.5px;color:var(--tx3)}
 .tbl-empty{color:var(--tx3);font-size:12px;text-align:center;padding:26px 0}
 

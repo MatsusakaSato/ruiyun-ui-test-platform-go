@@ -15,13 +15,17 @@ export function renderRunCases() {
   if (qCnt) qCnt.textContent = n ? `（${n} 条）` : '';
 
   if (!state.RUN_CASES.length) {
-    box.innerHTML = '<div class="run-empty">'
+    const emptyHtml = '<div class="run-empty">'
       + (state.RUNNING
         ? '<div style="display:flex;align-items:center;gap:9px;padding:12px 4px"><span class="spinner-blue"></span><span>正在启动测试，用例即将列出…</span></div>'
         : '还没有要跑的用例。到 '
           + '<button class="home-link" onclick="switchPage(\'cases\')">测试用例</button>'
           + ' 页从预设库里勾选加入本轮，或手动添加一行。')
       + '</div>';
+    if (box.dataset.lastHtml !== emptyHtml) {
+      box.innerHTML = emptyHtml;
+      box.dataset.lastHtml = emptyHtml;
+    }
     const hlWrap = $('homeHistLinkWrap');
     if (hlWrap) hlWrap.innerHTML = '';
     return;
@@ -101,7 +105,11 @@ export function renderRunCases() {
     </div>`;
   }).join('');
 
-  box.innerHTML = topHtml + rowsHtml;
+  const newHtml = topHtml + rowsHtml;
+  if (box.dataset.lastHtml !== newHtml) {
+    box.innerHTML = newHtml;
+    box.dataset.lastHtml = newHtml;
+  }
 }
 
 export async function startRun(body) {

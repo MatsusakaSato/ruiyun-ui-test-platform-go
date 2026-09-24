@@ -177,6 +177,15 @@ func (s *RunState) pump(cmd *exec.Cmd, stdout io.ReadCloser, runDir string) {
 			_ = logf.Sync()
 		}
 	}
+	if err := sc.Err(); err != nil {
+		s.mu.Lock()
+		s.lineLocked(fmt.Sprintf("[平台] 读取控制台输出异常: %v", err))
+		s.mu.Unlock()
+		if logf != nil {
+			_, _ = logf.WriteString(fmt.Sprintf("[平台] 读取控制台输出异常: %v\n", err))
+			_ = logf.Sync()
+		}
+	}
 	_ = cmd.Wait()
 
 	code := 0
