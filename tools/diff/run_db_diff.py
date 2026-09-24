@@ -28,9 +28,10 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 GO_ROOT = os.path.abspath(os.path.join(HERE, "..", ".."))
 DEFAULT_PY_ROOT = os.path.abspath(os.path.join(GO_ROOT, "..", "ruiyun-ui-test-platform"))
 
-# Go 侧输出比 Python 多出的顶层键（前端只读 labels.*，这两个键未被使用）。
-# 归一化掉，避免永久性的假阳性差异；如需严格比对见 --strict。
-GO_EXTRA_CASE_KEYS = {"scene", "targets"}
+# Go 侧输出比 Python 多出的顶层键 —— **已于 2026-09-24 修复，集合现在为空**。
+# 原先 Go 的 row_to_case 多输出 scene/targets（Python 只在 labels 里给），
+# 端到端 HTTP 差分实测确认后已删除，因此这里不再豁免任何键。
+GO_EXTRA_CASE_KEYS: set = set()
 
 
 def copy_db(src: str, dst: str) -> None:
@@ -58,7 +59,7 @@ def main() -> int:
     ap.add_argument("--db", default=os.path.expanduser("~/.ruiyun-autotest/testcases.db"))
     ap.add_argument("--py-root", default=os.environ.get("RUIYUN_PY_ROOT", DEFAULT_PY_ROOT))
     ap.add_argument("--strict", action="store_true",
-                    help="不忽略 Go 额外顶层键")
+                    help="[已废弃] 保留仅为兼容旧命令；现在恒为严格比对")
     args = ap.parse_args()
 
     if not os.path.exists(args.db):
@@ -132,9 +133,6 @@ def main() -> int:
 
         print(f"\n{'='*70}")
         print("结果: " + ("✅ 语义一致" if fails == 0 else f"❌ {fails} 处真实差异"))
-        if not args.strict:
-            print(f"注: 已忽略 Go 侧多出的顶层键 {sorted(GO_EXTRA_CASE_KEYS)}"
-                  "（前端只读 labels.*，未使用）")
         print("=" * 70)
         return 0 if fails == 0 else 1
     finally:

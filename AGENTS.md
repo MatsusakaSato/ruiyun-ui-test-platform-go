@@ -1,20 +1,24 @@
 # AGENTS.md — Go 重写项目协作说明
 
 > 本文件由**另一个 AI 代理**（DSH）写入，用于与正在做 Go 重写的 **gemini** 协作。
-> 最后更新：2026-09-23（Python oracle 的两处问题已获授权修复/提交；六层差分仍全绿）
+> 最后更新：2026-09-24（新增**第七层端到端 HTTP 差分**；服务层已可编译可运行并跑通 148 个端点）
 > 对应 Python 原版：`../ruiyun-ui-test-platform`（**只读，任何情况下都不要修改它**）
 
 ---
 
 ## 0. ✅ 主干状态（最新复查）
 
-`go build ./...` ✅ 通过　`go test ./...` ✅ 全部通过。
+`go build ./...` ✅ 通过　`go test ./...` ✅ 全部通过　`go vet ./...` ✅ 通过。
+
+**服务层（`internal/server` + `cmd/ruiyun`）已从"只有 embed.go"变成可运行的完整平台**：
+`ruiyun serve` 默认起 `127.0.0.1:8765`，`ruiyun pipeline/repro/discover` 三个子命令对应
+Python 的 `run_pipeline.py` / `run_repro.py` / `discover_ui.py`。
+
+**七层差分全部 ✅ 退出码 0**（新增第七层见 §4.1），可以直接当 CI 门禁用了。
 
 > 之前 `internal/server/embed.go` 的 `//go:embed web/*` 找不到文件
 > （`go:embed` 的路径相对于 .go 文件所在目录解析），
 > 你已把 `web/` 放进 `internal/server/` 解决 —— 👍 **已确认恢复，保留此条仅供回溯。**
-
-**六层差分的退出码现在全是 0**（下面 §4 的表），可以直接当 CI 门禁用了。
 
 `testcasedb` 当前导出（供写 `pipeline` / `server` 时对照）：
 
@@ -247,11 +251,17 @@ docs/P0-差分验证报告.md                          完整发现与证据
     Go 写成了 `len(caseResults) - len(uiFailed)`。实测 **219 vs 188**。
 41. **`generated_at` 不该取当前时间** —— Python 恒为 `""`（由上层写文件时决定）。→ 改为 `""`。
 
-### 3.9 ⚠️ 已知但**故意未改**的两处
+### 3.9 ⚠️ 已知但**故意未改**的一处
 
-**a) `rowToCase` 多输出两个顶层键。** Go 输出比 Python 多 `scene` / `targets`。
-已确认**无害**（前端只读 `c.labels.scene` / `c.labels.targets`），但属契约偏离。
-要严格一致删掉那两行即可 —— 我没擅自删，因为这是设计选择而非缺陷。
+**a) ✅ 已修复（本轮）：`rowToCase` 多输出两个顶层键。**
+Go 曾比 Python 多输出 `scene` / `targets`。虽然前端只读 `c.labels.scene` /
+`c.labels.targets`、**实际无害**，但它是**契约偏离**：预设用例的 JSON 形状
+与 Python 不一致，任何按顶层键遍历的消费方（含本仓的 `pipeline`）都会看到多余字段。
+→ 已删除这两个键，并**同时删掉 `run_db_diff.py` 里那条 `GO_EXTRA_CASE_KEYS` 豁免**
+（豁免一旦留着，以后同类偏离就再也报不出来）。现在 DB 层是**严格逐键相等**。
+
+> 教训：**"已知无害"的偏离要在差分工装里留豁免，就等于给自己开了后门。**
+> 能修就修掉，修不掉的要像 (b) 那样**用交叉校验证明**，而不是静默放过。
 
 **b) `EMPTY_REQUIRED_ARG` 的 `evidence` 键序（6 条 finding）。**
 Python 是 `json.dumps(t.arguments, ensure_ascii=False)` —— **注意没有 `sort_keys`**，
@@ -684,9 +694,16 @@ python3 tools/diff/run_metrics_diff.py    # 指标层：219 用例 × (trajector
 python3 tools/diff/run_eval_diff.py       # 评估前置层：667 用例 × (formatcheck + safetyscan + intent)
                                           #   加 --dump DIR 可落盘两侧原始输出做事后分析
                                           #   加 --show N 控制每层打印多少条样本
+python3 tools/diff/run_http_diff.py       # 🆕 第七层端到端 HTTP：148 端点（见 §4.1）
+                                          #   加 --keep 复用已启动的服务
 
 # 退出码 0 = 等价，1 = 有真实差异 —— 可直接接 CI
 ```
+
+> ⚠️ `run_assert_diff.py` / `run_metrics_diff.py` **需要 PyYAML**，
+> 必须用项目 venv 的 python 跑（`../ruiyun-ui-test-platform/.venv/bin/python`），
+> 否则会以退出码 2 报「需要 PyYAML」。其余四层用系统 `python3` 即可。
+> `run_http_diff.py` 自己会挑 venv python 去拉起 Python 服务，无需手动指定。
 
 **差分器的三个关键设计**（你后续加层时请照做）：
 
@@ -704,6 +721,71 @@ python3 tools/diff/run_eval_diff.py       # 评估前置层：667 用例 × (for
    外加 10 个逐字符的纯对抗用例 —— **10 种 Python `\s` 独有字符各一个**。
    真实语料里 U+2003 只出现 64 次、U+2028 只有 1 次，
    靠真实数据覆盖是碰运气；对抗注入把它变成必然。
+
+### 4.1 🆕 第七层：端到端 HTTP 差分（`tools/diff/run_http_diff.py`，本轮新增）
+
+**为什么必须补这一层**：前六层全部只测到**库函数**，`server.py` 的**路由分派**
+没有任何门禁 —— 服务层是"可编译但没人知道对不对"的状态。这一层把两个服务
+**同时拉起来**、对同一批请求做**递归结构化比较**，是唯一覆盖完整 HTTP 契约的层。
+
+```bash
+# 自行拉起两个服务（Go + Python）→ 比对 → 收工；退出码 0 = 等价
+python3 tools/diff/run_http_diff.py
+
+# 复用已启动的服务（调试时更快）
+python3 tools/diff/run_http_diff.py --keep
+```
+
+**覆盖（148 个端点/变体）**：
+
+| 组 | 数量 | 内容 |
+|---|---|---|
+| 静态资源 | 17 | `web/` 下全部文件**逐字节**比对（前端一行不改，必须字节相等） |
+| 轮次归档 | 12×2 | `/api/rounds/<rid>` 详情 JSON + `report.html` 字节 |
+| 查询电池 | ~50 | `limit/offset/keyword/date_from/scene/targets/attachment/ids/order` 的**边界与非法值** |
+| 固定端点 | 10 | `config/env/uploads/rounds/preset-cases/run-status/eval-status/...` |
+| 同源校验 | 6×5 | 6 组 Host/Origin × 5 个路径 → 403 文案与回显值 |
+| 方法与畸形请求 | ~20 | `PUT/PATCH/OPTIONS/` 未定义方法、路径穿越、坏 base64、坏 JSON |
+
+**第七层额外抓出并修掉的 3 处真实缺陷**（前六层全都覆盖不到）：
+
+**83. 🔴 未定义方法返回 404，而 Python 返回 501。**
+Python 的 `BaseHTTPRequestHandler` 对没实现的方法回 **501**，并带一段固定 HTML
+错误模板（里面模板变量 `%(code)d`/`%(message)s` 会**原样泄露**成
+`HTTPStatus.NOT_IMPLEMENTED`）；Go 用的是自定义的 `404 not found`。
+→ 新增 `pythonNotImplemented()` 逐字复刻该模板（含 `Content-Type: text/html;charset=utf-8`）。
+
+**84. 🔴 路径穿越被 `http.ServeMux` 重定向（307），Python 不重定向。**
+`ServeMux` 会对含 `..` 的路径做 `cleanPath` 并回 307。Python 的
+`urlparse(self.path).path` **既不规范化也不解码**。
+→ 移除 `ServeMux`，直接用 `http.HandlerFunc(s.route)`，并新增 `rawPath(r)`
+（`r.URL.EscapedPath()`）—— 因为 Go 的 `r.URL.Path` **会自动百分号解码**，
+Python 不会，`DELETE /api/rounds/..%2fetc` 的回显值一度不同。
+
+**85. 🔴 `Host` 请求头在 Go 里取不到（`r.Header.Get("Host")` 恒为空）。**
+Go 的 `net/http` 把 Host 提升到 `r.Host` 并从 Header 里删掉 ——
+导致同源校验的报错文案回显成 `Host=-`。
+→ 改用 `r.Host`，并新增 `hostFromHeader()` 复刻 Python
+`(self.headers.get("Host") or "").split(":")[0].strip("[]")`。
+⚠️ 这里**故意保留了 oracle 的 IPv6 缺陷**：`[::1]:8791` 会被 `split(":")[0]`
+切成 `[`，Python 因此**拒绝** IPv6 字面量 —— Go 也必须拒绝，否则差分立刻报警。
+*（Origin 的解析走 `urlparse().hostname`，Python 那边是对的，Go 用 `hostOnly`。）*
+
+**差分器的安全约束（重要）**：HTTP 探针**会真的产生副作用**，本层刻意只做只读探测：
+
+| 端点 | 为什么不探 |
+|---|---|
+| `POST /api/run` | 真的 spawn 流水线子进程（曾经误触发两次真实运行） |
+| `POST /api/app-settings` | 真的写 `.app_settings.json` 覆盖文件 |
+| `POST /api/reveal` + **存在的**目录 | macOS 上真的 `open -R` 弹访达窗口 |
+| `POST /api/llm/test` + 合法地址 | 真的打外网 |
+
+`/api/reveal` 只传「不存在的路径」、`/api/llm/test` 只传**本地校验必失败**的入参。
+
+**已知装饰性差异（1 处，不修）**：非法 `run_id` 含 `..` 时 `artifacts.root` 的
+路径归一化 —— Python 给 `/a/b/rounds/..`（不归一），Go 的 `filepath.Join` 给 `/a/b`。
+**两者返回 200、都不读文件、无穿越**，纯粹是路径字符串形态。
+差分器把它**单独计数并打印判据**（`known_cosmetic`），而不是塞进忽略清单。
 
 **当前已验证状态**
 
@@ -879,8 +961,9 @@ oracle 与端口保持一致。
 ### 7.1 当前状态
 
 - **`go build ./...` ✅**、**`go test ./...` ✅**、**`go vet ./...` ✅** 全绿
-- **六层差分全部 ✅ 退出码 0**：xlsx / DB / 分析层 / 断言层 / 指标层 / **评估前置层**
-- 累计修复 **82 处**真实保真度缺陷；回归测试 **13 个文件 162 个用例**
+- **七层差分全部 ✅ 退出码 0**：xlsx / DB / 分析层 / 断言层 / 指标层 / 评估前置层 /
+  **端到端 HTTP（148 端点，仅 1 处已证明的装饰性差异）**
+- 累计修复 **85 处**真实保真度缺陷；回归测试 **15 个文件 180+ 个用例**
 - 你新增了 `internal/repro`、`internal/driver`、`internal/sysutil`、`internal/pipeline`、
   `internal/llm`、`internal/server` 👍
 
