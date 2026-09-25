@@ -347,7 +347,7 @@ func renderReproReport(cfg map[string]any, traces []*models.ExecutionTrace,
 	m["repro_summary"] = reproSummary
 
 	appVersion, bundleID := sysutil.ReadAppVersion(appBinaryOf(cfg))
-	rp := filepath.Join(config.RootDir, "report", "ruiyun_hardbug_report.html")
+	rp := filepath.Join(config.RootDir, "report", "ruiyun_report.html")
 	if _, err := report.RenderReport(m, rp, appVersion, bundleID, "复现验证", 0); err != nil {
 		return "", err
 	}

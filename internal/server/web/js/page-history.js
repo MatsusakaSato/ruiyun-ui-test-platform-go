@@ -495,7 +495,7 @@ export function bugsTab(m, d) {
   if (!rows.length) {
     return h + `<div class="none-banner">
       <div class="big">✓ 没有发现问题</div>
-      <div class="sm">已按全部硬性缺陷规则逐条检查本次调用链路（工具调用失败、死循环、重复调用、
+      <div class="sm">已按全部断言规则逐条检查本次调用链路（工具调用失败、死循环、重复调用、
       内容截断、必填参数为空、调用链自洽、会话收尾等），一条都没命中。</div></div>`;
   }
 

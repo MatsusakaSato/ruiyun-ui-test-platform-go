@@ -129,7 +129,7 @@
 <div class="note">
   <b>评估范围</b><br/>
   · 本轮共 {{ .Summary.cases }} 条用例，逐条独立会话执行，评估只覆盖这些用例自身产生的日志。<br/>
-  · 判定基于 {{ len .RuleRows }} 条硬性缺陷断言规则（阈值见 config.yaml），不对生成内容的质量做评价。<br/>
+  · 判定基于 {{ len .RuleRows }} 条断言规则（阈值见 config.yaml），不对生成内容的质量做评价。<br/>
   · 下方第 2 节按用例逐个展示；每条用例只呈现它自己的调用链路、耗时用量与命中的问题，不做跨用例汇总。
 </div>
 
@@ -191,7 +191,7 @@
   {{ if not $cfind }}
     <div class="none-banner" style="padding:22px 18px">
       <div class="big" style="font-size:17px">✓ 该用例未发现问题</div>
-      <div class="sm">已按全部硬性缺陷规则检查该用例的调用链路，未命中任何规则。</div>
+      <div class="sm">已按全部断言规则检查该用例的调用链路，未命中任何规则。</div>
     </div>
   {{ else }}
     {{ range $f := $cfind }}
@@ -229,7 +229,7 @@
 <div class="note" style="margin-top:26px">
   <b>判定与口径说明</b><br/>
   · 本报告全部数据来自本轮 {{ .Summary.cases }} 条用例产生的会话日志，不含任何历史数据。<br/>
-  · 「问题发现」基于 {{ len .RuleRows }} 条硬性缺陷断言规则（阈值见 config.yaml），不对生成内容的质量做评价。<br/>
+  · 「问题发现」基于 {{ len .RuleRows }} 条断言规则（阈值见 config.yaml），不对生成内容的质量做评价。<br/>
   · token 为字符量折算的估算值（应用日志未记录官方 usage）；步骤级耗时日志未记录，耗时仅到会话/消息级。<br/>
   · 复现率由 UI 自动化重复执行同一配方统计，&lt;3 次样本的结论仅供参考。
 </div>

@@ -181,7 +181,7 @@ func runPipeline(args []string) int {
 	autoConfirm := fs.String("auto-confirm", "", "自动点击确认卡片：on / off（不传则沿用配置）")
 	keepApp := fs.Bool("keep-app", false, "[已废弃] 应用常驻不关闭，该参数无任何作用")
 	runID := fs.String("run-id", "", "轮次 ID（平台传入，用于归档该轮全部数据）")
-	reportName := fs.String("report-name", "ruiyun_hardbug_report.html", "报告文件名")
+	reportName := fs.String("report-name", "ruiyun_report.html", "报告文件名")
 	_ = fs.Parse(args)
 
 	if *keepApp {

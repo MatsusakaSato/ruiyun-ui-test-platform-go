@@ -304,7 +304,7 @@ func (t *ExecutionTrace) OrphanIDs() []string {
 	return res
 }
 
-// Finding 一条命中的硬 bug。
+// Finding 一条命中断言规则的缺陷。
 type Finding struct {
 	Rule      string `json:"rule"`
 	Severity  string `json:"severity"` // P0 / P1 / P2

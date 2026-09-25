@@ -587,7 +587,7 @@ func RunPipeline(opts PipelineOptions) (int, error) {
 
 	reportName := opts.ReportName
 	if reportName == "" {
-		reportName = "ruiyun_hardbug_report.html"
+		reportName = "ruiyun_report.html"
 	}
 	reportDir := filepath.Join(config.RootDir, "report")
 	_ = os.MkdirAll(reportDir, 0755)
