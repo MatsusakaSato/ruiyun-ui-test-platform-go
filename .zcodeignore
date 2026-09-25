@@ -1,0 +1,57 @@
+# 构建产物（不要提交）
+*.test
+*.out
+/ruiyun-autotest
+/ruiyun-cli
+/bin/
+/dist/
+coverage.out
+coverage.html
+
+# 运行期数据（默认落在用户目录，此处兜底）
+/rounds/
+/logs/
+/artifacts/
+*.db
+*.db-wal
+*.db-shm
+# 应用设置覆盖文件：POST /api/app-settings 会写它，内容是运行期状态（带 saved_at），
+# 不是源码。Python 原版同样忽略它。
+.app_settings.json
+
+# 编辑器 / 系统
+.DS_Store
+.idea/
+.vscode/
+
+# ===== ↑ 以上同步自 .gitignore（「从 .gitignore 同步」只重写以上部分）=====
+.git/
+.hg/
+.svn/
+node_modules/
+bower_components/
+jspm_packages/
+__pycache__/
+site-packages/
+venv/
+coverage/
+htmlcov/
+lcov-report/
+cmakefiles/
+cmake-build-*/
+bazel-*/
+pods/
+deriveddata/
+storybook-static/
+playwright-report/
+test-results/
+allure-results/
+allure-report/
+cdk.out/
+*.egg-info/
+*.dist-info/
+eggs/
+pip-wheel-metadata/
+wheels/
+# ----- ↑ 以上为 ZCode 默认排除规则（自定义规则请写在本行下方，不会被同步/恢复改动）-----
+# 自定义规则写在下方（本行提示可删除）
