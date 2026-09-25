@@ -7,9 +7,9 @@ import (
 	"unicode"
 )
 
-// ParsePyLiteral 解析 Python repr 格式的字面量（兼容 dict、list、单/双引号字符串、True/False/None、数字）
-func ParsePyLiteral(s string) (any, error) {
-	p := &pyParser{src: []rune(strings.TrimSpace(s)), pos: 0}
+// ParseLiteral 解析字面量文本（兼容 dict、list、tuple、单/双引号字符串、True/False/None、数字）
+func ParseLiteral(s string) (any, error) {
+	p := &literalParser{src: []rune(strings.TrimSpace(s)), pos: 0}
 	val, err := p.parseValue()
 	if err != nil {
 		return nil, err
@@ -21,18 +21,18 @@ func ParsePyLiteral(s string) (any, error) {
 	return val, nil
 }
 
-type pyParser struct {
+type literalParser struct {
 	src []rune
 	pos int
 }
 
-func (p *pyParser) skipWhitespace() {
+func (p *literalParser) skipWhitespace() {
 	for p.pos < len(p.src) && unicode.IsSpace(p.src[p.pos]) {
 		p.pos++
 	}
 }
 
-func (p *pyParser) peek() rune {
+func (p *literalParser) peek() rune {
 	p.skipWhitespace()
 	if p.pos >= len(p.src) {
 		return 0
@@ -40,7 +40,7 @@ func (p *pyParser) peek() rune {
 	return p.src[p.pos]
 }
 
-func (p *pyParser) parseValue() (any, error) {
+func (p *literalParser) parseValue() (any, error) {
 	p.skipWhitespace()
 	if p.pos >= len(p.src) {
 		return nil, fmt.Errorf("意外到达输入末尾")
@@ -77,7 +77,7 @@ func (p *pyParser) parseValue() (any, error) {
 	return nil, fmt.Errorf("无法识别的字面量起始: '%c' (pos %d)", ch, p.pos)
 }
 
-func (p *pyParser) consumeLiteral(lit string) bool {
+func (p *literalParser) consumeLiteral(lit string) bool {
 	runes := []rune(lit)
 	if p.pos+len(runes) <= len(p.src) {
 		for i, r := range runes {
@@ -91,7 +91,7 @@ func (p *pyParser) consumeLiteral(lit string) bool {
 	return false
 }
 
-func (p *pyParser) parseDict() (map[string]any, error) {
+func (p *literalParser) parseDict() (map[string]any, error) {
 	p.pos++ // 跳过 '{'
 	res := make(map[string]any)
 
@@ -135,7 +135,7 @@ func (p *pyParser) parseDict() (map[string]any, error) {
 	}
 }
 
-func (p *pyParser) parseList() ([]any, error) {
+func (p *literalParser) parseList() ([]any, error) {
 	p.pos++ // 跳过 '['
 	var res []any
 
@@ -167,7 +167,7 @@ func (p *pyParser) parseList() ([]any, error) {
 	}
 }
 
-func (p *pyParser) parseTuple() ([]any, error) {
+func (p *literalParser) parseTuple() ([]any, error) {
 	p.pos++ // 跳过 '('
 	var res []any
 
@@ -199,7 +199,7 @@ func (p *pyParser) parseTuple() ([]any, error) {
 	}
 }
 
-func (p *pyParser) parseString() (string, error) {
+func (p *literalParser) parseString() (string, error) {
 	quote := p.src[p.pos]
 	p.pos++ // 跳过起始引号
 
@@ -242,7 +242,7 @@ func (p *pyParser) parseString() (string, error) {
 	return "", fmt.Errorf("字符串未闭合")
 }
 
-func (p *pyParser) parseNumber() (any, error) {
+func (p *literalParser) parseNumber() (any, error) {
 	start := p.pos
 	hasDot := false
 

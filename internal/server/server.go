@@ -1,11 +1,11 @@
-// Package server 复刻 Python 版 server.py：本地可视化平台服务。
+// Package server 提供本地可视化平台服务。
 //
 // 纯标准库实现，职责：
 //   - 一键运行：后台子进程执行本程序自带的 pipeline 子命令，实时回收 stdout
 //   - 轮次归档：读取用户工作区 rounds/<run_id>/ 的落盘数据
 //   - REST API：轮次列表 / 轮次详情 / 运行状态 / 预设用例 / 文件管理器定位
 //
-// 路由与响应字段严格对齐 server.py，下游是 4,120 行前端 JS。
+// 路由与响应字段是前端 JS（4,120 行）依赖的稳定契约。
 package server
 
 import (
@@ -24,7 +24,7 @@ import (
 
 // Server 平台 HTTP 服务
 type Server struct {
-	// AllowLAN 对应 server.py 的 --allow-lan 临时放行局域网访问
+	// AllowLAN 对应 --allow-lan 启动参数，临时放行局域网访问
 	AllowLAN bool
 	// SelfExe 当前可执行文件路径（用于拉起 pipeline 子进程）
 	SelfExe string
@@ -63,7 +63,7 @@ func writeJSON(w http.ResponseWriter, code int, obj any) {
 		_, _ = w.Write([]byte("{}"))
 		return
 	}
-	// json.Encoder 会追加换行；Python 的 json.dumps 不会
+	// json.Encoder 默认会追加换行，响应体不能带这个换行
 	_, _ = w.Write([]byte(strings.TrimRight(buf.String(), "\n")))
 }
 
@@ -79,7 +79,7 @@ func writeText(w http.ResponseWriter, code int, text string) {
 	writeBody(w, code, []byte(text), "text/plain; charset=utf-8")
 }
 
-// readJSONBody 复刻 Python：读 body 解析 JSON，任何异常都退化成空 dict
+// readJSONBody 读 body 解析 JSON，任何异常都退化成空 dict
 func readJSONBody(r *http.Request) map[string]any {
 	raw, err := io.ReadAll(r.Body)
 	if err != nil || len(raw) == 0 {
@@ -111,8 +111,7 @@ func isPrivateHost(host string) bool {
 	return b[0] == 10 || (b[0] == 172 && b[1] >= 16 && b[1] <= 31) || (b[0] == 192 && b[1] == 168)
 }
 
-// hostOnly 取主机名并去掉方括号（用于 Origin —— Python 走 urlparse().hostname，
-// 会正确解析 IPv6）。
+// hostOnly 取主机名并去掉方括号（用于 Origin；能正确解析 IPv6 字面量）。
 func hostOnly(hostport string) string {
 	if hostport == "" {
 		return ""
@@ -123,15 +122,15 @@ func hostOnly(hostport string) string {
 	return strings.Trim(strings.TrimSpace(hostport), "[]")
 }
 
-// hostFromHeader 复刻 Python `(self.headers.get("Host") or "").split(":")[0].strip("[]")`。
+// hostFromHeader 从 Host 头取主机名：取 `:` 前的第一段并去掉方括号。
 //
-// ⚠ 这里**故意**保留 oracle 的解析方式（连同它的缺陷）：IPv6 字面量 `[::1]:8791`
-// 会被 `split(":")[0]` 切成 `"["`、再 strip 成空串，于是和 Python 一样被拒。
-// 差分实测：改用 net.SplitHostPort 会得到 `::1` 而放行 —— 与 oracle 的
-// 拒绝行为不一致（Go 比 oracle 宽松，属安全面放宽，故按 oracle 对齐）。
+// ⚠ 这里**故意**使用这种朴素切分方式（连同它的缺陷）：IPv6 字面量 `[::1]:8791`
+// 会被切成 `"["`、再去掉方括号成空串，于是被拒。
+// 端到端实测：改用 net.SplitHostPort 会得到 `::1` 而放行 —— 会放宽安全面，
+// 故保留这种切分方式，让 IPv6 字面量 Host 一律被拒。
 //
 // 另注：Go 的 net/http 会把 Host 头搬进 r.Host，r.Header.Get("Host") **恒为空**，
-// 所以调用方必须传 r.Host（旧实现在 forbidden 里读 Header，导致回显 Host=-）。
+// 所以调用方必须传 r.Host，否则 forbidden 里回显的 Host 会是 -。
 func hostFromHeader(raw string) string {
 	first := raw
 	if i := strings.Index(raw, ":"); i >= 0 {
@@ -170,8 +169,7 @@ func originHostname(origin string) string {
 }
 
 func (s *Server) forbidden(w http.ResponseWriter, r *http.Request) {
-	// 回显观测到的 Host/Origin（Python 用 self.headers.get("Host")；
-	// Go 的 net/http 把它放在 r.Host，Header 里取不到）。
+	// 回显观测到的 Host/Origin（Host 头在 Go 里只能从 r.Host 取到）。
 	writeJSON(w, 403, map[string]any{
 		"ok":       false,
 		"category": "forbidden",
@@ -193,19 +191,20 @@ func orDash(s string) string {
 // Handler 返回平台 HTTP 处理器
 //
 // ⚠ 刻意**不用** http.ServeMux：ServeMux 会做路径清洗（cleanPath），把
-// `/api/rounds/../../etc/passwd` 307 重定向到 `/etc/passwd`，而 Python 的
-// `urlparse(path).path` 不做任何清洗（它会把 rid 当成 `..` 直接去查归档）。
-// 端到端差分实测到该不一致，故直接把 route 挂成根处理器。
+// `/api/rounds/../../etc/passwd` 307 重定向到 `/etc/passwd`；而路由匹配必须
+// **不做任何路径清洗**（否则 rid 会被清洗掉，取不到 `..` 这类原始段）。
+// 端到端实测到该不一致，故直接把 route 挂成根处理器。
 func (s *Server) Handler() http.Handler {
 	return http.HandlerFunc(s.route)
 }
 
-// pythonNotImplemented 复刻 Python `BaseHTTPRequestHandler.send_error(501, ...)` 的响应。
+// notImplementedResponse 未实现方法的 501 响应。
 //
-// 模板里那句 `Error code explanation: HTTPStatus.NOT_IMPLEMENTED - ...` 是 Python
-// 自己把枚举对象格式化进去的结果（不是 "501"）—— 逐字照抄才对得上。
-// 前端只用 GET/POST/DELETE，这条路径实际不可达，但差分要求一致。
-func pythonNotImplemented(w http.ResponseWriter, method string) {
+// 响应体必须逐字匹配约定了的固定格式：模板里那句
+// `Error code explanation: HTTPStatus.NOT_IMPLEMENTED - Server does not support this operation.`
+// 不是 "501"，枚举名与说明文字要原样保留。
+// 前端只用 GET/POST/DELETE，这条路径实际不可达，但响应体仍要求一致。
+func notImplementedResponse(w http.ResponseWriter, method string) {
 	body := "<!DOCTYPE HTML PUBLIC \"-//W3C//DTD HTML 4.01//EN\"\n" +
 		"        \"http://www.w3.org/TR/html4/strict.dtd\">\n" +
 		"<html>\n" +
@@ -225,9 +224,10 @@ func pythonNotImplemented(w http.ResponseWriter, method string) {
 	_, _ = w.Write([]byte(body))
 }
 
-// rawPath 复刻 Python `urlparse(self.path).path` —— **不做百分号解码**。
+// rawPath 取路由用的路径 —— **不做百分号解码**。
 // Go 的 r.URL.Path 已经解码过（`%2f` 会变成 `/`），会让 /api/rounds/<rid> 与
-// DELETE 的 run_id 取值和 Python 不一致（实测 `..%2fetc` 报错文案就不同）。
+// DELETE 的 run_id 取值走偏（实测 `..%2fetc` 报错文案就不同），所以改用
+// EscapedPath，让路由看到未解码的原始路径。
 func rawPath(r *http.Request) string {
 	if p := r.URL.EscapedPath(); p != "" {
 		return p
@@ -252,8 +252,8 @@ func (s *Server) route(w http.ResponseWriter, r *http.Request) {
 		}
 		s.doDelete(w, r)
 	default:
-		// 未实现的方法：Python 的 BaseHTTPRequestHandler 回 501，不是 404。
-		pythonNotImplemented(w, r.Method)
+		// 未实现的方法回 501，不是 404。
+		notImplementedResponse(w, r.Method)
 	}
 }
 
@@ -406,7 +406,7 @@ func readWebFile(rel string) ([]byte, error) {
 	return fs.ReadFile(sub, rel)
 }
 
-// serveStatic 复刻 Python 的静态资源分支：防路径穿越 + 按扩展名猜 MIME
+// serveStatic 静态资源分支：防路径穿越 + 按扩展名猜 MIME
 func serveStatic(w http.ResponseWriter, rel string) bool {
 	clean := path.Clean("/" + rel)
 	clean = strings.TrimPrefix(clean, "/")

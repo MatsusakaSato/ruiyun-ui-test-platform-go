@@ -17,13 +17,13 @@ import (
 
 	"ruiyun-ui-test-platform-go/internal/artifacts"
 	"ruiyun-ui-test-platform-go/internal/assertor"
+	"ruiyun-ui-test-platform-go/internal/canon"
 	"ruiyun-ui-test-platform-go/internal/config"
 	"ruiyun-ui-test-platform-go/internal/formatcheck"
 	"ruiyun-ui-test-platform-go/internal/intent"
 	"ruiyun-ui-test-platform-go/internal/llm"
 	"ruiyun-ui-test-platform-go/internal/logparser"
 	"ruiyun-ui-test-platform-go/internal/models"
-	"ruiyun-ui-test-platform-go/internal/pyre"
 	"ruiyun-ui-test-platform-go/internal/rubric"
 	"ruiyun-ui-test-platform-go/internal/safetyscan"
 	"ruiyun-ui-test-platform-go/internal/testcasedb"
@@ -42,10 +42,10 @@ const (
 	RedlineOverrideDefault = true
 )
 
-// ⚠️ 不能写 Go 的 `\s`：它只认 5 个字符，Python 的 `\s` 认 29 个。
+// ⚠️ 不能写 Go 的 `\s`：它只认 5 个字符；本项目要求按 29 个字符的空白集归一化。
 // 这是 prompt 去重键与预设索引键的**唯一**归一化函数 —— 一旦与
 // 索引构建侧语义不一致，重复问题就检测不出来、预设标签也查不到。
-var whitespaceRegex = regexp.MustCompile(`[` + pyre.SpaceClass + `]+`)
+var whitespaceRegex = regexp.MustCompile(`[` + canon.SpaceClass + `]+`)
 
 func normPrompt(s string) string {
 	return whitespaceRegex.ReplaceAllString(s, "")
@@ -210,19 +210,19 @@ func finalAnswerTruncated(trace *models.ExecutionTrace, findings []interface{}, 
 	return false, ""
 }
 
-// pyStrValue 复刻 Python 的 str() 对标量的字符串化。
+// stringValue 把标量字符串化的规范化函数。
 //
 // 与 Go 的 `fmt.Sprintf("%v", x)` 的差异（都会真实影响 expect_tools 归一化）：
 //
-//	          Python str()   Go %v
+//	          本实现        Go %v
 //	nil       "None"        "<nil>"
 //	true      "True"        "true"
 //	3.0       "3.0"         "3"
 //
-// 字符串原样返回；float 交给 models.PyJSONDumps（已实测 str(float) ≡ json.dumps(float)）。
-// 容器类型走 JSON 兜底 —— Python repr 用单引号，此处不追求逐字一致，
+// 字符串原样返回；float 交给 models.JSONDumps（已实测浮点字符串化 ≡ 紧凑 JSON 数值表示）。
+// 容器类型走 JSON 兜底 —— 本实现的引号风格为单引号，此处不追求逐字一致，
 // 但 expect_tools 里出现容器本身即属异常数据。
-func pyStrValue(v interface{}) string {
+func stringValue(v interface{}) string {
 	switch t := v.(type) {
 	case nil:
 		return "None"
@@ -234,7 +234,7 @@ func pyStrValue(v interface{}) string {
 		}
 		return "False"
 	case float64:
-		return models.PyJSONDumps(t)
+		return models.JSONDumps(t)
 	case int:
 		return strconv.Itoa(t)
 	case int64:
@@ -244,12 +244,12 @@ func pyStrValue(v interface{}) string {
 }
 
 func objToolSelection(expectTools []interface{}, trace *models.ExecutionTrace) (*float64, map[string]interface{}) {
-	// Python: `[str(t).strip() for t in (expect_tools or []) if str(t).strip()]`
-	//   - str(t) 而非 fmt %v：str(None)=="None"（**非空，会被保留**）、str(3.0)=="3.0"；
-	//   - .strip() 是 Python 的 29 字符空白集，必须用 pyre.Strip（Go 的 TrimSpace 少 U+001C–U+001F）。
+	// 期望工具归一化：逐个字符串化、去首尾空白，丢弃空串。
+	//   - 用 stringValue 而非 fmt %v：nil 字符串化为 "None"（**非空，会被保留**）、3.0 → "3.0"；
+	//   - 去首尾空白按 29 字符的空白集，必须用 canon.Strip（Go 的 TrimSpace 少 U+001C–U+001F）。
 	var exp []string
 	for _, t := range expectTools {
-		s := pyre.Strip(pyStrValue(t))
+		s := canon.Strip(stringValue(t))
 		if s != "" {
 			exp = append(exp, s)
 		}
@@ -265,7 +265,7 @@ func objToolSelection(expectTools []interface{}, trace *models.ExecutionTrace) (
 	for _, tc := range trace.ToolCalls {
 		usedSet[tc.Name] = true
 	}
-	hit := []string{} // 非 nil：Python 列表推导天然给 []，Go 的 nil 会序列化成 null
+	hit := []string{} // 必须是非 nil 空切片：nil 切片会 JSON 序列化成 null，接口契约要求 []
 	for _, t := range exp {
 		if usedSet[t] {
 			hit = append(hit, t)
@@ -327,11 +327,11 @@ func objDeliveryEfficiency(turns int, elapsedS float64, completionOK bool) (int,
 	mins := elapsedS / 60.0
 	ev := map[string]interface{}{
 		"turns": turns,
-		// Python `round(mins, 1)` 是银行家舍入（对二进制精确值做正确十进制舍入）。
+		// round(mins, 1) 是银行家舍入（对二进制精确值做正确十进制舍入）。
 		// 原先写 `math.Round(mins*10)/10` 有两重错误：不是 ties-to-even，
 		// 且 `*10` 引入二次舍入 —— 连 0.35 / 12.45 这类**非精确 tie** 都会错
-		// （0.35 的真实值 ≈ 0.34999…，Python 给 0.3，`*10` 路线给 0.4）。
-		"minutes": trajectory.PyRound(mins, 1),
+		// （0.35 的真实值 ≈ 0.34999…，正确结果为 0.3，`*10` 路线给 0.4）。
+		"minutes": trajectory.RoundTo(mins, 1),
 	}
 	if turns <= 2 || mins < 5 {
 		return 5, ev
@@ -585,13 +585,13 @@ func objectiveScores(caseItem map[string]interface{}, trace *models.ExecutionTra
 
 func workspaceRoot(cfg map[string]interface{}) string {
 	if cfg != nil {
-		// Python 侧是 `.strip()`（29 字符集），统一走 pyre.Strip
+		// 统一按 29 字符空白集去首尾空白，即 canon.Strip
 		if paths, ok := cfg["paths"].(map[string]interface{}); ok {
-			if root, ok := paths["workspace_root"].(string); ok && pyre.Strip(root) != "" {
-				return pyre.Strip(root)
+			if root, ok := paths["workspace_root"].(string); ok && canon.Strip(root) != "" {
+				return canon.Strip(root)
 			}
-			if sr, ok := paths["session_root"].(string); ok && pyre.Strip(sr) != "" {
-				return filepath.Dir(pyre.Strip(sr))
+			if sr, ok := paths["session_root"].(string); ok && canon.Strip(sr) != "" {
+				return filepath.Dir(canon.Strip(sr))
 			}
 		}
 	}
@@ -695,7 +695,7 @@ func factsPayload(caseItem map[string]interface{}, trace *models.ExecutionTrace,
 			artItems = append(artItems, map[string]interface{}{
 				"类型": a.Kind,
 				"文件": a.RelPath,
-				// 必须用带存在性校验的 DisplayAbsPath：Python 侧是 resolve_abs_path，
+				// 必须用带存在性校验的 DisplayAbsPath：
 				// 解析不到要返回空串让界面显示「本机未找到」，而不是猜一个路径
 				"绝对路径": artifacts.DisplayAbsPath(a, wsRoot),
 			})
@@ -725,7 +725,7 @@ func factsPayload(caseItem map[string]interface{}, trace *models.ExecutionTrace,
 		},
 		"执行轨迹": map[string]interface{}{
 			"轮次":      turns,
-			"耗时秒":     pyre.Round(elapsed, 1), // Python: round(elapsed, 1)
+			"耗时秒":     canon.Round(elapsed, 1), // round 到 1 位小数
 			"工具调用":    calls,
 			"是否正常收尾":  closed,
 			"有最终回复":   tcEv["answer_chars"] != nil && tcEv["answer_chars"] != 0,
@@ -805,8 +805,8 @@ func parseJSONRobust(text string) map[string]interface{} {
 	}
 	s := strings.TrimSpace(text)
 	if strings.HasPrefix(s, "```") {
-		s = regexp.MustCompile("^```[a-zA-Z]*["+pyre.SpaceClass+"]*").ReplaceAllString(s, "")
-		s = regexp.MustCompile("["+pyre.SpaceClass+"]*```$").ReplaceAllString(s, "")
+		s = regexp.MustCompile("^```[a-zA-Z]*["+canon.SpaceClass+"]*").ReplaceAllString(s, "")
+		s = regexp.MustCompile("["+canon.SpaceClass+"]*```$").ReplaceAllString(s, "")
 		s = strings.TrimSpace(s)
 	}
 	var obj map[string]interface{}
@@ -835,18 +835,18 @@ func coerceScore(raw interface{}, scale string) *int {
 	case int:
 		f = float64(v)
 	case bool:
-		// Python `float(True) == 1.0` —— 会落进 (1,2,3,4,5) 等档位
+		// bool true 转成 1.0 —— 会落进 (1,2,3,4,5) 等档位
 		if v {
 			f = 1
 		} else {
 			f = 0
 		}
 	case string:
-		// Python `float(s)` 要求**整个**字符串合法，多余字符直接 ValueError → None（记为未评）。
+		// 字符串转数值要求**整个**字符串合法，多余字符直接判非法 → nil（记为未评）。
 		// 原先用 `fmt.Sscanf(v, "%f", &parsed)` 是**前缀**解析：
 		// "3分" / "3.0（满分5）" / "3abc" 都会静默得到 3 —— 把"本该未评"变成"有分"，
 		// 而这类带单位/说明的回复恰恰是 LLM 判分最常见的输出形态。
-		parsed, err := strconv.ParseFloat(pyre.Strip(v), 64)
+		parsed, err := strconv.ParseFloat(canon.Strip(v), 64)
 		if err != nil {
 			return nil
 		}
@@ -1210,15 +1210,15 @@ func calcStability(caseItem map[string]interface{}, repeats []map[string]interfa
 	}
 }
 
-// pyFloatValue 复刻 Python 的 float(v)：int/float/bool/数字字符串皆可，
-// 其余（含 None、容器）抛 TypeError/ValueError → 调用方按「不可用」处理。
+// floatValue 把值转成 float：int/float/bool/数字字符串皆可，
+// 其余（含 nil、容器）判为非法 → 调用方按「不可用」处理。
 //
-//	Python            Go
-//	float(True)  == 1.0
-//	float(False) == 0.0
-//	float("3")   == 3.0
-//	float("3分") → ValueError
-func pyFloatValue(v interface{}) (float64, bool) {
+//	输入            结果
+//	true         == 1.0
+//	false        == 0.0
+//	"3"          == 3.0
+//	"3分"        → 非法
+func floatValue(v interface{}) (float64, bool) {
 	switch t := v.(type) {
 	case nil:
 		return 0, false
@@ -1234,7 +1234,7 @@ func pyFloatValue(v interface{}) (float64, bool) {
 		}
 		return 0, true
 	case string:
-		f, err := strconv.ParseFloat(pyre.Strip(t), 64)
+		f, err := strconv.ParseFloat(canon.Strip(t), 64)
 		if err != nil {
 			return 0, false
 		}
@@ -1251,10 +1251,10 @@ func calcMean(vals []float64) *float64 {
 	for _, v := range vals {
 		sum += v
 	}
-	// Python 是 round(sum/len, 2) —— 银行家舍入。
+	// round(sum/len, 2) —— 银行家舍入。
 	// 原写成 math.Round(x*100)/100：ties 方向错，且 *100 有二次舍入。
-	// 实测两维取 {0.0, 0.25} 时 Python=0.12 / Go 原先=0.13；穷举 n=2..5 共 313 组不一致。
-	res := pyre.Round(sum/float64(len(vals)), 2)
+	// 实测两维取 {0.0, 0.25} 时正确值=0.12 / 旧实现=0.13；穷举 n=2..5 共 313 组不一致。
+	res := canon.Round(sum/float64(len(vals)), 2)
 	return &res
 }
 
@@ -1298,10 +1298,10 @@ func aggregateResults(caseRows []map[string]interface{}) map[string]interface{} 
 				continue
 			}
 			hasAnyScore = true
-			// Python 侧是 normalize(score, ...)，而 normalize 内部做 float(score)
-			// 并捕获 TypeError/ValueError —— 所以 **字符串与布尔也合法**
+			// normalize(score, ...) 内部做数值转换
+			// 并接受非法值 → 所以 **字符串与布尔也合法**
 			// （"3"→3.0、True→1.0、False→0.0）。原实现只认 int/float64，会把它们静默丢掉。
-			val, okNum := pyFloatValue(sc)
+			val, okNum := floatValue(sc)
 			if !okNum {
 				continue
 			}
@@ -1309,7 +1309,7 @@ func aggregateResults(caseRows []map[string]interface{}) map[string]interface{} 
 			if nv == nil {
 				continue
 			}
-			groupAcc[dim.Group] = append(groupAcc[dim.Group], pyre.Round(*nv*5, 2))
+			groupAcc[dim.Group] = append(groupAcc[dim.Group], canon.Round(*nv*5, 2))
 			overall = append(overall, *nv)
 		}
 		if hasAnyScore {
@@ -1320,10 +1320,10 @@ func aggregateResults(caseRows []map[string]interface{}) map[string]interface{} 
 	overallMean := calcMean(overall)
 	var overallScore100 *float64
 	if overallMean != nil {
-		// Python 是 round(overall_mean * 100, 1)。
+		// round(overall_mean * 100, 1)。
 		// 原写成 math.Round(m*1000)/10：不仅 ties 方向错，`*1000` 与 `(*100)*10`
-		// 在浮点下也不可交换 —— 实测 mean=0.6375 时 Python=63.7 / Go 原先=63.8。
-		s100 := pyre.Round(*overallMean*100, 1)
+		// 在浮点下也不可交换 —— 实测 mean=0.6375 时正确值=63.7 / 旧实现=63.8。
+		s100 := canon.Round(*overallMean*100, 1)
 		overallScore100 = &s100
 	}
 
@@ -1335,8 +1335,8 @@ func aggregateResults(caseRows []map[string]interface{}) map[string]interface{} 
 	for k, v := range judgeErrors {
 		errList = append(errList, errPair{Reason: k, Count: v})
 	}
-	// Python 的 sorted(..., key=lambda kv: -kv[1]) 是**稳定排序**，
-	// 并列时保持 judge_errors dict 的插入序（= 首次出现顺序）。
+	// 按次数降序是**稳定排序**，
+	// 并列时保持 judge_errors 的插入序（= 首次出现顺序）。
 	// sort.Slice 会让并列项顺序随机 —— 同 §3.5 第 20/21 条、§3.8 第 36-38 条。
 	sort.SliceStable(errList, func(i, j int) bool {
 		return errList[i].Count > errList[j].Count
@@ -1548,7 +1548,7 @@ func evaluateCase(runID string, caseItem map[string]interface{}, bundle *RoundBu
 			}
 		}
 	}
-	// 必须用有序版本：Python 的 build_sources 返回有序 dict，scan() 按 **来源优先**
+	// 必须用有序版本：BuildSourcesOrdered 返回有序来源，ScanOrdered 按 **来源优先**
 	// 遍历；用 map 版本会让 hits / redlines 每次运行顺序都不同。
 	sources := safetyscan.BuildSourcesOrdered(finalAns, arts.Texts(), toolCalls)
 	hits := safetyscan.ScanOrdered(sources)
@@ -1966,7 +1966,7 @@ func EvaluateRound(runID string, opts EvaluateOptions) (map[string]interface{}, 
 	}
 	var roundCloseRate *float64
 	if len(bundle.Cases) > 0 {
-		rate := pyre.Round(float64(closedCount)/float64(len(bundle.Cases)), 3) // Python: round(closed/len, 3)
+		rate := canon.Round(float64(closedCount)/float64(len(bundle.Cases)), 3) // round 到 3 位小数
 		roundCloseRate = &rate
 	}
 
@@ -2068,7 +2068,7 @@ func EvaluateRound(runID string, opts EvaluateOptions) (map[string]interface{}, 
 	}
 
 	summary := aggregateResults(rows)
-	elapsedS := pyre.Round(time.Since(t0).Seconds(), 1) // Python: round(self.elapsed_s, 1)
+	elapsedS := canon.Round(time.Since(t0).Seconds(), 1) // round 到 1 位小数
 
 	out := map[string]interface{}{
 		"run_id":         runID,

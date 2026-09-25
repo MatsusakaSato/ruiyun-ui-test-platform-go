@@ -20,7 +20,7 @@ import (
 	"ruiyun-ui-test-platform-go/internal/sysutil"
 )
 
-// runRepro 对应 Python `run_repro.py`：对指定 bug 签名做 N 次 UI 自动化复现，
+// runRepro 对指定 bug 签名做 N 次 UI 自动化复现，
 // 量化稳定性。支持 --list（零成本列配方）/ --render-only（不驱动 UI 重渲染报告）。
 func runRepro(args []string) int {
 	fs := flag.NewFlagSet("repro", flag.ExitOnError)
@@ -92,7 +92,7 @@ func runRepro(args []string) int {
 			log(fmt.Sprintf("  来源会话 : %s（提示词取自%s）", r.SourceSession, src))
 			log(fmt.Sprintf("  复现提示词: %s", r.Prompt))
 			if len(r.TriggerArgs) > 0 {
-				argsJSON := models.PyJSONDumps(r.TriggerArgs)
+				argsJSON := models.JSONDumps(r.TriggerArgs)
 				log(fmt.Sprintf("  触发参数  : %s", truncRunes(argsJSON, 160)))
 			}
 			log(fmt.Sprintf("  验证标准  : %s", r.VerifyDesc))
@@ -169,7 +169,7 @@ func runRepro(args []string) int {
 
 // ------------------------------------------------------------------ 数据装配
 
-// loadTraces 扫描会话根目录下的 sess_* 并解析（Python: load_traces）
+// loadTraces 扫描会话根目录下的 sess_* 并解析
 func loadTraces(cfg map[string]any) []*models.ExecutionTrace {
 	paths, _ := cfg["paths"].(map[string]any)
 	root := ""
@@ -189,7 +189,7 @@ func loadTraces(cfg map[string]any) []*models.ExecutionTrace {
 			names = append(names, e.Name())
 		}
 	}
-	sort.Strings(names) // Python: sorted(root.glob("sess_*"))
+	sort.Strings(names) // 按字典序排序，保证历次处理顺序一致
 
 	var traces []*models.ExecutionTrace
 	for _, n := range names {
@@ -200,7 +200,7 @@ func loadTraces(cfg map[string]any) []*models.ExecutionTrace {
 	return traces
 }
 
-// allFindings 对全部会话跑断言（Python: all_findings）
+// allFindings 对全部会话跑断言
 func allFindings(cfg map[string]any, traces []*models.ExecutionTrace) []*models.Finding {
 	rulesMap, _ := cfg["rules"].(map[string]any)
 	if rulesMap == nil {
@@ -224,7 +224,7 @@ func filterRecipes(in []*repro.ReproRecipe, keep func(*repro.ReproRecipe) bool) 
 	return out
 }
 
-// saveRecipes 落盘复现结果（Python: save()）
+// saveRecipes 落盘复现结果
 func saveRecipes(recipes []*repro.ReproRecipe, path string) error {
 	if err := os.MkdirAll(filepath.Dir(path), 0755); err != nil {
 		return err
@@ -240,7 +240,7 @@ func saveRecipes(recipes []*repro.ReproRecipe, path string) error {
 	return os.WriteFile(path, unescapeHTMLish(data), 0644)
 }
 
-// recipeFromDict 复刻 Python `ReproRecipe(**d)`（用于 --render-only 回读）
+// recipeFromDict 从字典字段装配 ReproRecipe（用于 --render-only 回读）
 func recipeFromDict(d map[string]any) *repro.ReproRecipe {
 	r := &repro.ReproRecipe{}
 	r.Key = dictStr(d, "key")
@@ -291,7 +291,7 @@ func recipeFromDict(d map[string]any) *repro.ReproRecipe {
 	return r
 }
 
-// renderReproReport 重渲染报告（Python: render()）——
+// renderReproReport 重渲染报告——
 // 以上次完整运行的 metrics 为基底，注入复现数据。
 func renderReproReport(cfg map[string]any, traces []*models.ExecutionTrace,
 	findings []*models.Finding, verified []*repro.ReproRecipe) (string, error) {

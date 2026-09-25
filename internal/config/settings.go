@@ -13,7 +13,7 @@ import (
 
 	"gopkg.in/yaml.v3"
 
-	"ruiyun-ui-test-platform-go/internal/pyre"
+	"ruiyun-ui-test-platform-go/internal/canon"
 )
 
 var (
@@ -191,10 +191,10 @@ func UserWorkspace() string {
 
 func migrateLegacy(src, dst string) {
 	if _, err := os.Stat(dst); err == nil {
-		return // dst 存在，不迁移
+		return // dst 已存在，不再移动
 	}
 	if _, err := os.Stat(src); os.IsNotExist(err) {
-		return // src 不存在，无法迁移
+		return // src 不存在，无需移动
 	}
 	_ = os.MkdirAll(filepath.Dir(dst), 0755)
 	_ = os.Rename(src, dst)
@@ -469,8 +469,7 @@ func Describe(cfg map[string]any) map[string]any {
 func WriteEnvProfile(profile string) (bool, string) {
 	key := strings.TrimSpace(profile)
 	if key != "dev" && key != "production" {
-		// Python: f"未知环境档案：{key or '(空)'}（只支持 dev / production）"
-		// 空值要显示为「(空)」，不能是空串。
+		// 错误文案：空值要显示为「(空)」，不能是空串。
 		shown := key
 		if shown == "" {
 			shown = "(空)"
@@ -485,7 +484,7 @@ func WriteEnvProfile(profile string) (bool, string) {
 	}
 	text := string(data)
 
-	reEnv := regexp.MustCompile(`(?m)^([` + pyre.SpaceClass + `]*)env_profile:.*$`)
+	reEnv := regexp.MustCompile(`(?m)^([` + canon.SpaceClass + `]*)env_profile:.*$`)
 	if reEnv.MatchString(text) {
 		text = reEnv.ReplaceAllString(text, fmt.Sprintf(`${1}env_profile: "%s"`, key))
 	} else {

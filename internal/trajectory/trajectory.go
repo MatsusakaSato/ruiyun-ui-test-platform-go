@@ -9,8 +9,8 @@ import (
 	"unicode/utf8"
 
 	"ruiyun-ui-test-platform-go/internal/artifacts"
+	"ruiyun-ui-test-platform-go/internal/canon"
 	"ruiyun-ui-test-platform-go/internal/models"
-	"ruiyun-ui-test-platform-go/internal/pyre"
 )
 
 var RuleImpact = map[string]string{
@@ -46,7 +46,7 @@ type ToolStat struct {
 }
 
 // SkillEntry 逐用例的 skill 条目。
-// Python 侧字段是 {"name","files","steps"} —— **没有** calls/sessions，
+// 字段固定为 {"name","files","steps"} —— **没有** calls/sessions，
 // 而 steps 记录用到该 skill 的步骤序号。多写字段会让前端拿到不存在的契约。
 type SkillEntry struct {
 	Name  string   `json:"name"`
@@ -54,7 +54,7 @@ type SkillEntry struct {
 	Steps []int    `json:"steps"`
 }
 
-// RoundSkill 轮次级 skill 汇总（Python 侧 {"name","sessions","files"} —— 同样没有 calls）
+// RoundSkill 轮次级 skill 汇总（字段 {"name","sessions","files"} —— 同样没有 calls）
 type RoundSkill struct {
 	Name     string   `json:"name"`
 	Sessions int      `json:"sessions"`
@@ -93,16 +93,16 @@ func EstTokens(text string) int {
 	return int(float64(cjk)/1.6 + float64(other)/4.0)
 }
 
-// PyRound 复刻 Python 的 round(x, nd)：银行家舍入（ties-to-even）。
+// RoundTo 实现 round(x, nd)：银行家舍入（ties-to-even）。
 //
-// 实现已统一搬到 pyre.Round —— 全项目只保留一份 Python 舍入语义，
+// 实现已统一搬到 canon.Round —— 全项目只保留一份舍入语义，
 // 这里保留公开名只是为了不动既有调用点。
-func PyRound(x float64, nd int) float64 {
-	return pyre.Round(x, nd)
+func RoundTo(x float64, nd int) float64 {
+	return canon.Round(x, nd)
 }
 
 func RoundToOneDecimal(v float64) float64 {
-	return PyRound(v, 1)
+	return RoundTo(v, 1)
 }
 
 func parseEpoch(tsStr string) float64 {
@@ -182,7 +182,7 @@ func SkillFiles(tc *models.ToolCall) []string {
 	return []string{}
 }
 
-// nilSafeStr 复刻 Python 的 `str(x or "")`：缺失/None 一律得到空串。
+// nilSafeStr 实现「空值回退空串」语义：缺失/nil 一律得到空串。
 // 切忌用 fmt.Sprintf("%v", nil) —— 那会产出字面量字符串 "<nil>"。
 func nilSafeStr(v any) string {
 	if v == nil {
@@ -194,8 +194,8 @@ func nilSafeStr(v any) string {
 	return fmt.Sprintf("%v", v)
 }
 
-// nonNilSlices 把 nil 切片换成空切片：Python 产出 []，Go 的 nil 会序列化成 null，
-// 而前端对 `?? []` 与 `null` 的处理并不等价。
+// nonNilSlices 把 nil 切片换成空切片：契约要求空集合为 []，而 Go 的 nil 会序列化成 null，
+// 前端对 `?? []` 与 `null` 的处理并不等价。
 func nonNilSlices(v any) []string {
 	switch t := v.(type) {
 	case []string:
@@ -208,9 +208,9 @@ func nonNilSlices(v any) []string {
 }
 
 func argSummary(arguments any, limit int) string {
-	// Python: json.dumps(arguments, ensure_ascii=False)
-	// 分隔符必须是 ", " / ": "，紧凑格式会与 Python 全量不一致。
-	s := models.PyJSONDumps(arguments)
+	// 非 ASCII 原样输出、键排序后的规范 JSON 形态。
+	// 分隔符必须是 ", " / ": "，紧凑格式会产出不一致的字符串。
+	s := models.JSONDumps(arguments)
 	runes := []rune(s)
 	if len(runes) > limit {
 		return string(runes[:limit]) + "…"
@@ -389,7 +389,7 @@ func BuildObjective(caseResult *models.CaseResult, stageTimes map[string]float64
 	return o
 }
 
-// evEpoch 复刻 Python _ev_epoch：float(ev.get("ts") or 0)
+// evEpoch 取事件时间戳（浮点秒），缺失归 0
 func evEpoch(ev map[string]any) float64 {
 	if f, ok := ev["ts"].(float64); ok {
 		return f
@@ -400,9 +400,9 @@ func evEpoch(ev map[string]any) float64 {
 	return 0
 }
 
-// isoToEpochOpt 复刻 Python _iso_to_epoch：本地无时区 ISO 串 → epoch 秒，
-// 解析失败返回 ok=false（Python 返回 None）。**无时区串按本地时区解释**，
-// 与 datetime.fromisoformat(...).timestamp() 一致。
+// isoToEpochOpt 把本地无时区 ISO 串转成 epoch 秒，
+// 解析失败返回 ok=false。**无时区串按本地时区解释**，
+// 即按本地时区补齐时区信息后再转 epoch。
 func isoToEpochOpt(s string) (float64, bool) {
 	if s == "" {
 		return 0, false
@@ -434,7 +434,7 @@ func toIntOK(v any) (int, bool) {
 	return 0, false
 }
 
-// confirmLabel 复刻 Python `CONFIRM_MODE_LABEL.get(mode, mode or "自动确认")`。
+// confirmLabel 取确认模式标签：已知模式取中文标签，未知/为空时原样回退。
 // mode 为空时必须回退成「自动确认」，绝不能给前端一个空标签。
 func confirmLabel(mode string) string {
 	if lbl, ok := ConfirmModeLabel[mode]; ok && lbl != "" {
@@ -650,8 +650,8 @@ func BuildCaseDetail(caseResult *models.CaseResult, findingsByStep map[string][]
 	for _, th := range trace.ThinkingSteps {
 		merged = append(merged, mergedItem{kind: "think", idx: th.Index, think: th})
 	}
-	// 必须稳定排序：Python 的 list.sort() 稳定，且它是先把 tool 全部入列、
-	// 再把 thinking 入列，所以**下标相同时 tool 排在 thinking 前面**。
+	// 必须稳定排序：先按「tool 全部入列、再把 thinking 入列」的顺序入队，
+	// 所以**下标相同时 tool 排在 thinking 前面**。
 	// 用 sort.Slice 会让同下标的顺序随机化，整个时间线随之漂移。
 	sort.SliceStable(merged, func(i, j int) bool {
 		return merged[i].idx < merged[j].idx
@@ -731,7 +731,7 @@ func BuildCaseDetail(caseResult *models.CaseResult, findingsByStep map[string][]
 			st.Truncated++
 		}
 	}
-	// 按首次出现顺序取出，再用**稳定**排序 —— Python 的 sorted() 是稳定排序，
+	// 按首次出现顺序取出，再用**稳定**排序，
 	// 同调用次数时必须保持首次出现顺序，否则 finding 顺序会随运行漂移。
 	toolsList := []*ToolStat{}
 	for _, name := range toolOrder {
@@ -775,7 +775,7 @@ func BuildCaseDetail(caseResult *models.CaseResult, findingsByStep map[string][]
 			sk.Files = appendUnique(sk.Files, f)
 		}
 	}
-	// 按首次出现顺序输出（Python 的 dict 保证插入有序；range map 会随机化）
+	// 按首次出现顺序输出（插入有序；range map 会随机化）
 	skillsList := []*SkillEntry{}
 	for _, name := range skillOrder {
 		skillsList = append(skillsList, skillsMap[name])
@@ -909,8 +909,8 @@ func BuildRoundDetail(caseResults []*models.CaseResult, metrics map[string]any, 
 		}
 	}
 
-	// 按**首次出现顺序**取出后再稳定排序：Python 的 dict.setdefault 保证插入有序，
-	// sorted() 又是稳定排序，同调用次数时顺序不能漂移。
+	// 按**首次出现顺序**取出后再稳定排序：插入有序 + 稳定排序，
+	// 同调用次数时顺序不能漂移。
 	roundTools := []*ToolStat{}
 	for _, name := range toolsOrder {
 		roundTools = append(roundTools, toolsMap[name])
@@ -964,7 +964,7 @@ func BuildRoundDetail(caseResults []*models.CaseResult, metrics map[string]any, 
 		reproRows = []map[string]any{}
 	}
 
-	// ---- 轮次级客观汇总（Python build_round_detail 里的 round_objective）----
+	// ---- 轮次级客观汇总（round_objective）----
 	sumObj := func(field, key string) int {
 		total := 0
 		for _, d := range details {
@@ -1005,7 +1005,7 @@ func BuildRoundDetail(caseResults []*models.CaseResult, metrics map[string]any, 
 		for _, t := range timings {
 			sum += toFloatValue(t["first_response_s"])
 		}
-		avgFirst = PyRound(sum/float64(len(timings)), 2)
+		avgFirst = RoundTo(sum/float64(len(timings)), 2)
 	}
 	stMap := stageTimes
 	if stMap == nil {
@@ -1015,7 +1015,7 @@ func BuildRoundDetail(caseResults []*models.CaseResult, metrics map[string]any, 
 		if b == 0 {
 			return 0.0
 		}
-		return PyRound(float64(a)*100.0/float64(b), 1)
+		return RoundTo(float64(a)*100.0/float64(b), 1)
 	}
 	roundObjective := map[string]any{
 		"volume": map[string]any{

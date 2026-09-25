@@ -156,9 +156,9 @@ func IsDeliverable(path string) bool {
 
 // ResolveAbsPath 只做「相对路径 → 拼接」，**不做任何存在性校验**。
 //
-// Deprecated: 展示用的绝对路径请用 DisplayAbsPath —— Python 侧
-// （core/artifacts.resolve_abs_path）每一级候选都要求 is_file() 通过，
-// 解析不到返回空串，界面据此显示「本机未找到」。
+// Deprecated: 展示用的绝对路径请用 DisplayAbsPath —— 它要求
+// 每一级候选都存在（逐级 stat），解析不到返回空串，
+// 界面据此显示「本机未找到」。
 // 用本函数会给出**指向不存在文件**的路径，前端「查看产物」按钮会点空。
 func ResolveAbsPath(relOrAbs string, workspaceRoot string) string {
 	if relOrAbs == "" {
@@ -181,11 +181,11 @@ func ResolveAbsPath(relOrAbs string, workspaceRoot string) string {
 	return filepath.Join(workspaceRoot, p)
 }
 
-// callFailed 复刻 Python _call_failed：只有**明确失败**才算失败
+// callFailed 判定调用是否**明确失败**：只有明确失败才算失败
 // （结果里没有这些字段的工具一律按成功处理，不误杀）。
 //
 // 实测事故：convert_markdown_to_docx 返回 {"success": false, "error": ...} 时，
-// 旧实现照样把它记成一件产物 —— 界面上就出现一个指向**不存在文件**的链接，
+// 若不判失败就照样把它记成一件产物 —— 界面上会出现一个指向**不存在文件**的链接，
 // 而真正产出的文件反倒没被记录。
 func callFailed(obj map[string]any) bool {
 	if len(obj) == 0 {
@@ -204,7 +204,7 @@ func callFailed(obj map[string]any) bool {
 	return false
 }
 
-// truthy 复刻 Python 的真值判定（用于 error 字段）
+// truthy 真值判定（用于 error 字段）
 func truthy(v any) bool {
 	switch t := v.(type) {
 	case nil:
@@ -226,7 +226,6 @@ func truthy(v any) bool {
 }
 
 // ExtractArtifacts 从轨迹的工具调用中抽取产出物。
-// 逐行对齐 Python core.artifacts.extract_artifacts。
 func ExtractArtifacts(trace *models.ExecutionTrace, workspaceRoot string) *ArtifactSet {
 	items := []*Artifact{}
 	if trace == nil {
@@ -312,7 +311,7 @@ func ExtractArtifacts(trace *models.ExecutionTrace, workspaceRoot string) *Artif
 }
 
 // ---------------------------------------------------------------------------
-// 本机绝对路径解析（复刻 Python core.artifacts.resolve_abs_path）
+// 本机绝对路径解析
 //
 // 用途：界面「查看产物」按钮要调 POST /api/reveal（在文件管理器中定位），
 // 而它只认绝对路径。**解析不到时必须返回空串**，让界面显示「本机未找到」，
@@ -331,7 +330,7 @@ func expandUser(p string) string {
 	return p
 }
 
-// okFile 复刻 _ok：必须**绝对路径且真实存在为文件**才返回（否则空串）
+// okFile 校验：必须**绝对路径且真实存在为文件**才返回（否则空串）
 func okFile(p string) string {
 	if p == "" {
 		return ""
@@ -438,7 +437,7 @@ func searchByName(root, name, rel string, budget int) string {
 	return ""
 }
 
-// DisplayAbsPath 复刻 Python resolve_abs_path（六级回落，只读且有界）。
+// DisplayAbsPath 解析本机绝对路径（六级回落，只读且有界）。
 func DisplayAbsPath(a *Artifact, workspaceRoot string) string {
 	if a == nil {
 		return ""

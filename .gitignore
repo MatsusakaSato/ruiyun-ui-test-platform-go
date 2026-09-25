@@ -16,7 +16,7 @@ coverage.html
 *.db-wal
 *.db-shm
 # 应用设置覆盖文件：POST /api/app-settings 会写它，内容是运行期状态（带 saved_at），
-# 不是源码。Python 原版同样忽略它。
+# 不是源码，不应提交。
 .app_settings.json
 
 # 编辑器 / 系统

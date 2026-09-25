@@ -11,7 +11,7 @@ import (
 )
 
 // loadEffectiveCfg 读 config.yaml 并做三层合并（.app_settings.json > config.yaml > 内置默认）。
-// 对应 Python 的 `yaml.safe_load(config_path().read_text())` + `effective_config(cfg)`。
+// 先按 YAML 解析出原始字典，再交给 config.EffectiveConfig 做优先级合并。
 // cfgPath 为空时使用默认配置路径。
 func loadEffectiveCfg(cfgPath string) map[string]any {
 	var raw map[string]any
@@ -39,27 +39,27 @@ func readYAMLMap(path string) map[string]any {
 	return out
 }
 
-// pyVal 复刻 Python 打印用的值渲染（nil → "None"）
-func pyVal(v any) string {
+// reprValue 值渲染：空值显示为字面量 None（无引号）
+func reprValue(v any) string {
 	if v == nil {
 		return "None"
 	}
 	return fmt.Sprintf("%v", v)
 }
 
-// pyReprStr 复刻 Python 的 {x!r}：None 无引号，字符串加引号
-func pyReprStr(v any) string {
+// reprString 值渲染：空值显示为 None（无引号），字符串加引号
+func reprString(v any) string {
 	if v == nil {
 		return "None"
 	}
 	if s, ok := v.(string); ok {
-		return pyReprQuote(s)
+		return reprQuote(s)
 	}
 	return fmt.Sprintf("%v", v)
 }
 
-// pyReprQuote 复刻 Python repr(str)：单引号优先，含 ' 而无 " 时改用双引号
-func pyReprQuote(s string) string {
+// reprQuote 字符串加引号渲染：单引号优先，含 ' 而无 " 时改用双引号
+func reprQuote(s string) string {
 	quote := byte('\'')
 	if strings.Contains(s, "'") && !strings.Contains(s, `"`) {
 		quote = '"'
@@ -87,7 +87,7 @@ func pyReprQuote(s string) string {
 	return b.String()
 }
 
-// truncRunes 按码点截断（Python 的切片语义）
+// truncRunes 按码点截断（按 rune 而非字节切分）
 func truncRunes(s string, n int) string {
 	r := []rune(s)
 	if len(r) <= n {
@@ -113,7 +113,7 @@ func mapList(v any) []map[string]any {
 	return nil
 }
 
-// unescapeHTMLish 复刻 Python json.dumps 不转义 < > & / U+2028 / U+2029 的行为
+// unescapeHTMLish 让 JSON 输出保持 < > & / U+2028 / U+2029 原样
 // （Go 的 encoding/json 默认会把它转成 \u003c 等）
 func unescapeHTMLish(data []byte) []byte {
 	s := string(data)

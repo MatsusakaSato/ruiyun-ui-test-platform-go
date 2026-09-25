@@ -13,7 +13,7 @@ const (
 )
 
 // procAttrNewSession Windows：CREATE_NEW_PROCESS_GROUP | DETACHED_PROCESS
-// （与 server.py 的 creationflags 一致）
+// （让测试进程独立于服务所在进程组）
 func procAttrNewSession() *syscall.SysProcAttr {
 	return &syscall.SysProcAttr{CreationFlags: createNewProcessGroup | detachedProcess}
 }

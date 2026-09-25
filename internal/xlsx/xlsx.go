@@ -30,8 +30,8 @@ var (
 	knownTargets = []string{"word", "ppt", "html", "pdf", "excel", "network"}
 
 	// kindOrder 固定第 3 步（语义推断）的遍历顺序。
-	// Python 原版此处遍历 set，顺序随 PYTHONHASHSEED 随机化 —— 同一份输入
-	// 多次运行会得到不同顺序的 targets。Go 侧显式固定顺序以保证可复现。
+	// 若此处遍历 set，顺序会随哈希种子随机化 —— 同一份输入
+	// 多次运行会得到不同顺序的 targets。这里显式固定顺序以保证可复现。
 	kindOrder = []string{"docx", "pptx", "excel", "pdf", "html", "network"}
 )
 
@@ -68,7 +68,7 @@ func hitKey(text string, keys []string) bool {
 // InferTargets 从显式目标列、附件后缀或提问语义推断测试目标
 func InferTargets(prompt, attachmentName, rawTarget string) []string {
 	// 初始化为空切片而非 nil：nil 会被 encoding/json 序列化成 null，
-	// 而 Python 原版返回的是 []，前端依赖二者语义一致。
+	// 而契约要求返回 []，前端依赖二者语义一致。
 	targets := []string{}
 
 	// 1. 显式白名单匹配
@@ -137,9 +137,9 @@ func InferTargets(prompt, attachmentName, rawTarget string) []string {
 				break
 			}
 		}
-		// Python 原版这里是 if/elif 互斥链：命中前一个分支就不再判后面的。
+		// 这里是 if/elif 互斥链：命中前一个分支就不再判后面的。
 		// 必须保持互斥，否则同时含「课件」和「表格」的提问会同时补出
-		// ppt 与 excel（比原版多推一个目标，下游断言会跟着变）。
+		// ppt 与 excel（多推一个目标，下游断言会跟着变）。
 		if !hitWord {
 			if hitKey(pLower, pptKeys) {
 				targets = append(targets, "ppt")
@@ -399,7 +399,7 @@ func RowsToItems(rows [][]string, headIdx *int, promptCol int,
 	}
 	body := rows[startIdx:]
 
-	// 空切片而非 nil：nil 会序列化成 null，Python 原版返回的是 []。
+	// 空切片而非 nil：nil 会序列化成 null，契约要求返回 []。
 	items := []map[string]any{}
 	skipped := 0
 
@@ -592,7 +592,7 @@ func ReadXLSX(data []byte, maxRows int) (map[string]any, error) {
 		resRows = append(resRows, cleanRow)
 	}
 
-	// 保持原 Python 端的返回怪癖：小写 "sheet1"
+	// 保持既定的返回约定：sheet 名统一小写
 	return map[string]any{
 		"rows":  resRows,
 		"sheet": strings.ToLower(sheetName),

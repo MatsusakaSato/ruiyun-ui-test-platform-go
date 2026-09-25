@@ -9,8 +9,8 @@ import (
 	"time"
 	"unicode/utf8"
 
+	"ruiyun-ui-test-platform-go/internal/canon"
 	"ruiyun-ui-test-platform-go/internal/models"
-	"ruiyun-ui-test-platform-go/internal/pyre"
 )
 
 var wrapperKeys = []string{"event_type", "tool_name", "tool_call_id"}
@@ -54,8 +54,8 @@ func UnwrapResult(raw any) (*string, any) {
 			if err := json.Unmarshal([]byte(stripped), &obj); err == nil {
 				return &v, obj
 			}
-			if pyObj, err := ParsePyLiteral(stripped); err == nil {
-				return &v, pyObj
+			if parsedObj, err := ParseLiteral(stripped); err == nil {
+				return &v, parsedObj
 			}
 		}
 		return &v, nil
@@ -98,7 +98,7 @@ func ExtractBody(text *string, obj any) (string, string) {
 // DetectEmptyRequiredArgs 检测必填参数为空被放行的情况
 func DetectEmptyRequiredArgs(name string, arguments any) []string {
 	// 必须是空切片而非 nil：nil 会被 encoding/json 序列化成 null，
-	// 而 Python 原版返回 []。前端对二者不等价（真实差分：1037 次调用全部不一致）。
+	// 而契约要求返回 []。前端对二者不等价（真实实测：1037 次调用全部不一致）。
 	empty := []string{}
 	m, ok := arguments.(map[string]any)
 	if !ok {
@@ -135,14 +135,14 @@ func DetectEmptyRequiredArgs(name string, arguments any) []string {
 	return empty
 }
 
-// pyStr 复刻 Python 的 `d.get(key, "")` / `d.get(key) or ""` 语义：
-// 键缺失或值为 None 一律返回空串。
+// mapString 实现「取键、缺失回退空串」语义：
+// 键缺失或值为 nil 一律返回空串。
 //
 // 绝不能用 fmt.Sprintf("%v", m[key]) 代替 —— 那样会产出字面量字符串 "<nil>"。
 // 真实事故：session.meta.json 用的是 snake_case（session_id / created_at /
 // updated_at），早期实现读的是 id / createdAt / updatedAt，于是 219/219 个会话的
 // session_id、created_at、updated_at 全部变成字符串 "<nil>"。
-func pyStr(m map[string]any, key string) string {
+func mapString(m map[string]any, key string) string {
 	v, ok := m[key]
 	if !ok || v == nil {
 		return ""
@@ -153,11 +153,11 @@ func pyStr(m map[string]any, key string) string {
 	return fmt.Sprintf("%v", v)
 }
 
-// round2 复刻 Python 的 round(x, 2)（银行家舍入）。
-// Python 侧所有派生耗时都做了 2 位小数取整，Go 侧不做就会全量不一致。
-// 已委托 pyre.Round —— 原写法 math.Round(x*100)/100 在 ties 上方向相反且多一次舍入。
+// round2 对 x 做 2 位小数取整（银行家舍入）。
+// 所有派生耗时都做了 2 位小数取整，不做就会全量不一致。
+// 已委托 canon.Round —— 原写法 math.Round(x*100)/100 在 ties 上方向相反且多一次舍入。
 func round2(x float64) float64 {
-	return pyre.Round(x, 2)
+	return canon.Round(x, 2)
 }
 
 func parseTime(tsStr string) (time.Time, bool) {
@@ -203,16 +203,16 @@ func ParseSession(sessionDir string) (*models.ExecutionTrace, error) {
 	}
 
 	// 键名必须与 session.meta.json 实际的 snake_case 字段一致
-	sessionID := pyStr(meta, "session_id")
+	sessionID := mapString(meta, "session_id")
 	if sessionID == "" {
-		// Python: meta.get("session_id") or session_dir.name
+		// 键缺失或为空时回退到会话目录名
 		sessionID = filepath.Base(sessionDir)
 	}
-	title := pyStr(meta, "title")
-	status := pyStr(meta, "status")
-	mode := pyStr(meta, "mode")
-	createdAt := pyStr(meta, "created_at")
-	updatedAt := pyStr(meta, "updated_at")
+	title := mapString(meta, "title")
+	status := mapString(meta, "status")
+	mode := mapString(meta, "mode")
+	createdAt := mapString(meta, "created_at")
+	updatedAt := mapString(meta, "updated_at")
 
 	rawMessages, _ := msgRoot["messages"].([]any)
 
@@ -246,27 +246,27 @@ func ParseSession(sessionDir string) (*models.ExecutionTrace, error) {
 		if !ok {
 			continue
 		}
-		role := pyStr(msg, "role")
-		msgTs := pyStr(msg, "timestamp")
+		role := mapString(msg, "role")
+		msgTs := mapString(msg, "timestamp")
 
 		if role == "user" {
-			// 多轮会话：每条 user 消息都刷新触发源（Python: current_turn_prompt）
-			currentTurnPrompt = pyStr(msg, "content")
+			// 多轮会话：每条 user 消息都刷新触发源（current_turn_prompt）
+			currentTurnPrompt = mapString(msg, "content")
 			trace.TurnCount++
 			if firstUserPrompt == "" {
 				firstUserPrompt = currentTurnPrompt
 				userAt = msgTs
 			}
 		} else if role == "assistant" {
-			// Python 累加的是整条消息的 reasoningContent，
+			// 累加的是整条消息的 reasoningContent，
 			// 不是 thinking 步骤的 content 之和（二者在现有语料里恰好相等，
 			// 但来源不同，一旦日志多出「有 reasoning 无 thinking 步骤」就露馅）。
-			trace.ReasoningChars += utf8.RuneCountInString(pyStr(msg, "reasoningContent"))
+			trace.ReasoningChars += utf8.RuneCountInString(mapString(msg, "reasoningContent"))
 
 			if assistantAt == "" && msgTs != "" {
 				assistantAt = msgTs
 			}
-			msgDoneAt := pyStr(msg, "completedAt")
+			msgDoneAt := mapString(msg, "completedAt")
 			if msgDoneAt != "" {
 				completedAt = msgDoneAt
 			}
@@ -281,15 +281,15 @@ func ParseSession(sessionDir string) (*models.ExecutionTrace, error) {
 				}
 			}
 
-			// 最终答复：Python 取最后一条 content 非 None 的 assistant 消息，
+			// 最终答复：取最后一条 content 非 None 的 assistant 消息，
 			// 空串也算（只要不是 null）—— 不能跳过空串。
 			if ans, exists := msg["content"]; exists && ans != nil {
-				lastAssistantAnswer = pyStr(msg, "content")
+				lastAssistantAnswer = mapString(msg, "content")
 			}
 
 			// 遍历 timelineSteps
-			// Python 的 step_index 是「先取当前值，循环末尾再 +1」，首个步骤 index=0。
-			// 早期实现先 ++ 再取，导致全部 index/hint 偏移 +1（真实差分 1037/1037）。
+			// step_index 是「先取当前值，循环末尾再 +1」，首个步骤 index=0。
+			// 早期实现先 ++ 再取，导致全部 index/hint 偏移 +1（真实实测 1037/1037）。
 			spanFirst := stepIndex
 			timeline, _ := msg["timelineSteps"].([]any)
 			for _, item := range timeline {
@@ -297,43 +297,42 @@ func ParseSession(sessionDir string) (*models.ExecutionTrace, error) {
 				if !ok {
 					continue
 				}
-				stepType := pyStr(step, "type")
+				stepType := mapString(step, "type")
 
 				if stepType == "thinking" {
 					trace.ThinkingSteps = append(trace.ThinkingSteps, &models.ThinkingStep{
 						Index:     stepIndex,
-						Content:   pyStr(step, "content"),
+						Content:   mapString(step, "content"),
 						MsgAt:     msgTs,
 						MsgDoneAt: msgDoneAt,
 					})
 				} else if stepType == "tool_call" {
-					toolName := pyStr(step, "name")
+					toolName := mapString(step, "name")
 					arguments := step["arguments"]
 					rawRes, resObj := UnwrapResult(step["result"])
 					body, bodyFrom := ExtractBody(rawRes, resObj)
 
-					// 结果外壳里的元信息。
-					// Python: meta_res = raw_res if isinstance(raw_res, dict) else {}
+					// 结果外壳里的元信息：结果不是 dict 时按空 dict 处理。
 					resMeta, _ := step["result"].(map[string]any)
-					tcSessionID := pyStr(resMeta, "session_id")
+					tcSessionID := mapString(resMeta, "session_id")
 					if tcSessionID == "" {
 						tcSessionID = sessionID
 					}
-					reqID := pyStr(resMeta, "request_id")
+					reqID := mapString(resMeta, "request_id")
 					if reqID == "" {
-						reqID = pyStr(msg, "request_id")
+						reqID = mapString(msg, "request_id")
 					}
 
 					trace.ToolCalls = append(trace.ToolCalls, &models.ToolCall{
 						Index:            stepIndex,
-						ToolCallID:       pyStr(step, "toolCallId"),
+						ToolCallID:       mapString(step, "toolCallId"),
 						Name:             toolName,
 						Arguments:        arguments,
 						RawResult:        rawRes,
 						ResultObj:        resObj,
 						Body:             body,
 						BodyFrom:         bodyFrom,
-						EventType:        pyStr(resMeta, "event_type"),
+						EventType:        mapString(resMeta, "event_type"),
 						SessionID:        tcSessionID,
 						RequestID:        reqID,
 						TurnPrompt:       currentTurnPrompt,
@@ -345,7 +344,7 @@ func ParseSession(sessionDir string) (*models.ExecutionTrace, error) {
 				stepIndex++
 			}
 
-			// 只有本条消息确有步骤时才记录区间（Python: if span_last >= span_first）
+			// 只有本条消息确有步骤时才记录区间（if span_last >= span_first）
 			if spanLast := stepIndex - 1; spanLast >= spanFirst {
 				trace.MessageSpans = append(trace.MessageSpans, map[string]any{
 					"at":         msgTs,
@@ -364,7 +363,7 @@ func ParseSession(sessionDir string) (*models.ExecutionTrace, error) {
 	trace.CompletedAt = completedAt
 	trace.IsStreaming = isStreaming
 
-	// 派生耗时（秒）：Python 侧全部 round(x, 2)，且不做非负兜底。
+	// 派生耗时（秒）：全部 round(x, 2)，且不做非负兜底。
 	uT, uOK := parseTime(userAt)
 	aT, aOK := parseTime(assistantAt)
 	dT, dOK := parseTime(completedAt)
@@ -377,7 +376,7 @@ func ParseSession(sessionDir string) (*models.ExecutionTrace, error) {
 	if aOK && dOK {
 		trace.GenerationS = round2(dT.Sub(aT).Seconds())
 	} else if uOK && dOK {
-		// Python 的 elif 兜底：无 assistant 时间锚时退化为 user -> done
+		// elif 兜底：无 assistant 时间锚时退化为 user -> done
 		trace.GenerationS = round2(dT.Sub(uT).Seconds())
 	}
 	if crOK && upOK {

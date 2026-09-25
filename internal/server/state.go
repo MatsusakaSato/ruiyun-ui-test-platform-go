@@ -13,14 +13,14 @@ import (
 	"time"
 
 	"gopkg.in/yaml.v3"
+	"ruiyun-ui-test-platform-go/internal/canon"
 	"ruiyun-ui-test-platform-go/internal/config"
 	"ruiyun-ui-test-platform-go/internal/evaluator"
 	"ruiyun-ui-test-platform-go/internal/llm"
-	"ruiyun-ui-test-platform-go/internal/pyre"
 	"ruiyun-ui-test-platform-go/internal/rounds"
 )
 
-// MaxLogLines 控制台回放缓冲上限（与 server.py 的 MAX_LOG_LINES 一致）
+// MaxLogLines 控制台回放缓冲上限
 const MaxLogLines = 800
 
 // ------------------------------------------------------------------ RunState
@@ -35,7 +35,7 @@ type RunOptions struct {
 	AutoConfirm *bool
 }
 
-// RunState 同一时刻只允许一轮运行（与 server.py 的 RunState 同构）
+// RunState 同一时刻只允许一轮运行
 type RunState struct {
 	mu             sync.Mutex
 	proc           *exec.Cmd
@@ -78,14 +78,14 @@ func (s *RunState) Start(opts RunOptions) (bool, string) {
 	s.stopped = false
 	s.queue = []map[string]any{}
 	for i, c := range opts.CaseItems {
-		id := pyStrOr(c["id"], "")
+		id := strOr(c["id"], "")
 		if id == "" {
 			id = fmt.Sprintf("CASE-%03d", i+1)
 		}
 		s.queue = append(s.queue, map[string]any{
 			"case_id":   id,
-			"name":      pyStrOr(c["name"], ""),
-			"prompt":    pyStrOr(c["prompt"], ""),
+			"name":      strOr(c["name"], ""),
+			"prompt":    strOr(c["prompt"], ""),
 			"status":    "",
 			"elapsed_s": nil,
 		})
@@ -251,7 +251,7 @@ func (s *RunState) Status() map[string]any {
 	finishedOK := s.exitCode != nil && *s.exitCode == 0
 	elapsed := 0.0
 	if s.startedAt != 0 {
-		elapsed = pyRound1(float64(time.Now().UnixNano())/1e9 - s.startedAt)
+		elapsed = round1(float64(time.Now().UnixNano())/1e9 - s.startedAt)
 	}
 	exitCode := any(nil)
 	if s.exitCode != nil {
@@ -287,18 +287,18 @@ func (s *RunState) queueStatusLocked(archived bool) []map[string]any {
 				byID := map[string]map[string]any{}
 				for _, r := range rows {
 					if rm, ok := r.(map[string]any); ok {
-						byID[pyStrOr(rm["case_id"], "")] = rm
+						byID[strOr(rm["case_id"], "")] = rm
 					}
 				}
 				for i, q := range s.queue {
 					var r map[string]any
-					if v, ok := byID[pyStrOr(q["case_id"], "")]; ok {
+					if v, ok := byID[strOr(q["case_id"], "")]; ok {
 						r = v
 					} else if i < len(rows) {
 						r, _ = rows[i].(map[string]any)
 					}
 					if r != nil {
-						q["status"] = pyStrOr(r["status"], "")
+						q["status"] = strOr(r["status"], "")
 						q["elapsed_s"] = r["elapsed_s"]
 					}
 				}
@@ -381,7 +381,7 @@ func llmConfigDict() map[string]any {
 func (e *EvalState) preflight() map[string]any {
 	defer func() {
 		if r := recover(); r != nil {
-			// 与 Python 的 except 分支同义：异常也当作一次「不可用」的探活结果
+			// 探活异常也当作一次「不可用」的结果，不向上抛
 		}
 	}()
 	res := evaluator.PreflightCheck(map[string]any{"llm": llmConfigDict()})
@@ -411,7 +411,7 @@ func (e *EvalState) Start(runID string, maxCases, concurrency int) (bool, string
 	e.lastPreflight = pf
 	e.mu.Unlock()
 	if ok, _ := pf["ok"].(bool); !ok {
-		msg := pyStrOr(pf["message"], "模型不可用，已中止评估")
+		msg := strOr(pf["message"], "模型不可用，已中止评估")
 		e.mu.Lock()
 		e.line(fmt.Sprintf("[评估] 已拒绝启动：%s", msg))
 		e.mu.Unlock()
@@ -485,7 +485,7 @@ func (e *EvalState) run(runID string, maxCases, concurrency int) {
 	}
 	if aborted, _ := res["aborted"].(bool); aborted {
 		e.mu.Lock()
-		e.errMsg = pyStrOr(res["error"], "模型不可用，已中止评估")
+		e.errMsg = strOr(res["error"], "模型不可用，已中止评估")
 		e.line(fmt.Sprintf("[评估] 已中止：%s", e.errMsg))
 		e.mu.Unlock()
 		return
@@ -496,7 +496,7 @@ func (e *EvalState) run(runID string, maxCases, concurrency int) {
 	} else {
 		e.summary = map[string]any{}
 	}
-	if er := pyStrOr(res["error"], ""); er != "" {
+	if er := strOr(res["error"], ""); er != "" {
 		e.errMsg = er
 	}
 	casesLen := 0
@@ -535,7 +535,7 @@ func (e *EvalState) Status() map[string]any {
 	defer e.mu.Unlock()
 	elapsed := 0.0
 	if e.startedAt != 0 {
-		elapsed = pyRound1(float64(time.Now().UnixNano())/1e9 - e.startedAt)
+		elapsed = round1(float64(time.Now().UnixNano())/1e9 - e.startedAt)
 	}
 	lines := []string{}
 	if n := len(e.lines); n > 60 {
@@ -563,9 +563,9 @@ func (e *EvalState) Status() map[string]any {
 
 // ------------------------------------------------------------------ 平台相关
 
-// pyRound1 Python round(x, 1)
-func pyRound1(v float64) float64 {
-	return pyre.Round(v, 1)
+// round1 四舍五入保留 1 位小数
+func round1(v float64) float64 {
+	return canon.Round(v, 1)
 }
 
 // deleteRound 供路由层调用

@@ -13,8 +13,8 @@ import (
 	"time"
 	"unicode/utf8"
 
+	"ruiyun-ui-test-platform-go/internal/canon"
 	"ruiyun-ui-test-platform-go/internal/config"
-	"ruiyun-ui-test-platform-go/internal/pyre"
 )
 
 const (
@@ -35,8 +35,8 @@ const (
 )
 
 var (
-	reBearer = regexp.MustCompile(`(?i)(bearer[` + pyre.SpaceClass + `]+)[A-Za-z0-9._\-]{6,}`)
-	reAPIKey = regexp.MustCompile(`(?i)(["']?(?:api[_-]?key|apikey|authorization|access[_-]?token)["']?[` + pyre.SpaceClass + `]*[:=][` + pyre.SpaceClass + `]*["']?)[^"'` + pyre.SpaceClass + `,}]{4,}`)
+	reBearer = regexp.MustCompile(`(?i)(bearer[` + canon.SpaceClass + `]+)[A-Za-z0-9._\-]{6,}`)
+	reAPIKey = regexp.MustCompile(`(?i)(["']?(?:api[_-]?key|apikey|authorization|access[_-]?token)["']?[` + canon.SpaceClass + `]*[:=][` + canon.SpaceClass + `]*["']?)[^"'` + canon.SpaceClass + `,}]{4,}`)
 )
 
 // Redact 抹去敏感凭证
@@ -113,10 +113,9 @@ func NewLLMClient(timeout time.Duration) *LLMClient {
 
 // normalizeBaseURL 校验并规范化 base_url，返回 (规范化地址, 错误信息)。
 //
-// 对应 Python `core/llm_client.py:normalize_base_url` —— 文案逐字保留，
-// 前端「测试连接」直接把它显示给用户。
+// 返回的错误文案会被前端「测试连接」直接显示给用户，需逐字保留。
 func normalizeBaseURL(baseURL string) (string, string) {
-	raw := strings.TrimRight(pyre.Strip(baseURL), "/")
+	raw := strings.TrimRight(canon.Strip(baseURL), "/")
 	if raw == "" {
 		return "", "请填写模型供应商地址"
 	}
@@ -138,8 +137,8 @@ func normalizeBaseURL(baseURL string) (string, string) {
 
 // ProbeProvider 供应商探活
 func ProbeProvider(baseURL, apiKey, model, probePath string, timeoutS float64) *ProbeResult {
-	key := pyre.Strip(apiKey) // Python 是 (api_key or "").strip()
-	mName := pyre.Strip(model)
+	key := canon.Strip(apiKey) // 去掉首尾空白（空值/未配置得到空串）
+	mName := canon.Strip(model)
 
 	if timeoutS <= 0 {
 		timeoutS = DefaultTimeoutS
@@ -151,9 +150,9 @@ func ProbeProvider(baseURL, apiKey, model, probePath string, timeoutS float64) *
 		return int(time.Since(t0).Milliseconds())
 	}
 
-	// Python 先校验地址、再校验 Key，两条都是 stage="preflight"。
-	// （旧实现把两者合成一条 "供应商地址与 API Key 均不能为空" 且 stage="input"，
-	// 与 oracle 的文案和 stage 都不一致 —— HTTP 差分实测。）
+	// 先校验地址、再校验 Key，两条都是 stage="preflight"。
+	// 若把两者合成一条「供应商地址与 API Key 均不能为空」且 stage="input"，
+	// 前端拿到的文案与 stage 都会对不上 —— HTTP 实测。
 	bURL, errMsg := normalizeBaseURL(baseURL)
 	if errMsg != "" {
 		return &ProbeResult{
@@ -176,8 +175,8 @@ func ProbeProvider(baseURL, apiKey, model, probePath string, timeoutS float64) *
 
 	// API Key 绝不含空白。把「Key + 模型名/地址」一起粘进来是最常见的坑：
 	// 直接判入参错误，比发出去换回一个含义模糊的 401 更容易定位。
-	// 对应 core/llm_client.py:242（原文逐字保留）。
-	if pyre.ContainsSpace(key) {
+	// 该文案直接展示给用户，需逐字保留。
+	if canon.ContainsSpace(key) {
 		return &ProbeResult{
 			OK:       false,
 			Stage:    "preflight",
@@ -371,7 +370,7 @@ type ChatResult struct {
 	LatencyMs int                    `json:"latency_ms"`
 }
 
-// Chat 完整对话调用，兼容 Python core.llm_client.chat
+// Chat 完整对话调用
 func Chat(baseURL, apiKey, model string, messages []map[string]string, timeoutS float64, temperature float64, jsonMode bool, maxTokens int) ChatResult {
 	bURL := strings.TrimRight(strings.TrimSpace(baseURL), "/")
 	if timeoutS <= 0 {
@@ -382,15 +381,14 @@ func Chat(baseURL, apiKey, model string, messages []map[string]string, timeoutS 
 		return int(time.Since(t0).Milliseconds())
 	}
 
-	// ⚠️ 原实现**完全没有**这两个前置校验（Python 有，见 core/llm_client.py:406-414）。
-	// 缺了它们，把「模型名」一起粘进 Key 时会白跑一次网络请求，
-	// 换回一句与真实原因无关的 401。原文逐字保留。
-	key := pyre.Strip(apiKey)
+	// ⚠️ 这两个前置校验必须保留。缺了它们，把「模型名」一起粘进 Key 时
+	// 会白跑一次网络请求，换回一句与真实原因无关的 401。文案逐字保留。
+	key := canon.Strip(apiKey)
 	if key == "" {
 		return ChatResult{OK: false, Error: "未配置 API Key", Stage: "preflight",
 			LatencyMs: elapsedMs()}
 	}
-	if pyre.ContainsSpace(key) {
+	if canon.ContainsSpace(key) {
 		return ChatResult{OK: false, Error: "API Key 含空格或换行，请检查是否粘贴了多余内容",
 			Stage: "preflight", LatencyMs: elapsedMs()}
 	}
@@ -549,7 +547,7 @@ type SecretsData struct {
 }
 
 // LoadConfig 读取存储的密钥。
-// Python `load_config` 会对每个字符串值做 `.strip()`，这里一致。
+// 读取时对每个字符串值做首尾去空白。
 func LoadConfig() SecretsData {
 	sp := config.SecretsPath()
 	data, err := os.ReadFile(sp)
@@ -558,10 +556,10 @@ func LoadConfig() SecretsData {
 	}
 	var s SecretsData
 	_ = json.Unmarshal(data, &s)
-	s.BaseURL = pyre.Strip(s.BaseURL)
-	s.APIKey = pyre.Strip(s.APIKey)
-	s.Model = pyre.Strip(s.Model)
-	s.SavedAt = pyre.Strip(s.SavedAt)
+	s.BaseURL = canon.Strip(s.BaseURL)
+	s.APIKey = canon.Strip(s.APIKey)
+	s.Model = canon.Strip(s.Model)
+	s.SavedAt = canon.Strip(s.SavedAt)
 	return s
 }
 
@@ -592,16 +590,16 @@ func ClearConfig() {
 
 // PublicConfig 返回脱敏公开配置。
 //
-// 字段名必须与 Python `core/llm_client.py:public_config` 完全一致：
-// 前端 `state.js` 的 `LLM_SRV` 读的是 `key_hint` / `saved_at`。
-// （原实现返回 `key_mask` 且漏了 `saved_at` —— 界面拿不到「已配置的 Key 提示」。）
+// 字段名必须与前端 `state.js` 的 `LLM_SRV` 契约一致：它读的是
+// `key_hint` / `saved_at`。若返回 `key_mask` 且漏了 `saved_at`，
+// 界面就拿不到「已配置的 Key 提示」。
 func PublicConfig() map[string]any {
 	cfg := LoadConfig()
-	baseURL := pyre.Strip(cfg.BaseURL)
-	key := pyre.Strip(cfg.APIKey)
+	baseURL := canon.Strip(cfg.BaseURL)
+	key := canon.Strip(cfg.APIKey)
 	configured := baseURL != "" && key != ""
 
-	// Python: len(key) 数码点
+	// 按字符数（码点）计算提示
 	hint := ""
 	if utf8.RuneCountInString(key) >= 14 {
 		r := []rune(key)
@@ -613,8 +611,8 @@ func PublicConfig() map[string]any {
 	return map[string]any{
 		"configured": configured,
 		"base_url":   baseURL,
-		"model":      pyre.Strip(cfg.Model),
+		"model":      canon.Strip(cfg.Model),
 		"key_hint":   hint,
-		"saved_at":   pyre.Strip(cfg.SavedAt),
+		"saved_at":   canon.Strip(cfg.SavedAt),
 	}
 }

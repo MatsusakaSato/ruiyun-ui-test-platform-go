@@ -13,7 +13,7 @@ import (
 	"strings"
 	"time"
 
-	"ruiyun-ui-test-platform-go/internal/pyre"
+	"ruiyun-ui-test-platform-go/internal/canon"
 
 	"ruiyun-ui-test-platform-go/internal/cdp"
 	"ruiyun-ui-test-platform-go/internal/config"
@@ -156,12 +156,12 @@ func listUploads() []map[string]any {
 	return out
 }
 
-// walkFilesUnsorted 复刻 Python `Path.rglob("*")` 的深度优先、**不排序**遍历。
+// walkFilesUnsorted 深度优先、**不排序**遍历目录下的所有文件。
 //
-// ⚠ 这是 listUploads 顺序保真的关键：Python 的 `Path.rglob` 走 os.scandir 的
-// 底层目录序（**不排序**），而 Go 的 `filepath.Walk` / `os.ReadDir` 会按文件名排序。
+// ⚠ 这是 listUploads 顺序稳定的关键：底层目录序（**不排序**）才是稳定依据，
+// 而 Go 的 `filepath.Walk` / `os.ReadDir` 会按文件名排序。
 // mtime 只精确到分钟，同一批上传的附件 mtime 字符串大量并列，此时稳定排序的结果
-// 完全由遍历序决定 —— 用排序过的遍历会让清单顺序与 Python 不一致（实测 5 条全错位）。
+// 完全由遍历序决定 —— 用排序过的遍历会让清单顺序错位（实测 5 条全错位）。
 func walkFilesUnsorted(dir string) []string {
 	f, err := os.Open(dir)
 	if err != nil {
@@ -234,7 +234,7 @@ func (s *Server) handleRoundsList(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) handleRoundDetail(w http.ResponseWriter, r *http.Request) {
-	// 用未解码的原始路径，与 Python `path.split("/")[3]` 对齐
+	// 用未解码的原始路径，按 `/` 切分取第 4 段作为 rid
 	raw := rawPath(r)
 	parts := strings.Split(raw, "/")
 	rid := ""
@@ -269,7 +269,7 @@ func (s *Server) handleConfig(w http.ResponseWriter) {
 	appCfg, _ := eff["app"].(map[string]any)
 	name := ""
 	if appCfg != nil {
-		name = pyStrOr(appCfg["name"], "")
+		name = strOr(appCfg["name"], "")
 	}
 	if name == "" {
 		name = "睿云智能工作台"
@@ -358,7 +358,7 @@ func (s *Server) handleEnvPost(w http.ResponseWriter, r *http.Request) {
 			"ok": false, "message": "应用正在运行，环境为只读。请先关闭实例再切换。"})
 		return
 	}
-	ok, msg := config.WriteEnvProfile(pyStrOr(body["profile"], ""))
+	ok, msg := config.WriteEnvProfile(strOr(body["profile"], ""))
 	data := map[string]any{}
 	if ok {
 		if d, err := config.ReadEnvConfig(appIsRunning(nil)); err == nil {
@@ -407,12 +407,12 @@ func (s *Server) handleLLMConfigPost(w http.ResponseWriter, r *http.Request) {
 			"ok": true, "api_key": llm.LoadConfig().APIKey})
 		return
 	}
-	baseURL := strings.TrimSpace(pyStrOr(body["base_url"], ""))
-	apiKey := strings.TrimSpace(pyStrOr(body["api_key"], ""))
+	baseURL := strings.TrimSpace(strOr(body["base_url"], ""))
+	apiKey := strings.TrimSpace(strOr(body["api_key"], ""))
 	if apiKey == "" && truthyAny(body["keep_key"]) {
 		apiKey = llm.LoadConfig().APIKey
 	}
-	model := strings.TrimSpace(pyStrOr(body["model"], ""))
+	model := strings.TrimSpace(strOr(body["model"], ""))
 	if baseURL == "" || apiKey == "" {
 		writeJSON(w, 400, map[string]any{"ok": false, "message": "供应商地址与 API Key 均为必填"})
 		return
@@ -437,7 +437,7 @@ func (s *Server) handleLLMConfigPost(w http.ResponseWriter, r *http.Request) {
 
 func (s *Server) handlePresetCasesPost(w http.ResponseWriter, r *http.Request) {
 	body := readJSONBody(r)
-	action := strings.TrimSpace(pyStrOr(body["action"], ""))
+	action := strings.TrimSpace(strOr(body["action"], ""))
 	switch action {
 	case "add":
 		item, _ := body["item"].(map[string]any)
@@ -462,8 +462,8 @@ func (s *Server) handlePresetCasesPost(w http.ResponseWriter, r *http.Request) {
 
 func (s *Server) handlePresetImport(w http.ResponseWriter, r *http.Request) {
 	body := readJSONBody(r)
-	name := pyStrOr(body["name"], "")
-	raw := pyStrOr(body["data_base64"], "")
+	name := strOr(body["name"], "")
+	raw := strOr(body["data_base64"], "")
 	if name == "" || raw == "" {
 		writeJSON(w, 400, map[string]any{"ok": false, "message": "缺少文件名或文件内容"})
 		return
@@ -541,15 +541,15 @@ func (s *Server) handlePresetImport(w http.ResponseWriter, r *http.Request) {
 			if i >= 200 {
 				break
 			}
-			prompt := pyStrOr(it["prompt"], "")
+			prompt := strOr(it["prompt"], "")
 			if len([]rune(prompt)) > 200 {
 				prompt = string([]rune(prompt)[:200])
 			}
 			preview = append(preview, map[string]any{
-				"id":          pyStrOr(it["id"], ""),
-				"name":        pyStrOr(it["name"], ""),
+				"id":          strOr(it["id"], ""),
+				"name":        strOr(it["name"], ""),
 				"prompt":      prompt,
-				"scene":       pyStrOr(it["scene"], ""),
+				"scene":       strOr(it["scene"], ""),
 				"targets":     orEmptyList(it["targets"]),
 				"attachments": orEmptyList(it["attachments"]),
 			})
@@ -557,7 +557,7 @@ func (s *Server) handlePresetImport(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, 200, map[string]any{
 			"ok":             true,
 			"file":           name,
-			"sheet":          pyStrOr(table["sheet"], ""),
+			"sheet":          strOr(table["sheet"], ""),
 			"header":         header,
 			"width":          width,
 			"prompt_col":     promptCol,
@@ -594,9 +594,9 @@ func (s *Server) handleAppSettingsPost(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, 200, out)
 		return
 	}
-	binary := strings.TrimSpace(pyStrOr(body["app_binary"], ""))
-	sessionRoot := strings.TrimSpace(pyStrOr(body["session_root"], ""))
-	userWs := strings.TrimSpace(pyStrOr(body["user_workspace"], ""))
+	binary := strings.TrimSpace(strOr(body["app_binary"], ""))
+	sessionRoot := strings.TrimSpace(strOr(body["session_root"], ""))
+	userWs := strings.TrimSpace(strOr(body["user_workspace"], ""))
 	for _, pair := range [][2]string{{"应用路径", binary}, {"日志目录", sessionRoot}, {"工作区目录", userWs}} {
 		v := pair[1]
 		if v != "" && (strings.HasPrefix(v, "|") || strings.HasPrefix(v, ";")) {
@@ -647,7 +647,7 @@ func (s *Server) handleAppSettingsPost(w http.ResponseWriter, r *http.Request) {
 
 func (s *Server) handleEvaluate(w http.ResponseWriter, r *http.Request) {
 	body := readJSONBody(r)
-	runID := strings.TrimSpace(pyStrOr(body["run_id"], ""))
+	runID := strings.TrimSpace(strOr(body["run_id"], ""))
 	if !rounds.RunIDPattern.MatchString(runID) {
 		writeJSON(w, 400, map[string]any{
 			"ok": false, "message": fmt.Sprintf("run_id 含非法字符：%s", runID)})
@@ -682,10 +682,10 @@ func (s *Server) handleLLMTest(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 	result := llm.ProbeProvider(
-		pyStrOr(body["base_url"], ""),
-		pyStrOr(body["api_key"], ""),
-		pyStrOr(body["model"], ""),
-		pyStrOr(body["probe_path"], ""),
+		strOr(body["base_url"], ""),
+		strOr(body["api_key"], ""),
+		strOr(body["model"], ""),
+		strOr(body["probe_path"], ""),
 		timeoutS,
 	)
 	writeJSON(w, 200, result.ToDict())
@@ -693,13 +693,13 @@ func (s *Server) handleLLMTest(w http.ResponseWriter, r *http.Request) {
 
 func (s *Server) handleUpload(w http.ResponseWriter, r *http.Request) {
 	body := readJSONBody(r)
-	name := strings.TrimSpace(pyStrOr(body["name"], ""))
-	b64 := pyStrOr(body["data_base64"], "")
+	name := strings.TrimSpace(strOr(body["name"], ""))
+	b64 := strOr(body["data_base64"], "")
 	if name == "" || b64 == "" {
 		writeJSON(w, 400, map[string]any{"ok": false, "message": "缺少文件名或文件内容"})
 		return
 	}
-	raw, err := pyB64Decode(b64)
+	raw, err := decodeBase64Tolerant(b64)
 	if err != nil {
 		writeJSON(w, 400, map[string]any{
 			"ok": false, "message": fmt.Sprintf("内容不是合法 base64：%v", err)})
@@ -715,7 +715,7 @@ func (s *Server) handleUpload(w http.ResponseWriter, r *http.Request) {
 	fp, err := saveUpload(name, raw)
 	if err != nil {
 		writeJSON(w, 500, map[string]any{
-			"ok": false, "message": fmt.Sprintf("写入附件库失败：%s", pyre.OSError(err))})
+			"ok": false, "message": fmt.Sprintf("写入附件库失败：%s", canon.FormatOSError(err))})
 		return
 	}
 	writeJSON(w, 200, map[string]any{
@@ -723,13 +723,13 @@ func (s *Server) handleUpload(w http.ResponseWriter, r *http.Request) {
 		"size": len(raw), "message": "已上传到本机附件库"})
 }
 
-// pyB64Decode 复刻 Python `base64.b64decode(s)`（validate=False）的语义。
+// decodeBase64Tolerant 宽容 base64 解码（忽略字母表外字符）。
 //
 // Go 的 `base64.StdEncoding.DecodeString` 是**严格**的：遇到字母表外的字符
 // （`!`、空格、换行…）立即报 `illegal base64 data at input byte N`。
-// Python 默认会**先丢弃**所有非字母表字符再解码，实测：
+// 宽容模式会**先丢弃**所有非字母表字符再解码，实测：
 //
-//	"!!!"      -> b''      （全被丢弃；Go 严格模式会直接报错）
+//	"!!!"      -> b''      （全被丢弃；严格模式会直接报错）
 //	"Y W J j"  -> b'abc'   （空格被丢弃）
 //	"YQ==extra"-> b'a'     （填充之后的尾巴被忽略）
 //	"YQ==="    -> b'a'     （多余的 '=' 被忽略）
@@ -739,8 +739,8 @@ func (s *Server) handleUpload(w http.ResponseWriter, r *http.Request) {
 //	"a"/"YWJjZ"-> number of data characters (N) cannot be 1 more than a multiple of 4
 //
 // 前端把 base64 塞进 URL/表单时经常带换行或空格，严格模式会让上传整单失败。
-// 错误文案也逐字对齐，因为 Python 是 `f"内容不是合法 base64：{exc}"`。
-func pyB64Decode(s string) ([]byte, error) {
+// 错误文案也逐字固定，前端会按 `内容不是合法 base64：{exc}` 的形式回显。
+func decodeBase64Tolerant(s string) ([]byte, error) {
 	const alphabet = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/"
 
 	// 1) 丢弃字母表外的字符（保留 '='）
@@ -762,7 +762,7 @@ func pyB64Decode(s string) ([]byte, error) {
 		}
 	}
 
-	// 3) 数据字符数 ≡ 1 (mod 4) 是结构性非法（先报这个，与 Python 一致）
+	// 3) 数据字符数 ≡ 1 (mod 4) 是结构性非法（先报这个）
 	if len(data)%4 == 1 {
 		return nil, fmt.Errorf("Invalid base64-encoded string: number of data "+
 			"characters (%d) cannot be 1 more than a multiple of 4", len(data))
@@ -778,7 +778,7 @@ func pyB64Decode(s string) ([]byte, error) {
 
 func (s *Server) handleUploadDelete(w http.ResponseWriter, r *http.Request) {
 	body := readJSONBody(r)
-	target, err := filepath.Abs(pyStrOr(body["path"], ""))
+	target, err := filepath.Abs(strOr(body["path"], ""))
 	if err != nil {
 		writeJSON(w, 400, map[string]any{"ok": false, "message": "只允许删除附件库内的文件"})
 		return
@@ -810,7 +810,7 @@ func (s *Server) handleUploadDelete(w http.ResponseWriter, r *http.Request) {
 
 func (s *Server) handleReveal(w http.ResponseWriter, r *http.Request) {
 	body := readJSONBody(r)
-	target := strings.TrimSpace(pyStrOr(body["path"], ""))
+	target := strings.TrimSpace(strOr(body["path"], ""))
 	if target == "" {
 		writeJSON(w, 400, map[string]any{"ok": false, "message": "缺少 path 参数"})
 		return
@@ -844,15 +844,15 @@ func normalizeCases(raw any) []map[string]any {
 				continue
 			}
 		}
-		prompt := strings.TrimSpace(pyStrOr(m["prompt"], ""))
+		prompt := strings.TrimSpace(strOr(m["prompt"], ""))
 		if prompt == "" {
 			continue
 		}
-		id := pyStrOr(m["id"], "")
+		id := strOr(m["id"], "")
 		if id == "" {
 			id = fmt.Sprintf("CASE-%03d", i+1)
 		}
-		name := pyStrOr(m["name"], "")
+		name := strOr(m["name"], "")
 		if name == "" {
 			name = fmt.Sprintf("用例 %d", i+1)
 		}
@@ -887,7 +887,7 @@ func normalizeCases(raw any) []map[string]any {
 
 // ------------------------------------------------------------------ 类型工具
 
-func pyStrOr(v any, def string) string {
+func strOr(v any, def string) string {
 	if v == nil {
 		return def
 	}
@@ -939,7 +939,7 @@ func boolPtr(v any) *bool {
 	return nil
 }
 
-// truthyAny 复刻 Python 的真值判断（用于 clear/reveal/keep_key/parse_only/replace）
+// truthyAny 通用真值判断（用于 clear/reveal/keep_key/parse_only/replace）
 func truthyAny(v any) bool {
 	switch t := v.(type) {
 	case nil:

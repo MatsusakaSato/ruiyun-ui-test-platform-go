@@ -6,8 +6,8 @@ import (
 	"unicode/utf8"
 
 	"ruiyun-ui-test-platform-go/internal/assertor"
+	"ruiyun-ui-test-platform-go/internal/canon"
 	"ruiyun-ui-test-platform-go/internal/models"
-	"ruiyun-ui-test-platform-go/internal/pyre"
 	"ruiyun-ui-test-platform-go/internal/repro"
 	"ruiyun-ui-test-platform-go/internal/trajectory"
 )
@@ -16,21 +16,21 @@ var severityOrder = map[string]int{
 	"P0": 0, "P1": 1, "P2": 2,
 }
 
-// pct 复刻 Python _pct(a, b) = round(a * 100.0 / b, 1) if b else 0.0
+// pct 计算 a 占 b 的百分比：round(a * 100.0 / b, 1)，b 为 0 时返回 0.0。
 //
 // 注意两点：中间量是 a*100.0/b（不是 a*1000.0/b 再除 10），
-// 舍入是银行家舍入 —— 写成 math.Round 会在恰好半值处与 Python 分道扬镳。
+// 舍入是银行家舍入 —— 写成 math.Round 会在恰好半值处产生 ties 方向错误。
 func pct(a, b int) float64 {
 	if b == 0 {
 		return 0.0
 	}
-	return trajectory.PyRound(float64(a)*100.0/float64(b), 1)
+	return trajectory.RoundTo(float64(a)*100.0/float64(b), 1)
 }
 
-// ReproBlock 复刻 Python `core/metrics.py:repro_block(recipes)`。
+// ReproBlock 生成复现行的明细与汇总。
 //
 // 输入是流水线产出的 ReproRecipe（**不是**旧的 models.Recipe）——
-// Python 侧读的是 rd["key"] / rd.get("rule_name") / rd.get("run_sessions")，
+// 读取的是 rd["key"] / rd["rule_name"] / rd["run_sessions"]，
 // 用错类型会让报告里的「复现方法」整列错位。
 func ReproBlock(recipes []*repro.ReproRecipe) ([]map[string]any, map[string]any) {
 	rows := []map[string]any{}
@@ -85,7 +85,7 @@ func ReproBlock(recipes []*repro.ReproRecipe) ([]map[string]any, map[string]any)
 
 	var avgRate *float64
 	if len(rows) > 0 {
-		v := pyre.Round(rateSum/float64(len(rows)), 3) // Python: round(x, 3)
+		v := canon.Round(rateSum/float64(len(rows)), 3) // round 到 3 位小数
 		avgRate = &v
 	}
 
@@ -99,7 +99,7 @@ func ReproBlock(recipes []*repro.ReproRecipe) ([]map[string]any, map[string]any)
 	return rows, summary
 }
 
-// ReproSubBlock 复刻 Python `findings_rows[].repro` 子块
+// ReproSubBlock 生成单条报错发现的 repro 子块
 func ReproSubBlock(r *repro.ReproRecipe) map[string]any {
 	runSessions := []map[string]any{}
 	for _, s := range r.RunSessions {
@@ -151,7 +151,7 @@ func BuildMetrics(caseResults []*models.CaseResult, cfg map[string]any, recipes 
 		ruleCounter[f.Rule]++
 	}
 	ruleRows := []map[string]any{}
-	// Python 按 RULES.items() 的**声明顺序**生成，再稳定排序；
+	// 按规则注册表 RuleOrder 的**声明顺序**生成，再稳定排序；
 	// range map 会随机化顺序，sort.Slice 又是不稳定排序 —— 两处都得改。
 	for _, rule := range assertor.RuleOrder {
 		meta := assertor.Rules[rule]
@@ -209,7 +209,7 @@ func BuildMetrics(caseResults []*models.CaseResult, cfg map[string]any, recipes 
 		Name  string
 		Count int
 	}
-	// Counter.most_common() 按次数降序，**并列时保持首次出现顺序**（稳定）
+	// 按次数降序，**并列时保持首次出现顺序**（稳定）
 	toolSorted := []toolCountItem{}
 	for _, nm := range toolOrder {
 		toolSorted = append(toolSorted, toolCountItem{Name: nm, Count: toolCounter[nm]})
@@ -316,11 +316,11 @@ func BuildMetrics(caseResults []*models.CaseResult, cfg map[string]any, recipes 
 		for _, v := range firstResponses {
 			sum += v
 		}
-		v := pyre.Round(sum/float64(len(firstResponses)), 2) // Python: round(x, 2)
+		v := canon.Round(sum/float64(len(firstResponses)), 2) // round 到 2 位小数
 		avgFirstResponse = &v
 	}
 
-	// sessions_closed：Python 统计的是 objective.status.session_closed 为真的用例数
+	// sessions_closed：统计 objective.status.session_closed 为真的用例数
 	closedCount := 0
 	for _, o := range caseObjective {
 		obj, _ := o.(map[string]any)
@@ -335,7 +335,7 @@ func BuildMetrics(caseResults []*models.CaseResult, cfg map[string]any, recipes 
 	}
 
 	// Skill 使用（仅本轮，从 read_skill_file 返回解析）
-	// Python 侧是**列表**，按 key 首次出现顺序；sessions 是该 skill 覆盖的用例号（已排序）
+	// skill_rows 是**列表**，按 key 首次出现顺序；sessions 是该 skill 覆盖的用例号（已排序）
 	type skillRowAgg struct {
 		name     string
 		sessions map[string]bool
@@ -457,14 +457,14 @@ func BuildMetrics(caseResults []*models.CaseResult, cfg map[string]any, recipes 
 
 	// 问题发现行列表
 	findingsRows := []map[string]any{}
-	// 复现配方索引：Python 的 key 恒为 f"{rule}:{tool or '-'}"
+	// 复现配方索引：key 恒为 "<rule>:<tool 或 '-'>"
 	recipeByKey := map[string]*repro.ReproRecipe{}
 	for _, r := range recipes {
 		if r != nil {
 			recipeByKey[r.Key] = r
 		}
 	}
-	// 必须稳定排序：Python 的 sorted(...) 稳定，(severity, rule) 相同时保持原序。
+	// 必须稳定排序：同 (severity, rule) 时保持原序。
 	// 用 sort.Slice 会让同严重度同规则的发现行随机换位。
 	sort.SliceStable(findings, func(i, j int) bool {
 		sI := severityOrder[findings[i].Severity]
@@ -499,7 +499,7 @@ func BuildMetrics(caseResults []*models.CaseResult, cfg map[string]any, recipes 
 			"step_index": f.StepIndex,
 			"case_id":    cID,
 		}
-		// Python: rep = recipe_by_key.get(f"{f.rule}:{f.tool or '-'}")
+		// 按 "<rule>:<tool 或 '-'>" 组装索引键
 		toolKey := f.Tool
 		if toolKey == "" {
 			toolKey = "-"
@@ -518,7 +518,7 @@ func BuildMetrics(caseResults []*models.CaseResult, cfg map[string]any, recipes 
 	}
 
 	return map[string]any{
-		"generated_at": "", // Python 侧恒为空串（时间由上层写文件时决定）
+		"generated_at": "", // 恒为空串（时间由上层写文件时决定）
 		"summary": map[string]any{
 			"cases":                len(caseResults),
 			"passed":               len(passed),

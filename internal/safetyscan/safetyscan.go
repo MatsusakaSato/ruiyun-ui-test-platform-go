@@ -7,9 +7,9 @@ import (
 	"strings"
 	"unicode/utf8"
 
+	"ruiyun-ui-test-platform-go/internal/canon"
 	"ruiyun-ui-test-platform-go/internal/llm"
 	"ruiyun-ui-test-platform-go/internal/models"
-	"ruiyun-ui-test-platform-go/internal/pyre"
 )
 
 type RuleDef struct {
@@ -82,18 +82,18 @@ var compiledRules []struct {
 	patterns []*regexp.Regexp
 }
 
-// pySpaceClass 是 Python `\s` 的等价字符类（见 internal/pyre）。
+// spaceClass 是完整的 29 码点空白字符类（见 internal/canon）。
 // 规则里写了 `\s` 的地方必须用它 —— Go 的 `\s` 只有 5 个字符，
-// Python 的有 29 个，中文/排版语料里会静默漏匹配。
-const pySpaceClass = pyre.SpaceClass
+// 完整集合有 29 个，中文/排版语料里会静默漏匹配。
+const spaceClass = canon.SpaceClass
 
-// translatePyRegex 把 Python 正则里的 `\s` / `\S` 换成 Python 语义的等价写法。
+// translateRegex 把正则里的 `\s` / `\S` 换成完整空白语义的等价写法。
 //
-// 只处理这两个转义 —— 其余语法 Python 与 RE2 一致。`\S` 必须先换，
+// 只处理这两个转义 —— 其余语法与 RE2 一致。`\S` 必须先换，
 // 虽然两者字面不同不会互相干扰，但显式写出来避免以后有人改动顺序踩坑。
-func translatePyRegex(p string) string {
-	p = strings.ReplaceAll(p, `\S`, `[^`+pySpaceClass+`]`)
-	p = strings.ReplaceAll(p, `\s`, `[`+pySpaceClass+`]`)
+func translateRegex(p string) string {
+	p = strings.ReplaceAll(p, `\S`, `[^`+spaceClass+`]`)
+	p = strings.ReplaceAll(p, `\s`, `[`+spaceClass+`]`)
 	return p
 }
 
@@ -101,7 +101,7 @@ func init() {
 	for _, r := range Rules {
 		var regexps []*regexp.Regexp
 		for _, p := range r.Patterns {
-			re := regexp.MustCompile("(?is)" + translatePyRegex(p))
+			re := regexp.MustCompile("(?is)" + translateRegex(p))
 			regexps = append(regexps, re)
 		}
 		compiledRules = append(compiledRules, struct {
@@ -170,10 +170,9 @@ func FlattenArguments(arguments any) string {
 	}
 	switch arguments.(type) {
 	case map[string]any, []any, []string:
-		// 复刻 Python `json.dumps(arguments, ensure_ascii=False)`：
 		// 分隔符是 `", "` / `": "`（不是 json.Marshal 的紧凑形式），
 		// 且**不转义** `< > &`（json.Marshal 会转成 \u003c 等）。
-		return models.PyJSONDumpsSourceOrder(arguments)
+		return models.JSONDumpsSourceOrder(arguments)
 	}
 	if s, ok := arguments.(string); ok {
 		return s
@@ -183,9 +182,9 @@ func FlattenArguments(arguments any) string {
 
 // Scan 扫描多源文本的安全红线
 // Source 是一「条」扫描源。用切片而非 map，是因为 **顺序有语义**：
-// Python 的 sources 是有序 dict，scan() 按插入序遍历，
+// sources 是有序集合，按插入序遍历，
 // 命中列表的顺序随之确定；Go 的 map 迭代顺序是随机的，
-// 会让 hits / redlines 每次运行都不同，也会影响 _MAX_HITS 截断截到哪些。
+// 会让 hits / redlines 每次运行都不同，也会影响 maxHits 截断截到哪些。
 type Source struct {
 	Label string
 	Text  string
@@ -193,7 +192,7 @@ type Source struct {
 
 // Scan 兼容旧签名：把 map 转成「按标签排序」的确定性顺序。
 //
-// ⚠️ 新代码请用 BuildSourcesOrdered + ScanOrdered —— 那才是 Python 的遍历顺序。
+// ⚠️ 新代码请用 BuildSourcesOrdered + ScanOrdered —— 那才是声明的插入遍历顺序。
 func Scan(sources map[string]string) []*Hit {
 	labels := make([]string, 0, len(sources))
 	for k := range sources {
@@ -210,7 +209,7 @@ func Scan(sources map[string]string) []*Hit {
 // byteToRuneIndex 建立「字节偏移 → 码点偏移」映射。
 //
 // 为什么需要：Go regexp 给的 FindAllStringIndex 是**字节**偏移，
-// 而 Python 的 m.start()/m.end() 是**字符**（码点）偏移。
+// 而本模块的命中窗口按**字符**（码点）偏移计算。
 // 直接拿字节偏移当字符偏移去切片，会把多字节汉字**切成半个**（出现 U+FFFD 乱码），
 // 窗口位置也会整体偏移 —— 实测真实会话里 901 处 snippet 因此不一致。
 func byteToRuneIndex(runes []rune) map[int]int {
@@ -224,12 +223,12 @@ func byteToRuneIndex(runes []rune) map[int]int {
 	return m
 }
 
-// yamlLoadExempt 模拟 Python 正则里的否定前瞻 `yaml\.load\s*\((?![^)]*SafeLoader)`。
+// yamlLoadExempt 实现规则 `yaml\.load\s*\((?![^)]*SafeLoader)` 的否定前瞻语义。
 //
 // RE2（Go 的 regexp）**不支持否定前瞻**，所以只能在匹配之后自己判定：
 // 从 `(` 之后扫到**下一个 `)` 之前**（不含），若出现 SafeLoader 则该次命中作废。
 //
-// ⚠️ 原实现用的是「固定往后看 60 字节」，与前瞻语义不同：
+// ⚠️ 早期实现用的是「固定往后看 60 字节」，与前瞻语义不同：
 // 短调用会看到括号之后的内容（**误豁免**），长调用又会看不到括号内的 SafeLoader（**漏豁免**）。
 func yamlLoadExempt(runes []rune, from int) bool {
 	for i := from; i < len(runes); i++ {
@@ -243,15 +242,15 @@ func yamlLoadExempt(runes []rune, from int) bool {
 	return false
 }
 
-// ScanOrdered 按 Python `safety_scan.scan` 的语义扫描。
+// ScanOrdered 按来源优先的语义扫描。
 //
-// 关键结构差异（原实现是错的）：Python 是
+// 关键结构：两层循环，**外层来源、内层规则**，
 //
-//	for source in sources:        # 外层：来源（有序）
-//	    for key, label, pats in _COMPILED:   # 内层：规则（声明序）
+//	外层：来源（按传入顺序）
+//	  内层：规则（按声明顺序）
 //
-// 即 **来源优先**；原实现写成「外层规则、内层来源」，且内层来源是 map 遍历
-// → hits 的顺序既与 Python 不同，又每次运行都变。
+// 早期实现写反了（外层规则、内层来源），且内层来源是 map 遍历
+// → hits 的顺序不确定，又每次运行都变。
 func ScanOrdered(sources []Source) []*Hit {
 	hits := []*Hit{}
 	seen := make(map[string]bool)
@@ -274,7 +273,7 @@ func ScanOrdered(sources []Source) []*Hit {
 				continue
 			}
 
-			// cands 收集 (exempt, snippet)；与 Python 的 cands 一一对应
+			// cands 收集 (exempt, snippet)；每个候选对应一个命中
 			type cand struct {
 				exempt  bool
 				snippet string
@@ -312,7 +311,7 @@ func ScanOrdered(sources []Source) []*Hit {
 						we = nRunes
 					}
 					snippet := llm.Redact(string(runes[ws:we]), "")
-					// Python: snippet.replace("\n", " ")[:_MAX_SNIPPET]
+					// snippet 先把换行替换成空格，再按字符截断到 maxSnippet
 					// 注意**没有** TrimSpace，且脱敏在截断**之前**
 					snippet = strings.ReplaceAll(snippet, "\n", " ")
 					if utf8.RuneCountInString(snippet) > maxSnippet {
@@ -356,17 +355,17 @@ func ScanOrdered(sources []Source) []*Hit {
 	return hits
 }
 
-// 与 Python 的 _MAX_SNIPPET / _MAX_HITS / _MAX_CANDIDATES 对齐
+// snippet 长度 / 命中总数 / 候选数的上限
 const (
 	maxSnippet    = 120
 	maxHits       = 40
 	maxCandidates = 20
 )
 
-// BuildSourcesOrdered 复刻 Python `build_sources` —— 返回**有序**的源列表。
+// BuildSourcesOrdered 返回**有序**的源列表。
 //
-// 顺序即 Python dict 的插入序：最终答复 → 各产出物（按产物顺序）→ 各工具实参（按调用顺序）。
-// 同名工具多次调用时，Python 的 `sources[label] = flat` 是**后写覆盖前写**，
+// 顺序即插入序：最终答复 → 各产出物（按产物顺序）→ 各工具实参（按调用顺序）。
+// 同名工具多次调用时，后写**覆盖前写的值**，
 // 且**不改变位置**；这里同样处理（保持首次出现的位置，值取最后一次）。
 func BuildSourcesOrdered(finalAnswer string, artifactTexts [][2]string, toolCalls []models.ToolCall) []Source {
 	sources := []Source{}
@@ -408,7 +407,7 @@ func BuildSources(finalAnswer string, artifactTexts [][2]string, toolCalls []mod
 	return out
 }
 
-// HasRedline 复刻 Python 的 `has_redline(hits)`：是否存在**不可豁免**的命中。
+// HasRedline 判断是否存在**不可豁免**的命中。
 //
 // 调用方常写成 `len(Redlines(hits)) > 0`，但直接暴露语义更清楚，
 // 也避免每次都白建一个切片。

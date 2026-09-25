@@ -1,14 +1,14 @@
-// 睿云智能工作台 · UI 测试平台（Go 版）统一入口。
+// 睿云智能工作台 · UI 测试平台统一入口。
 //
-// 对应 Python 原版的三个可执行入口 + 一个服务入口：
+// 四个子命令：
 //
-//	ruiyun serve      ← server.py          可视化平台本地服务（默认子命令）
-//	ruiyun pipeline   ← run_pipeline.py    三段式流水线（UI → 日志校验 → 报告）
-//	ruiyun repro      ← run_repro.py       复现率验证器
-//	ruiyun discover   ← discover_ui.py     UI 诊断工具
+//	ruiyun serve     可视化平台本地服务（默认子命令）
+//	ruiyun pipeline  三段式流水线（UI 自动化 → 日志校验 → 报告）
+//	ruiyun repro     复现率验证器
+//	ruiyun discover  UI 诊断工具：导出 DOM 中可交互元素
 //
-// 服务端以子进程方式拉起 `ruiyun pipeline`（与 Python 版拉起
-// `python run_pipeline.py` 同构），因此 pipeline 子命令必须与 serve 同体。
+// 服务端以子进程方式拉起 `ruiyun pipeline`（复用同一可执行文件），
+// 因此 pipeline 子命令必须与 serve 同体。
 package main
 
 import (
@@ -140,7 +140,7 @@ func runServe(args []string) int {
 			"公网来源仍被拒绝。用完请去掉该参数重启。")
 	}
 
-	// Python 版启动前先确保预设用例库存在（首次运行会建表并灌入内置用例）
+	// 启动前先确保预设用例库存在（首次运行会建表并灌入内置用例）
 	if _, err := testcasedb.InitDB(""); err != nil {
 		fmt.Fprintf(os.Stderr, "初始化用例库失败：%v\n", err)
 	}

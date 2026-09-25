@@ -86,28 +86,18 @@ Stop-App | Out-Null
 
 # ---------- 5. 后台脱离启动 ----------
 if ($Mode -eq "--detach") {
-    $python = if (Get-Command python -ErrorAction SilentlyContinue) { "python" } else { "python3" }
-    
     $logDir = Split-Path $LOG_FILE
     if (-not (Test-Path $logDir)) {
         New-Item -ItemType Directory -Force -Path $logDir | Out-Null
     }
 
-    $pycode = @"
-import os, subprocess, sys
-binary, port, logfile = sys.argv[1], sys.argv[2], sys.argv[3]
-env = dict(os.environ)
-env.pop('ELECTRON_RUN_AS_NODE', None)
-with open(logfile, 'w', encoding='utf-8') as log:
-    p = subprocess.Popen(
-        [binary, f'--remote-debugging-port={port}', '--no-sandbox', '--disable-gpu', '--disable-gpu-compositing'],
-        env=env, creationflags=subprocess.CREATE_NEW_PROCESS_GROUP | 0x00000008,
-        stdout=log, stderr=subprocess.STDOUT, cwd=os.environ.get('TEMP', 'C:\\')
-    )
-print(f'[detach] 已启动 pid={p.pid} 日志={logfile}')
-"@
-    & $python -c $pycode $APP_BIN $DEBUG_PORT $LOG_FILE
-    
+    # Start-Process 启动独立进程：不挂在调用方的进程树上，命令结束/关终端后仍存活。
+    # stdout 与 stderr 不能重定向到同一个文件，故 stderr 单独落到 .err 侧车文件。
+    $proc = Start-Process -FilePath $APP_BIN -ArgumentList $CHROMIUM_FLAGS `
+        -WorkingDirectory $env:TEMP -WindowStyle Hidden `
+        -RedirectStandardOutput $LOG_FILE -RedirectStandardError "$LOG_FILE.err" -PassThru
+    Write-Output "[detach] 已启动 pid=$($proc.Id) 日志=$LOG_FILE"
+
     for ($i = 1; $i -le $LAUNCH_TIMEOUT_S; $i++) {
         try {
             $resp = Invoke-WebRequest -Uri "http://127.0.0.1:$DEBUG_PORT/json/version" -TimeoutSec 2 -UseBasicParsing -ErrorAction Stop

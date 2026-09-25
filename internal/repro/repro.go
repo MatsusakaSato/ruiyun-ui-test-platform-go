@@ -51,11 +51,11 @@ type SessionHit struct {
 	Note      string `json:"note,omitempty"`
 }
 
-// ToDict 复刻 Python `dataclasses.asdict(self)`。
+// ToDict 把配方序列化为字段字典。
 //
-// 键集合与顺序必须与 Python `core/repro.py:ReproRecipe` 的字段声明序一致 ——
+// 键集合与顺序必须与 ReproRecipe 的字段声明序一致 ——
 // 这份 dict 会落盘成 artifacts/repro_results.json 并喂给报告渲染器，
-// 也是 run_repro.py `--render-only` 回读的格式。
+// 也是按「仅渲染」模式回读的格式。
 func (r *ReproRecipe) ToDict() map[string]any {
 	runSessions := make([]map[string]any, 0, len(r.RunSessions))
 	for _, s := range r.RunSessions {

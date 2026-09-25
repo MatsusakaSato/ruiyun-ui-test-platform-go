@@ -10,7 +10,7 @@ import { initExcelImport } from './excel-import.js';
 import { initHistory, loadRounds, openRound, delRound, setTab, pickCase, startEval, stopEval, refreshEvalStatus, pollEval, openRoundById, copyRoundId } from './page-history.js';
 import { initModals, loadLLM, openLlm, revealCfgPath } from './modals.js';
 
-// 将 HTML 模板内联交互所依赖的函数挂载到 window，确保 100% 兼容
+// 将 HTML 模板内联交互所依赖的函数挂载到 window，模板里的 onclick 才能取到
 Object.assign(window, {
   switchPage,
   setCaseTab,

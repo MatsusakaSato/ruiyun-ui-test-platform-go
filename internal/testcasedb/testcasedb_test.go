@@ -168,18 +168,18 @@ func TestAddPresetCases_BatchDeduplication(t *testing.T) {
 			"scene":  "默认场景",
 		},
 		{
-			"prompt": "新用例A",
-			"scene":  "场景A",
+			"prompt":  "新用例A",
+			"scene":   "场景A",
 			"targets": []string{"word"},
 		},
 		{
-			"prompt": "新用例A", // 批次内重复 -> 应跳过
-			"scene":  "场景A",
+			"prompt":  "新用例A", // 批次内重复 -> 应跳过
+			"scene":   "场景A",
 			"targets": []string{"word"},
 		},
 		{
-			"prompt": "新用例B",
-			"scene":  "场景B",
+			"prompt":  "新用例B",
+			"scene":   "场景B",
 			"targets": []string{"ppt"},
 		},
 	}

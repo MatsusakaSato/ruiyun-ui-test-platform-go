@@ -105,26 +105,26 @@ fi
 stop_app || true
 
 # ---------- 5. 后台脱离启动 ----------
-# 为什么不直接 `&`：调用方的进程树可能在命令结束时被整体回收。
-# start_new_session=True 让应用进入新会话，彻底脱离调用方进程组。
+# 为什么不直接 `&`：调用方的进程树可能在命令结束时被整体回收，
+# 应用必须进入新会话才不会被连坐。
 # 为什么不用 `open -a`：open 走 LaunchServices，环境变量传不进去；
 # 它的 --env/--args 实测对本应用无效（调试端口不会开）。见 SKILL.md「启动这一步」。
 if [[ "${MODE}" == "--detach" ]]; then
-  PYTHON="$(command -v python3 || echo /usr/bin/python3)"
-  "${PYTHON}" - "${APP_BIN}" "${DEBUG_PORT}" "${LOG_FILE}" <<'PYEOF'
-import os, subprocess, sys
-binary, port, logfile = sys.argv[1], sys.argv[2], sys.argv[3]
-env = dict(os.environ)
-env.pop("ELECTRON_RUN_AS_NODE", None)   # 双保险：见 SKILL.md 坑 1
-with open(logfile, "w") as log:
-    p = subprocess.Popen(
-        [binary, f"--remote-debugging-port={port}",
-         "--no-sandbox", "--disable-gpu", "--disable-gpu-compositing"],
-        env=env, start_new_session=True,
-        stdout=log, stderr=subprocess.STDOUT, cwd=os.environ.get("TMPDIR", "/tmp"),
-    )
-print(f"[detach] 已启动 pid={p.pid}  日志={logfile}")
-PYEOF
+  mkdir -p "$(dirname "${LOG_FILE}")"
+  cd "${TMPDIR:-/tmp}"
+
+  # setsid 开新会话（Linux 有）；macOS 无 setsid，退回 nohup + disown，
+  # 同样能扛住调用方退出时的 SIGHUP。
+  if command -v setsid >/dev/null 2>&1; then
+    setsid "${APP_BIN}" "${CHROMIUM_FLAGS[@]}" \
+      >"${LOG_FILE}" 2>&1 </dev/null &
+  else
+    nohup "${APP_BIN}" "${CHROMIUM_FLAGS[@]}" \
+      >"${LOG_FILE}" 2>&1 </dev/null &
+    disown 2>/dev/null || true
+  fi
+  APP_PID=$!
+  echo "[detach] 已启动 pid=${APP_PID}  日志=${LOG_FILE}"
 
   # 自检：端口起来才算成功（端口就绪 ≠ 界面可用，但端口不通必然不可用）
   TIMEOUT="${LAUNCH_TIMEOUT_S:-60}"

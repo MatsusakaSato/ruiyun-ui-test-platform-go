@@ -1,8 +1,7 @@
-// Package rounds 复刻 Python 版 server.py 的轮次归档读取层：
-// query_rounds / load_round / delete_round / _round_artifacts /
-// _artifact_items / _backfill_case_artifacts。
+// Package rounds 轮次归档读取层：
+// 查询 / 加载 / 删除轮次，以及轮次产物清单的重算与回填。
 //
-// 严格对齐 Python 原版语义（字段名、取值优先级、分页与筛选规则），
+// 严格遵循既定语义（字段名、取值优先级、分页与筛选规则），
 // 下游是 4,120 行前端 JS，字段形状不得偏离。
 package rounds
 
@@ -50,7 +49,7 @@ func loadJSON(d string, name string) map[string]any {
 	return out
 }
 
-func pyStr(v any) string {
+func asString(v any) string {
 	if v == nil {
 		return ""
 	}
@@ -60,7 +59,7 @@ func pyStr(v any) string {
 	return fmt.Sprintf("%v", v)
 }
 
-// listRoundDirs 反向字典序枚举 rounds 目录（Python: sorted(ROUNDS.iterdir(), reverse=True)）
+// listRoundDirs 反向字典序枚举 rounds 目录
 func listRoundDirs() []string {
 	root := config.RoundsDir()
 	entries, err := os.ReadDir(root)
@@ -71,7 +70,7 @@ func listRoundDirs() []string {
 	for _, e := range entries {
 		names = append(names, e.Name())
 	}
-	// Python 的 Path 排序按路径字符串比较；这里只用目录名，效果一致
+	// 排序按路径字符串比较；这里只用目录名，效果一致
 	sort.Sort(sort.Reverse(sort.StringSlice(names)))
 	out := make([]string, 0, len(names))
 	for _, n := range names {
@@ -120,13 +119,13 @@ func Query(opts QueryOptions) map[string]any {
 	}
 	totalAll := len(rows)
 
-	df := firstN(pyStr(opts.DateFrom), 10)
-	dt := firstN(pyStr(opts.DateTo), 10)
-	kw := strings.ToLower(strings.TrimSpace(pyStr(opts.Keyword)))
+	df := firstN(asString(opts.DateFrom), 10)
+	dt := firstN(asString(opts.DateTo), 10)
+	kw := strings.ToLower(strings.TrimSpace(asString(opts.Keyword)))
 
 	var filtered []row
 	for _, r := range rows {
-		day := firstN(pyStr(r.sum["finished_at"]), 10)
+		day := firstN(asString(r.sum["finished_at"]), 10)
 		if df != "" && (day == "" || day < df) {
 			continue
 		}
@@ -134,11 +133,11 @@ func Query(opts QueryOptions) map[string]any {
 			continue
 		}
 		if kw != "" {
-			parts := []string{filepath.Base(r.dir), pyStr(r.sum["finished_at"])}
+			parts := []string{filepath.Base(r.dir), asString(r.sum["finished_at"])}
 			if cs, ok := r.sum["cases"].([]any); ok {
 				for _, c := range cs {
 					if cm, ok := c.(map[string]any); ok {
-						parts = append(parts, pyStr(cm["prompt"]))
+						parts = append(parts, asString(cm["prompt"]))
 					}
 				}
 			}
@@ -174,10 +173,10 @@ func Query(opts QueryOptions) map[string]any {
 					continue
 				}
 				casesOut = append(casesOut, map[string]any{
-					"case_id": pyStr(cm["case_id"]),
-					"name":    pyStr(cm["name"]),
-					"prompt":  pyStr(cm["prompt"]),
-					"status":  pyStr(cm["status"]),
+					"case_id": asString(cm["case_id"]),
+					"name":    asString(cm["name"]),
+					"prompt":  asString(cm["prompt"]),
+					"status":  asString(cm["status"]),
 				})
 			}
 		}
@@ -198,10 +197,10 @@ func Query(opts QueryOptions) map[string]any {
 		}
 		out = append(out, map[string]any{
 			"run_id":         filepath.Base(r.dir),
-			"finished_at":    pyVal(r.sum["finished_at"]),
-			"run_mode":       pyVal(r.sum["run_mode"]),
+			"finished_at":    asValue(r.sum["finished_at"]),
+			"run_mode":       asValue(r.sum["run_mode"]),
 			"elapsed_s":      zeroDefault(r.sum["elapsed_s"]),
-			"app_version":    pyVal(r.sum["app_version"]),
+			"app_version":    asValue(r.sum["app_version"]),
 			"summary":        summary,
 			"repro_summary":  reproSummary,
 			"round_skills":   roundSkills,
@@ -213,7 +212,7 @@ func Query(opts QueryOptions) map[string]any {
 
 	daysSet := map[string]bool{}
 	for _, r := range rows {
-		if fa := pyStr(r.sum["finished_at"]); fa != "" {
+		if fa := asString(r.sum["finished_at"]); fa != "" {
 			daysSet[firstN(fa, 10)] = true
 		}
 	}
@@ -279,7 +278,7 @@ func Load(runID string) map[string]any {
 // Delete 删除一个轮次归档目录。runIDPattern 校验 + 目录必须真实位于 ROUNDS 内。
 // running 由调用方传入（该轮次是否正在运行），返回 (ok, msg)。
 func Delete(runID string, running bool) (bool, string) {
-	rid := strings.TrimSpace(pyStr(runID))
+	rid := strings.TrimSpace(asString(runID))
 	if rid == "" {
 		return false, "缺少 run_id"
 	}
@@ -331,7 +330,7 @@ func ArtifactItems(detail map[string]any, evaluation map[string]any) ([]map[stri
 				if am == nil {
 					continue
 				}
-				if pyStr(am["path"]) != "" || pyStr(am["abs_path"]) != "" {
+				if asString(am["path"]) != "" || asString(am["abs_path"]) != "" {
 					items = append(items, am)
 				}
 			}
@@ -346,7 +345,7 @@ func ArtifactItems(detail map[string]any, evaluation map[string]any) ([]map[stri
 			if am == nil {
 				continue
 			}
-			if pyStr(am["path"]) != "" || pyStr(am["abs_path"]) != "" {
+			if asString(am["path"]) != "" || asString(am["abs_path"]) != "" {
 				items = append(items, am)
 			}
 		}
@@ -383,13 +382,13 @@ func RoundArtifacts(d string, evaluation map[string]any, detail map[string]any) 
 
 	var paths []string
 	for _, a := range items {
-		if p := strings.TrimSpace(pyStr(a["abs_path"])); p != "" {
+		if p := strings.TrimSpace(asString(a["abs_path"])); p != "" {
 			paths = append(paths, p)
 		}
 	}
 	kindSet := map[string]bool{}
 	for _, a := range items {
-		if k := strings.TrimSpace(pyStr(a["kind"])); k != "" {
+		if k := strings.TrimSpace(asString(a["kind"])); k != "" {
 			kindSet[k] = true
 		}
 	}
@@ -420,7 +419,7 @@ func RoundArtifacts(d string, evaluation map[string]any, detail map[string]any) 
 		}
 	}
 	if root == "" && evaluation != nil {
-		root = strings.TrimSpace(pyStr(evaluation["workspace_root"]))
+		root = strings.TrimSpace(asString(evaluation["workspace_root"]))
 	}
 	if root == "" {
 		root = d
@@ -481,7 +480,7 @@ func BackfillCaseArtifacts(detail map[string]any, d string) map[string]any {
 		artBackfillMu.Unlock()
 		if cached != nil {
 			for _, c := range stale {
-				cid := pyStr(c["case_id"])
+				cid := asString(c["case_id"])
 				hit, ok := cached[cid]
 				if !ok {
 					continue
@@ -498,13 +497,13 @@ func BackfillCaseArtifacts(detail map[string]any, d string) map[string]any {
 	if cfg, err := config.LoadConfigDict(); err == nil {
 		eff := config.EffectiveConfig(cfg)
 		if paths, ok := eff["paths"].(map[string]any); ok {
-			wsRoot = pyStr(paths["workspace_root"])
+			wsRoot = asString(paths["workspace_root"])
 		}
 	}
 
 	fresh := map[string][2]any{}
 	for _, c := range stale {
-		sess := strings.TrimSpace(pyStr(c["session_dir"]))
+		sess := strings.TrimSpace(asString(c["session_dir"]))
 		arts := []any{}
 		if sess != "" {
 			if st, err := os.Stat(sess); err == nil && st.IsDir() {
@@ -531,7 +530,7 @@ func BackfillCaseArtifacts(detail map[string]any, d string) map[string]any {
 			if am == nil {
 				continue
 			}
-			if k := pyStr(am["kind"]); k != "" {
+			if k := asString(am["kind"]); k != "" {
 				kindSet[k] = true
 			}
 		}
@@ -543,7 +542,7 @@ func BackfillCaseArtifacts(detail map[string]any, d string) map[string]any {
 		c["artifacts"] = arts
 		c["artifact_kinds"] = kinds
 		c["artifacts_version"] = extractVersion
-		fresh[pyStr(c["case_id"])] = [2]any{arts, kinds}
+		fresh[asString(c["case_id"])] = [2]any{arts, kinds}
 	}
 	if cacheKey != "" {
 		artBackfillMu.Lock()
@@ -571,7 +570,7 @@ func toIntSafe(v any) int {
 	return -1
 }
 
-func pyVal(v any) any {
+func asValue(v any) any {
 	if v == nil {
 		return ""
 	}
@@ -631,7 +630,7 @@ func dedupeKeepOrder(in []string) []string {
 	return out
 }
 
-// commonPath 复刻 Python os.path.commonpath（对已经是绝对路径的输入按分隔符求公共前缀）
+// commonPath 求公共路径前缀（对已经是绝对路径的输入按分隔符比较）
 func commonPath(paths []string) string {
 	if len(paths) == 0 {
 		return ""

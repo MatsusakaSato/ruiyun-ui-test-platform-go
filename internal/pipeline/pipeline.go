@@ -581,8 +581,8 @@ func RunPipeline(opts PipelineOptions) (int, error) {
 		"total":           float64(int(totalElapsed*10)) / 10.0,
 	}
 
-	// 直接把 ReproRecipe 交给指标层：Python 的 build_metrics(recipes=...) 收到的
-	// 就是 ReproRecipe 对象（findings_rows[].repro 与 repro_block 都按它的字段取值）。
+	// 直接把 ReproRecipe 交给指标层：BuildMetrics 里 findings_rows[].repro
+	// 与 repro_block 都按它的字段取值。
 	builtMetrics := metrics.BuildMetrics(results, cfg, recipes, stageTimes)
 
 	reportName := opts.ReportName
@@ -612,7 +612,7 @@ func RunPipeline(opts PipelineOptions) (int, error) {
 	bCases, _ := json.MarshalIndent(caseResultsDicts, "", "  ")
 	_ = os.WriteFile(filepath.Join(artDir, "case_results.json"), bCases, 0644)
 
-	// Python: 只有存在复现配方时才落盘 artifacts/repro_results.json
+	// 只有存在复现配方时才落盘 artifacts/repro_results.json
 	if len(recipes) > 0 {
 		var dicts []map[string]any
 		for _, r := range recipes {
@@ -627,7 +627,7 @@ func RunPipeline(opts PipelineOptions) (int, error) {
 		roundDir := filepath.Join(config.RoundsDir(), opts.RunID)
 		_ = os.MkdirAll(roundDir, 0755)
 
-		// Python: build_round_detail(..., [r.to_dict() for r in recipes], ...)
+		// 归档时把配方转成 map 再交给 BuildRoundDetail
 		reproRows := []map[string]any{}
 		for _, r := range recipes {
 			reproRows = append(reproRows, r.ToDict())

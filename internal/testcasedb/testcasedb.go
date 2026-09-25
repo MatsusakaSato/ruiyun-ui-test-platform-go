@@ -149,10 +149,10 @@ func rowToCase(id, name, prompt, scene, targetsStr string, attachment int, expec
 		labels["attachment"] = true
 	}
 
-	// 字段集合必须与 Python `core/testcase_db.py` 完全一致：
+	// 字段集合必须严格固定为：
 	// id / name / prompt / expect_tools / labels / attachments（+ 有附件时 attachment）。
-	// 旧实现多输出了顶层 scene / targets —— 前端只读 labels.scene / labels.targets，
-	// 属契约偏离（HTTP 差分实测确认），已删除。
+	// 不得多输出顶层 scene / targets —— 前端只读 labels.scene / labels.targets，
+	// 属契约偏离（HTTP 实测确认），已删除。
 	res := map[string]any{
 		"id":           id,
 		"name":         name,
@@ -227,7 +227,7 @@ func QueryPresetCases(keyword, scene string, targets []string, attachment string
 
 	// 1. 全局筛选属性
 	scRows, err := db.Query("SELECT DISTINCT scene FROM testcases WHERE scene != '' ORDER BY scene")
-	scenes := []string{} // Python 列表推导天然给 []；Go 的 nil 切片会序列化成 null
+	scenes := []string{} // 必须是非 nil 空切片：nil 切片会 JSON 序列化成 null
 	if err == nil {
 		for scRows.Next() {
 			var sc string
@@ -284,9 +284,9 @@ func QueryPresetCases(keyword, scene string, targets []string, attachment string
 		params = append(params, sc)
 	}
 
-	// 与 Python 原版严格对齐：只认 yes / no，其余值一律忽略筛选。
-	// Python 侧是 `if attachment == "yes": ... elif attachment == "no":`，
-	// 既不 trim 也不小写 —— 多接受 "1"/"true" 会让同一请求在两侧得到不同结果。
+	// 严格只认 yes / no，其余值一律忽略筛选。
+	// 即 `if attachment == "yes": ... elif attachment == "no":` 的语义，
+	// 既不 trim 也不小写 —— 多接受 "1"/"true" 会让同一请求得到不同结果。
 	if attachment == "yes" {
 		whereClauses = append(whereClauses, "attachment = 1")
 	} else if attachment == "no" {
@@ -294,7 +294,7 @@ func QueryPresetCases(keyword, scene string, targets []string, attachment string
 	}
 
 	// 多选目标是「或」语义：命中任意一个即算匹配。
-	// Python 原版用 `value IN (...)` 单条 EXISTS —— 若改成按目标逐个 EXISTS
+	// 用 `value IN (...)` 单条 EXISTS —— 若改成按目标逐个 EXISTS
 	// 再用 AND 串起来，就变成「且」语义，结果集会大幅缩小
 	// （真实库实测：或=863 条，且=7 条）。
 	var tgList []string
@@ -326,8 +326,8 @@ func QueryPresetCases(keyword, scene string, targets []string, attachment string
 	if strings.ToLower(order) == "asc" {
 		sortOrder = "ASC"
 	}
-	// 与 Python 原版对齐：limit 的规则是 max(1, min(limit or 50, 500))。
-	// 关键是 «or 50» 只在 limit 为 0 时生效（Python 里 0 是假值，负数仍是真值），
+	// limit 的规则是 max(1, min(limit, 500))，但 0 视为「未指定」而回落到 50。
+	// 关键是 0 这一路只在 limit 恰为 0 时生效，负数不回落到 50，
 	// 所以 limit=-5 应当被钳到 1 而不是回落到 50；上限 500 也必须有。
 	if limit == 0 {
 		limit = 50
@@ -352,7 +352,7 @@ func QueryPresetCases(keyword, scene string, targets []string, attachment string
 	}
 	defer rows.Close()
 
-	cases := []map[string]any{} // 空结果必须是 []，Python 的列表推导不会给 null
+	cases := []map[string]any{} // 空结果必须是 []，不能是 null
 	for rows.Next() {
 		var id, name, prompt, scene, targetsStr, expectToolsStr, attachmentsStr string
 		var attachment int
