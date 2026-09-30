@@ -79,42 +79,20 @@
 /* 首页用例全部测试完成 Banner */
 .run-done-banner {
   display:flex;align-items:center;justify-content:space-between;
-  gap:14px;border-radius:10px;padding:11px 16px;margin-bottom:12px;
-  box-shadow:0 2px 6px rgba(15,23,42,.04);
-}
-.run-done-banner.banner-ok {
-  background:linear-gradient(135deg, #f0fdf4 0%, #ecfdf5 100%);
-  border:1px solid #bbf7d0;
-}
-.run-done-banner.banner-warn {
-  background:linear-gradient(135deg, #fffbeb 0%, #fef3c7 100%);
-  border:1px solid #fde68a;
+  gap:14px;padding:5px 2px;margin-bottom:8px;
 }
 .rdb-left { display:flex;flex-direction:column;gap:3px; }
 .rdb-title {
-  display:flex;align-items:center;gap:8px;font-size:13.5px;font-weight:700;
+  display:flex;align-items:center;gap:8px;font-size:12.5px;font-weight:500;color:var(--tx2);
 }
-.banner-ok .rdb-title { color:#15803d; }
-.banner-warn .rdb-title { color:#b45309; }
-.rdb-stats { font-size:12px;color:var(--tx2); }
-.banner-warn .rdb-stats { color:#92400e; }
-.rdb-stats .t-pass { color:#15803d;font-weight:600; }
-.rdb-stats .t-fail { color:#b91c1c;font-weight:600; }
+.rdb-stats { font-size:11.5px;color:var(--tx3); }
+.rdb-stats .t-pass,.rdb-stats .t-fail { color:inherit;font-weight:500; }
 .rdb-btn {
   display:inline-flex;align-items:center;justify-content:center;
-  color:#fff;padding:6px 18px;border-radius:8px;
-  font-size:12.5px;font-weight:600;text-decoration:none;cursor:pointer;
-  border:none;white-space:nowrap;transition:all .15s ease;
+  color:var(--tx3);padding:0;background:none;border:0;border-radius:0;
+  font-size:11.5px;font-weight:500;text-decoration:none;cursor:pointer;
+  white-space:nowrap;
 }
-.banner-ok .rdb-btn {
-  background:#16a34a;box-shadow:0 1px 3px rgba(22,163,74,.25);
-}
-.banner-ok .rdb-btn:hover {
-  background:#15803d;box-shadow:0 3px 8px rgba(22,163,74,.35);transform:translateY(-1px);
-}
-.banner-warn .rdb-btn {
-  background:#d97706;box-shadow:0 1px 3px rgba(180,83,9,.25);
-}
-.banner-warn .rdb-btn:hover {
-  background:#b45309;box-shadow:0 3px 8px rgba(180,83,9,.35);transform:translateY(-1px);
+.rdb-btn:hover {
+  color:var(--accent);text-decoration:underline;
 }
