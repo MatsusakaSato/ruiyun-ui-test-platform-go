@@ -304,10 +304,11 @@ func (t *ExecutionTrace) OrphanIDs() []string {
 	return res
 }
 
-// Finding 一条命中断言规则的缺陷。
+// Finding 一条命中断言规则的问题记录。
+//
+// 只有「命中哪条规则、在哪一步、具体表现、证据」这些客观字段，不带严重级别。
 type Finding struct {
 	Rule      string `json:"rule"`
-	Severity  string `json:"severity"` // P0 / P1 / P2
 	SessionID string `json:"session_id"`
 	Detail    string `json:"detail"`
 	Tool      string `json:"tool,omitempty"`
@@ -355,7 +356,6 @@ func (cr *CaseResult) ToDict() map[string]any {
 	for i, f := range cr.Findings {
 		fm := map[string]any{
 			"rule":       f.Rule,
-			"severity":   f.Severity,
 			"session_id": f.SessionID,
 			"detail":     f.Detail,
 			"tool":       f.Tool,
@@ -400,7 +400,6 @@ func (cr *CaseResult) ToDict() map[string]any {
 type Recipe struct {
 	CaseID     string        `json:"case_id"`
 	Rule       string        `json:"rule"`
-	Severity   string        `json:"severity"`
 	Detail     string        `json:"detail"`
 	Tool       string        `json:"tool"`
 	TotalRuns  int           `json:"total_runs"`
@@ -419,7 +418,6 @@ func (r *Recipe) ToDict() map[string]any {
 	return map[string]any{
 		"case_id":     r.CaseID,
 		"rule":        r.Rule,
-		"severity":    r.Severity,
 		"detail":      r.Detail,
 		"tool":        r.Tool,
 		"total_runs":  r.TotalRuns,

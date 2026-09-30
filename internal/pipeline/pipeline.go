@@ -303,7 +303,6 @@ func RunUICases(cfg map[string]any, cases []map[string]any, uidriver *driver.Rui
 			res0 := owner.res
 			res0.Findings = append(res0.Findings, &models.Finding{
 				Rule:      "CONFIRM_MANUAL_NEEDED",
-				Severity:  "P0",
 				SessionID: res0.SessionID,
 				Detail:    "检测到确认卡片，但自动处理未能推进，任务可能在等待人工授权。请在应用界面手动处理；处理后的结果仍会被正常采集，但该用例已标记需人工复核。",
 				Evidence:  "详见控制台「确认」相关日志，以及本用例时间线里的自动确认条目",
@@ -554,17 +553,13 @@ func RunPipeline(opts PipelineOptions) (int, error) {
 		}
 		recipes = repro.BuildRecipes(roundFindings, roundTraces, cfg)
 		if opts.ReproLimit > 0 && len(recipes) > opts.ReproLimit {
+			// 挑选顺序＝规则表的声明顺序（越靠前＝越硬的缺陷），同规则按 key 排；
+			// 平台不再按严重级别定优先级。
 			sort.Slice(recipes, func(i, j int) bool {
-				p0I := 1
-				if recipes[i].Severity == "P0" {
-					p0I = 0
-				}
-				p0J := 1
-				if recipes[j].Severity == "P0" {
-					p0J = 0
-				}
-				if p0I != p0J {
-					return p0I < p0J
+				rI := assertor.RuleRank(recipes[i].Rule)
+				rJ := assertor.RuleRank(recipes[j].Rule)
+				if rI != rJ {
+					return rI < rJ
 				}
 				return recipes[i].Key < recipes[j].Key
 			})
@@ -699,8 +694,7 @@ func RunPipeline(opts PipelineOptions) (int, error) {
 	if fCount, _ := summaryMap["findings"].(int); fCount == 0 {
 		findingNote = "  ← 本轮未发现问题"
 	}
-	logFn(fmt.Sprintf("  问题发现    %v 个（P0 %v · P1 %v）%s",
-		summaryMap["findings"], summaryMap["p0"], summaryMap["p1"], findingNote))
+	logFn(fmt.Sprintf("  问题发现    %v 个%s", summaryMap["findings"], findingNote))
 	logFn(fmt.Sprintf("  工具调用    %v 次，失败 %v 次（%v%%），截断 %v 次",
 		summaryMap["tool_calls_total"], summaryMap["tool_calls_failed"], summaryMap["tool_fail_rate"], summaryMap["tool_calls_truncated"]))
 	logFn(fmt.Sprintf("  对话用量    提问 %v 轮 · 思考 %v 步 · 估算 token %v（入 %v / 出 %v）",

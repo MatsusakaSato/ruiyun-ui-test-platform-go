@@ -26,29 +26,33 @@ var payloadContentFields = map[string]bool{
 	"doc_content":      true,
 }
 
+// RuleMeta 一条断言规则的元信息。
+//
+// 规则只描述「命中了什么客观信号」，不再区分严重级别：
+// 分级需要人为判断影响面，平台不引入这层主观结论。
 type RuleMeta struct {
-	Severity string
-	Label    string
+	Label string
 }
 
 var Rules = map[string]RuleMeta{
-	"TOOL_CALL_FAILED":      {"P0", "工具调用失败"},
-	"TOOL_RESULT_MISSING":   {"P0", "工具调用无返回"},
-	"ORPHAN_TOOL_CALL":      {"P0", "调用链路 ID 不一致"},
-	"LOOP_CONSECUTIVE":      {"P0", "死循环（同工具连续调用）"},
-	"MAX_ITERATIONS_HIT":    {"P0", "触达 ReAct 迭代上限"},
-	"NO_FINAL_ANSWER":       {"P0", "会话无最终答复"},
-	"OUTPUT_TRUNCATED":      {"P1", "最终答案被强制截断（完结率不足）"},
-	"DUPLICATE_CALL":        {"P1", "同参数重复调用"},
-	"LOOP_TOTAL":            {"P1", "同工具高频调用"},
-	"EMPTY_REQUIRED_ARG":    {"P1", "必填参数为空被放行"},
-	"SESSION_NOT_CLOSED":    {"P1", "会话未正常收尾"},
-	"CONFIRM_MANUAL_NEEDED": {"P0", "确认卡片自动点击失败，需人工介入"},
+	"TOOL_CALL_FAILED":      {"工具调用失败"},
+	"TOOL_RESULT_MISSING":   {"工具调用无返回"},
+	"ORPHAN_TOOL_CALL":      {"调用链路 ID 不一致"},
+	"LOOP_CONSECUTIVE":      {"死循环（同工具连续调用）"},
+	"MAX_ITERATIONS_HIT":    {"触达 ReAct 迭代上限"},
+	"NO_FINAL_ANSWER":       {"会话无最终答复"},
+	"OUTPUT_TRUNCATED":      {"最终答案被强制截断（完结率不足）"},
+	"DUPLICATE_CALL":        {"同参数重复调用"},
+	"LOOP_TOTAL":            {"同工具高频调用"},
+	"EMPTY_REQUIRED_ARG":    {"必填参数为空被放行"},
+	"SESSION_NOT_CLOSED":    {"会话未正常收尾"},
+	"CONFIRM_MANUAL_NEEDED": {"确认卡片自动点击失败，需人工介入"},
 }
 
-// RuleOrder 规则的**声明顺序**。
-// rule_rows 按此声明顺序生成后做稳定排序；
-// Go 的 map 遍历会随机化，必须显式保留顺序，否则同严重度同数量的规则行会乱序。
+// RuleOrder 规则的**声明顺序**，同时充当展示与挑选时的排序依据
+// （越靠前＝越贴近「调用根本没跑通」的硬缺陷）。
+// rule_rows 按此顺序生成后做稳定排序；
+// Go 的 map 遍历会随机化，必须显式保留顺序，否则同数量的规则行会乱序。
 var RuleOrder = []string{
 	"TOOL_CALL_FAILED", "TOOL_RESULT_MISSING", "ORPHAN_TOOL_CALL",
 	"LOOP_CONSECUTIVE", "MAX_ITERATIONS_HIT", "NO_FINAL_ANSWER",
@@ -56,11 +60,19 @@ var RuleOrder = []string{
 	"EMPTY_REQUIRED_ARG", "SESSION_NOT_CLOSED", "CONFIRM_MANUAL_NEEDED",
 }
 
-func makeFinding(rule string, trace *models.ExecutionTrace, detail string, tool string, step *int, evidence string) *models.Finding {
-	sev := "P2"
-	if r, ok := Rules[rule]; ok {
-		sev = r.Severity
+// RuleRank 规则在 RuleOrder 里的位次；未登记的规则排在最后。
+// 问题行、规则行的展示顺序与复现配方的挑选顺序都引用它，
+// 避免各处各写一套排序口径。
+func RuleRank(rule string) int {
+	for i, r := range RuleOrder {
+		if r == rule {
+			return i
+		}
 	}
+	return len(RuleOrder)
+}
+
+func makeFinding(rule string, trace *models.ExecutionTrace, detail string, tool string, step *int, evidence string) *models.Finding {
 	evi := evidence
 	if utf8.RuneCountInString(evi) > 400 {
 		runes := []rune(evi)
@@ -68,7 +80,6 @@ func makeFinding(rule string, trace *models.ExecutionTrace, detail string, tool 
 	}
 	return &models.Finding{
 		Rule:      rule,
-		Severity:  sev,
 		SessionID: trace.SessionID,
 		Detail:    detail,
 		Tool:      tool,

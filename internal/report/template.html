@@ -52,9 +52,9 @@
   .b-pass{background:#dcfce7;color:#15803d}
   .b-fail{background:#fee2e2;color:#b91c1c}
   .b-uifail{background:#fef3c7;color:#92400e}
-  .b-p0{background:#fee2e2;color:#b91c1c}
-  .b-p1{background:#ffedd5;color:#c2410c}
-  .b-p2{background:#fef9c3;color:#a16207}
+  .b-stable{background:#fee2e2;color:#b91c1c}
+  .b-likely{background:#ffedd5;color:#c2410c}
+  .b-flaky{background:#fef9c3;color:#a16207}
   .b-skill{background:#ede9fe;color:#6d28d9}
   .chip{display:inline-block;padding:1px 7px;border-radius:5px;background:#eef2f7;
         color:var(--tx2);font-size:11px;margin:1px 3px 1px 0;font-family:ui-monospace,Menlo,monospace}
@@ -122,7 +122,7 @@
   <div class="kpi">
     <div class="label">问题发现</div>
     <div class="value {{ if eq (printf "%v" .Summary.findings) "0" }}v-ok{{ else }}v-bad{{ end }}">{{ .Summary.findings }}</div>
-    <div class="foot">P0 阻断 {{ .Summary.p0 }} · P1 严重 {{ .Summary.p1 }}</div>
+    <div class="foot">{{ if .Summary.rule_kinds }}涉及 {{ .Summary.rule_kinds }} 类规则{{ else }}未命中任何规则{{ end }}</div>
   </div>
 </div>
 
@@ -197,7 +197,6 @@
     {{ range $f := $cfind }}
     <div class="finding">
       <div class="f-hd">
-        <span class="badge b-{{ lower $f.severity }}">{{ $f.severity }}</span>
         <b>{{ $f.name }}</b>
         <span class="mono">{{ $f.rule }}</span>
         {{ if $f.tool }}<span class="mono">{{ $f.tool }}</span>{{ end }}
@@ -215,7 +214,7 @@
         {{ if $rep.attempts }}
           <div style="margin-top:5px"><b>自动化验证：</b>重复 {{ $rep.attempts }} 次命中 {{ $rep.hits }} 次 =
             <b style="color:var(--accent)">{{ round (mult $rep.rate 100.0) 0 }}%</b>
-            <span class="badge {{ if eq $rep.stability "必现" }}b-p0{{ else if eq $rep.stability "高概率复现" }}b-p1{{ else }}b-p2{{ end }}">{{ $rep.stability }}</span></div>
+            <span class="badge {{ if eq $rep.stability "必现" }}b-stable{{ else if eq $rep.stability "高概率复现" }}b-likely{{ else }}b-flaky{{ end }}">{{ $rep.stability }}</span></div>
         {{ end }}
       </div>
       {{ end }}

@@ -24,7 +24,6 @@ type ReproRecipe struct {
 	Key           string         `json:"key"` // rule:tool 唯一键
 	Rule          string         `json:"rule"`
 	RuleName      string         `json:"rule_name"`
-	Severity      string         `json:"severity"`
 	Tool          string         `json:"tool"`
 	Prompt        string         `json:"prompt"`
 	PromptSource  string         `json:"prompt_source"` // original / synthesized / unknown
@@ -81,7 +80,6 @@ func (r *ReproRecipe) ToDict() map[string]any {
 		"key":            r.Key,
 		"rule":           r.Rule,
 		"rule_name":      r.RuleName,
-		"severity":       r.Severity,
 		"tool":           r.Tool,
 		"prompt":         r.Prompt,
 		"prompt_source":  r.PromptSource,
@@ -243,7 +241,6 @@ func BuildRecipe(finding *models.Finding, tracesBySID map[string]*models.Executi
 		Key:           fmt.Sprintf("%s:%s", rule, toolDisplay),
 		Rule:          rule,
 		RuleName:      ruleName,
-		Severity:      finding.Severity,
 		Tool:          tool,
 		Prompt:        prompt,
 		PromptSource:  source,

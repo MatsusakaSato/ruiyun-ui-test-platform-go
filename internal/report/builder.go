@@ -14,7 +14,6 @@ import (
 type ReportData struct {
 	Summary       map[string]any
 	RuleRows      []map[string]any
-	Severity      map[string]int
 	CaseRows      []map[string]any
 	CaseObjective map[string]map[string]any
 	CaseFindings  map[string][]map[string]any
@@ -46,7 +45,6 @@ func RenderReport(metrics map[string]any, outPath string, appVersion, bundleID, 
 	}
 
 	summary, _ := metrics["summary"].(map[string]any)
-	severity, _ := metrics["severity"].(map[string]int)
 	caseRows, _ := metrics["case_rows"].([]map[string]any)
 	caseObjective, _ := metrics["case_objective"].(map[string]map[string]any)
 	reproSummary, _ := metrics["repro_summary"].(map[string]any)
@@ -57,7 +55,6 @@ func RenderReport(metrics map[string]any, outPath string, appVersion, bundleID, 
 	data := ReportData{
 		Summary:       summary,
 		RuleRows:      ruleRows,
-		Severity:      severity,
 		CaseRows:      caseRows,
 		CaseObjective: caseObjective,
 		CaseFindings:  caseFindings,

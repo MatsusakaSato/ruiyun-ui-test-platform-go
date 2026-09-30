@@ -12,9 +12,8 @@ import (
 	"ruiyun-ui-test-platform-go/internal/trajectory"
 )
 
-var severityOrder = map[string]int{
-	"P0": 0, "P1": 1, "P2": 2,
-}
+// 平台不给问题分严重级别，只按规则表的固定顺序展示：
+// 越靠前＝越贴近「调用根本没跑通」这类硬缺陷。排序键由 assertor.RuleRank 统一提供。
 
 // pct 计算 a 占 b 的百分比：round(a * 100.0 / b, 1)，b 为 0 时返回 0.0。
 //
@@ -44,17 +43,12 @@ func ReproBlock(recipes []*repro.ReproRecipe) ([]map[string]any, map[string]any)
 				sessions = append(sessions, run.SessionID)
 			}
 		}
-		severity := r.Severity
-		if severity == "" {
-			severity = "P1"
-		}
 		var rate any = 0.0
 		if r.Rate != nil {
 			rate = *r.Rate
 		}
 		rows = append(rows, map[string]any{
 			"key":       r.Key,
-			"severity":  severity,
 			"name":      r.RuleName,
 			"tool":      r.Tool,
 			"attempts":  r.Attempts,
@@ -154,31 +148,23 @@ func BuildMetrics(caseResults []*models.CaseResult, cfg map[string]any, recipes 
 	// 按规则注册表 RuleOrder 的**声明顺序**生成，再稳定排序；
 	// range map 会随机化顺序，sort.Slice 又是不稳定排序 —— 两处都得改。
 	for _, rule := range assertor.RuleOrder {
-		meta := assertor.Rules[rule]
 		ruleRows = append(ruleRows, map[string]any{
-			"rule":     rule,
-			"name":     meta.Label,
-			"severity": meta.Severity,
-			"count":    ruleCounter[rule],
+			"rule":  rule,
+			"name":  assertor.Rules[rule].Label,
+			"count": ruleCounter[rule],
 		})
 	}
+	// 命中数多的排前面；数量相同则保持规则表声明顺序（SliceStable + 上文的生成顺序）
 	sort.SliceStable(ruleRows, func(i, j int) bool {
-		sI := severityOrder[fmt.Sprintf("%v", ruleRows[i]["severity"])]
-		sJ := severityOrder[fmt.Sprintf("%v", ruleRows[j]["severity"])]
-		if sI != sJ {
-			return sI < sJ
-		}
 		return ruleRows[i]["count"].(int) > ruleRows[j]["count"].(int)
 	})
 
-	sevCounter := make(map[string]int)
-	for _, f := range findings {
-		sevCounter[f.Severity]++
-	}
-	severity := []map[string]any{
-		{"severity": "P0", "count": sevCounter["P0"]},
-		{"severity": "P1", "count": sevCounter["P1"]},
-		{"severity": "P2", "count": sevCounter["P2"]},
+	// 命中的规则种类数（去重计数），报告与界面用它替代原来的 P0/P1 分级脚注
+	ruleKinds := 0
+	for _, n := range ruleCounter {
+		if n > 0 {
+			ruleKinds++
+		}
 	}
 
 	// 工具维度
@@ -425,15 +411,6 @@ func BuildMetrics(caseResults []*models.CaseResult, cfg map[string]any, recipes 
 			toolCalls = len(tr.ToolCalls)
 			answerChars = utf8.RuneCountInString(tr.FinalAnswer)
 		}
-		p0Count := 0
-		p1Count := 0
-		for _, f := range c.Findings {
-			if f.Severity == "P0" {
-				p0Count++
-			} else if f.Severity == "P1" {
-				p1Count++
-			}
-		}
 		caseRows = append(caseRows, map[string]any{
 			"case_id":        c.CaseID,
 			"name":           c.Name,
@@ -443,8 +420,6 @@ func BuildMetrics(caseResults []*models.CaseResult, cfg map[string]any, recipes 
 			"tool_calls":     toolCalls,
 			"thinking_steps": thinkingCount,
 			"findings":       len(c.Findings),
-			"p0":             p0Count,
-			"p1":             p1Count,
 			"elapsed_s":      trajectory.RoundToOneDecimal(c.ElapsedS),
 			"ui_error":       c.UIError,
 			"waited_limit":   c.WaitedLimit,
@@ -464,15 +439,10 @@ func BuildMetrics(caseResults []*models.CaseResult, cfg map[string]any, recipes 
 			recipeByKey[r.Key] = r
 		}
 	}
-	// 必须稳定排序：同 (severity, rule) 时保持原序。
-	// 用 sort.Slice 会让同严重度同规则的发现行随机换位。
+	// 必须稳定排序：按规则表的声明顺序归拢，同规则的发现行保持原序（用例顺序）。
+	// 用 sort.Slice 会让同规则的发现行随机换位。
 	sort.SliceStable(findings, func(i, j int) bool {
-		sI := severityOrder[findings[i].Severity]
-		sJ := severityOrder[findings[j].Severity]
-		if sI != sJ {
-			return sI < sJ
-		}
-		return findings[i].Rule < findings[j].Rule
+		return assertor.RuleRank(findings[i].Rule) < assertor.RuleRank(findings[j].Rule)
 	})
 
 	for _, f := range findings {
@@ -490,7 +460,6 @@ func BuildMetrics(caseResults []*models.CaseResult, cfg map[string]any, recipes 
 		row := map[string]any{
 			"rule":       f.Rule,
 			"name":       ruleName,
-			"severity":   f.Severity,
 			"session_id": f.SessionID,
 			"tool":       f.Tool,
 			"detail":     f.Detail,
@@ -526,8 +495,7 @@ func BuildMetrics(caseResults []*models.CaseResult, cfg map[string]any, recipes 
 			"ui_failed":            len(uiFailed),
 			"pass_rate":            pct(len(passed), len(caseResults)),
 			"findings":             len(findings),
-			"p0":                   sevCounter["P0"],
-			"p1":                   sevCounter["P1"],
+			"rule_kinds":           ruleKinds,
 			"tool_calls_total":     callTotal,
 			"tool_calls_failed":    failsCount,
 			"tool_fail_rate":       pct(failsCount, callTotal),
@@ -538,7 +506,6 @@ func BuildMetrics(caseResults []*models.CaseResult, cfg map[string]any, recipes 
 		"case_objective": caseObjective,
 		"skill_rows":     skillRows,
 		"rule_rows":      ruleRows,
-		"severity":       severity,
 		"tool_rows":      toolRows,
 		"coverage":       coverage,
 		"case_rows":      caseRows,

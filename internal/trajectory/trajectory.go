@@ -810,7 +810,6 @@ func BuildCaseDetail(caseResult *models.CaseResult, findingsByStep map[string][]
 	for _, f := range caseResult.Findings {
 		fm := map[string]any{
 			"rule":       f.Rule,
-			"severity":   f.Severity,
 			"detail":     f.Detail,
 			"tool":       f.Tool,
 			"evidence":   f.Evidence,

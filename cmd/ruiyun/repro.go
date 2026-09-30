@@ -84,7 +84,7 @@ func runRepro(args []string) int {
 	if *listOnly {
 		log(fmt.Sprintf("共 %d 个 bug 签名的复现配方：\n", len(recipes)))
 		for _, r := range recipes {
-			log(fmt.Sprintf("[%s] %s  %s", r.Severity, r.RuleName, r.Key))
+			log(fmt.Sprintf("%s  %s", r.RuleName, r.Key))
 			src := "合成"
 			if r.PromptSource == "original" {
 				src = "原始提问"
@@ -160,8 +160,8 @@ func runRepro(args []string) int {
 		if r.Rate != nil {
 			rate = *r.Rate
 		}
-		log(fmt.Sprintf("[%s] %-48s %d/%d = %.0f%%  %s",
-			r.Severity, r.Key, r.Hits, r.Attempts, rate*100, r.Stability))
+		log(fmt.Sprintf("%-48s %d/%d = %.0f%%  %s",
+			r.Key, r.Hits, r.Attempts, rate*100, r.Stability))
 	}
 	log(strings.Repeat("=", 70))
 	return 0
@@ -246,7 +246,6 @@ func recipeFromDict(d map[string]any) *repro.ReproRecipe {
 	r.Key = dictStr(d, "key")
 	r.Rule = dictStr(d, "rule")
 	r.RuleName = dictStr(d, "rule_name")
-	r.Severity = dictStr(d, "severity")
 	r.Tool = dictStr(d, "tool")
 	r.Prompt = dictStr(d, "prompt")
 	r.PromptSource = dictStr(d, "prompt_source")

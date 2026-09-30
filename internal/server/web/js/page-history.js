@@ -230,7 +230,7 @@ export function renderRound(data) {
   const cases = d.cases || [];
   html += '<div class="kpis">'
     + kpi('本轮用例', cases.length, `通过 ${sm.passed ?? 0} · 断言失败 ${sm.failed ?? 0} · UI失败 ${sm.ui_failed ?? 0}`, 'v-acc')
-    + kpi('问题发现', sm.findings ?? 0, `P0 ${sm.p0 ?? 0} · P1 ${sm.p1 ?? 0}`, (sm.findings ?? 0) > 0 ? 'v-bad' : 'v-ok')
+    + kpi('问题发现', sm.findings ?? 0, sm.rule_kinds ? `涉及 ${sm.rule_kinds} 类规则` : '', (sm.findings ?? 0) > 0 ? 'v-bad' : 'v-ok')
     + '</div>';
 
   if (rp.verified) {
@@ -326,8 +326,8 @@ export function objTab(m, d) {
   h += '<h3 class="sec" style="margin-top:16px">用到的工具</h3><div class="tbl-card"><table><tr><th>工具</th><th>调用</th><th>失败</th><th>截断</th></tr>';
   for (const t of tools) {
     h += `<tr><td class="mono">${esc(t.name)}</td><td>${t.calls}</td>`
-      + `<td>${t.fail ? `<span class="badge b-p0">${t.fail}</span>` : '—'}</td>`
-      + `<td>${t.truncated ? `<span class="badge b-p1">${t.truncated}</span>` : '—'}</td></tr>`;
+      + `<td>${t.fail ? `<span class="badge b-fail">${t.fail}</span>` : '—'}</td>`
+      + `<td>${t.truncated ? `<span class="badge b-uifail">${t.truncated}</span>` : '—'}</td></tr>`;
   }
   if (!tools.length) h += '<tr><td colspan="4" class="empty">没有调用任何工具</td></tr>';
   h += '</table></div>';
@@ -426,9 +426,9 @@ export function caseTimeline(c) {
       </div>`;
     } else {
       const cls = st.skill_name ? 'skill' : (st.status === 'fail' ? 'fail' : (st.status === 'truncated' || st.status === 'empty') ? 'truncated' : '');
-      const stTxt = st.status === 'fail' ? '<span class="badge b-p0">失败</span>'
-        : st.status === 'truncated' ? '<span class="badge b-p1">截断</span>'
-        : st.status === 'empty' ? '<span class="badge b-p1">空返回</span>'
+      const stTxt = st.status === 'fail' ? '<span class="badge b-fail">失败</span>'
+        : st.status === 'truncated' ? '<span class="badge b-uifail">截断</span>'
+        : st.status === 'empty' ? '<span class="badge b-uifail">空返回</span>'
         : '<span class="badge b-ok">成功</span>';
       h += `<div class="step tool ${cls}"><span class="dot"></span>
         <div class="step-head" onclick="this.parentNode.classList.toggle('open')">
@@ -502,7 +502,6 @@ export function bugsTab(m, d) {
   for (const f of rows) {
     h += `<div class="finding">
       <div class="f-hd">
-        <span class="badge b-${(f.severity || 'p2').toLowerCase()}">${esc(f.severity)}</span>
         <b style="font-size:12.5px">${esc(f.name)}</b>
         <span class="mono">${esc(f.rule)}</span>
         ${f.tool ? `<span class="mono">${esc(f.tool)}</span>` : ''}
