@@ -19,6 +19,9 @@ coverage.html
 # 不是源码，不应提交。
 .app_settings.json
 
+# 助手（WorkBuddy）的项目记忆与配置目录
+.workbuddy/
+
 # 编辑器 / 系统
 .DS_Store
 .idea/

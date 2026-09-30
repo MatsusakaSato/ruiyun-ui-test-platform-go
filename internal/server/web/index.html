@@ -86,7 +86,7 @@
 - 并发数：同时执行的用例上限
 工作区内含预设用例、附件库、轮次归档与 config.yaml。">?</span>
   </span>
-  <button class="btn-run" id="btnRun" title="也可以直接按回车运行">▶ 运行测试</button>
+  <button class="btn-run" id="btnRun" title="顺序执行「本轮要跑的」全部用例">▶ 运行测试</button>
   <button class="btn-stop" id="btnStop" style="display:none" title="终止当前测试（本轮不产出报告）">■ 终止测试</button>
 </div></header>
 
@@ -198,7 +198,7 @@
     <!-- ---- 本轮要跑的队列：可改提问 / 挂附件 / 删行，再去首页运行 ---- -->
     <div id="paneQueue" hidden>
       <div class="lib-bar">
-        <span class="fhint">队列里的用例会按顺序执行，每条单独开一个会话；附件在运行时投递给被测应用。</span>
+        <span class="fhint" id="queueHint"></span>
         <div class="spacer"></div>
         <button class="btn-ghost" id="btnAddQueueRow">+ 添加一行</button>
         <button class="btn-ghost" id="btnClearCases">清空队列</button>

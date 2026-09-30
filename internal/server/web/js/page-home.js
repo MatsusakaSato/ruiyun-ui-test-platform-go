@@ -295,12 +295,6 @@ export function initHome() {
     };
   }
 
-  const caseRows = $('caseRows');
-  if (caseRows) {
-    caseRows.addEventListener('keydown', e => {
-      if (e.key !== 'Enter' || e.isComposing || e.shiftKey) return;
-      e.preventDefault();
-      doRun();
-    });
-  }
+  // 「本轮要跑的」队列里回车 = 新增用例、Ctrl/⌘+回车 = 启动测试，
+  // 该快捷键由 page-cases.js 的 initCases() 统一绑定
 }

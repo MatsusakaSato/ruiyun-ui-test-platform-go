@@ -1,8 +1,8 @@
 /* ================= 测试用例页（预设库 + 队列编辑 + 附件管理） ================= */
 
-import { $, esc, fmtSize, fileToBase64 } from './utils.js';
+import { $, esc, fmtSize, fileToBase64, IS_WIN, MOD_KEY } from './utils.js';
 import { state } from './state.js';
-import { renderRunCases } from './page-home.js';
+import { renderRunCases, doRun } from './page-home.js';
 
 /* ---------- 附件上传与附件库 ---------- */
 export async function loadUploads() {
@@ -136,13 +136,23 @@ export function syncCaseState() {
   if (hint) {
     if (filled === 0) {
       hint.className = 'hint warn';
-      hint.textContent = '队列还是空的。到「预设用例库」勾选用例后点「加入本轮」，或直接「+ 添加一行」。';
+      hint.textContent = state.CASES.length
+        ? '队列里的用例还没填提问。填完一条后按回车，即可在它下面继续新增。'
+        : '队列还是空的。到「预设用例库」勾选用例后点「加入本轮」，或点「+ 添加一行」新增。';
     } else {
       hint.className = 'hint';
       hint.textContent = `将按顺序执行 ${filled} 条用例，每条用例单独开一个会话。`;
     }
   }
+  renderQueueHint();
   renderRunCases();
+}
+
+/* 队列快捷键提示：文案随平台走，Windows 上不出现 ⌘ */
+function renderQueueHint() {
+  const el = $('queueHint');
+  if (!el) return;
+  el.textContent = `快捷键：回车 新增用例 · ${MOD_KEY()} + 回车 启动测试`;
 }
 
 export function setCaseTab(which) {
@@ -235,11 +245,23 @@ export function renderCases() {
   syncCaseState();
 }
 
-export function addCase() {
-  state.CASES.push({ prompt: '', attachments: [] });
+/* at 省略时追加到队尾；传入序号则插到该位置之前（回车新增用 at = 当前行 + 1） */
+export function addCase(at) {
+  const pos = Number.isInteger(at)
+    ? Math.min(Math.max(at, 0), state.CASES.length)
+    : state.CASES.length;
+  state.CASES.splice(pos, 0, { prompt: '', attachments: [] });
   renderCases();
-  const els = document.querySelectorAll('#caseRows .prompt');
-  els[els.length - 1]?.focus();
+  focusCaseRow(pos);
+}
+
+/* 聚焦第 i 行的提问输入框（renderCases 重建 DOM 后需要手动聚焦） */
+function focusCaseRow(i) {
+  const row = document.querySelectorAll('#caseRows .case-row')[i];
+  const input = row && row.querySelector('input.prompt');
+  if (!input) return;
+  input.focus();
+  try { row.scrollIntoView({ behavior: 'smooth', block: 'nearest' }); } catch (e) {}
 }
 
 export function delCase(i) {
@@ -411,7 +433,37 @@ export function initCases() {
   if (libMask) libMask.onclick = e => { if (e.target === e.currentTarget) closeLib(); };
 
   const btnAdd = $('btnAddQueueRow');
-  if (btnAdd) btnAdd.onclick = addCase;
+  if (btnAdd) btnAdd.onclick = () => addCase();
+
+  /* ---- 「本轮要跑的」队列快捷键 ----
+     回车：在当前用例下方新增一条空用例（末行且还是空的时候不再追加，免得连出一串空行）
+     Ctrl + 回车：启动本轮测试（macOS 上 ⌘ + 回车 同效；Windows 的 Win 键不算） */
+  const paneQueue = $('paneQueue');
+  if (paneQueue) {
+    paneQueue.addEventListener('keydown', e => {
+      if (e.key !== 'Enter' || e.isComposing) return;
+
+      if (IS_WIN ? e.ctrlKey : (e.ctrlKey || e.metaKey)) {
+        e.preventDefault();
+        doRun();
+        return;
+      }
+      // ⌘（macOS）/ Win（Windows）单独按下时不当普通回车用
+      if (e.shiftKey || e.altKey || e.metaKey) return;
+
+      // 只认用例行里的提问输入框；按钮上的回车交给按钮自己处理
+      const input = e.target.closest ? e.target.closest('input.prompt') : null;
+      if (!input) return;
+      const rows = [...document.querySelectorAll('#caseRows .case-row')];
+      const i = rows.indexOf(input.closest('.case-row'));
+      if (i < 0) return;
+
+      e.preventDefault();
+      const cur = state.CASES[i];
+      if (i === state.CASES.length - 1 && !((cur && cur.prompt) || '').trim()) return;
+      addCase(i + 1);
+    });
+  }
 
   const btnClear = $('btnClearCases');
   if (btnClear) {

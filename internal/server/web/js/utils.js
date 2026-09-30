@@ -27,9 +27,13 @@ export function fileToBase64(f) {
   });
 }
 
-export let IS_WIN = /Win/i.test(navigator.userAgent || '');
+// 注意不要用 /Win/i 这种宽匹配：macOS 上某些内核的 UA 带 "(darwin)"，拆开就是 …ar-win…
+export let IS_WIN = /Windows NT|Win64|Win32/i.test(navigator.userAgent || '');
 export const setPlatformWin = (v) => { IS_WIN = !!v; };
 export const FM_NAME = () => IS_WIN ? '资源管理器' : '访达';
+
+/* 组合键里修饰键的显示名：macOS 显示 Ctrl/⌘，Windows 只显示 Ctrl */
+export const MOD_KEY = () => IS_WIN ? 'Ctrl' : 'Ctrl/⌘';
 
 export async function doReveal(p) {
   try {
