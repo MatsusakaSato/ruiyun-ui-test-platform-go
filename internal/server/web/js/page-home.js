@@ -17,7 +17,7 @@ export function renderRunCases() {
   if (!state.RUN_CASES.length) {
     const emptyHtml = '<div class="run-empty">'
       + (state.RUNNING
-        ? '<div style="display:flex;align-items:center;gap:9px;padding:12px 4px"><span class="spinner-blue"></span><span>正在启动测试，用例即将列出…</span></div>'
+        ? '测试启动中…'
         : '还没有要跑的用例。到 '
           + '<button class="home-link" onclick="switchPage(\'cases\')">测试用例</button>'
           + ' 页从预设库里勾选加入本轮，或手动添加一行。')
@@ -41,18 +41,12 @@ export function renderRunCases() {
 
   let topHtml = '';
   if (state.RUNNING) {
-    const pct = total ? Math.round((done / total) * 100) : 0;
     topHtml = `<div class="run-progress-box">
       <div class="rpb-header">
         <div class="rpb-title">
-          <span class="spinner-blue"></span>
           <span>测试执行中</span>
           <span class="rpb-counts">（已完成 ${done} / ${total} 条）</span>
         </div>
-        <div class="rpb-pct">${pct}%</div>
-      </div>
-      <div class="rpb-track">
-        <div class="rpb-bar" style="width:${Math.max(pct, 5)}%"></div>
       </div>
     </div>`;
   } else if (isAllDone) {
@@ -83,16 +77,19 @@ export function renderRunCases() {
     let rowCls = 'run-row';
     if (c.status === 'PASS') {
       badgeHtml = '<span class="badge b-ok">✓ 通过</span>';
+      rowCls += ' is-collected';
     } else if (c.status === 'FAIL') {
       badgeHtml = '<span class="badge b-fail">✕ 断言失败</span>';
+      rowCls += ' is-collected is-failed';
     } else if (c.status === 'UI_FAIL') {
       badgeHtml = '<span class="badge b-uifail">⚠ UI 失败</span>';
+      rowCls += ' is-collected is-failed';
     } else if (state.RUNNING) {
       if (firstUnfinished !== -1 && i >= firstUnfinished && i < firstUnfinished + inflight) {
-        badgeHtml = '<span class="badge b-executing"><span class="spinner-inline"></span> 测试中…</span>';
+        badgeHtml = '<span class="badge b-executing">测试中</span>';
         rowCls += ' is-executing';
       } else {
-        badgeHtml = '<span class="badge b-idle"><span class="dot-pulse"></span> 排队中</span>';
+        badgeHtml = '<span class="badge b-idle">排队中</span>';
       }
     } else {
       badgeHtml = '<span class="badge b-idle">等待中</span>';
@@ -157,7 +154,7 @@ export function setRunning(v) {
   state.RUNNING = v;
   document.querySelectorAll('.btn-run').forEach(b => {
     if (v) {
-      b.innerHTML = '<span class="btn-spinner"></span> 测试运行中…';
+      b.textContent = '测试运行中…';
       b.classList.add('is-running');
     } else {
       b.textContent = '▶ 运行测试';
@@ -171,7 +168,7 @@ export function setRunning(v) {
   syncEnvUI();
   syncAutoClickUI();
 
-  if (v && !state.pollTimer) state.pollTimer = setInterval(pollStatus, 1200);
+  if (v && !state.pollTimer) state.pollTimer = setInterval(pollStatus, 500);
   if (!v && state.pollTimer) { clearInterval(state.pollTimer); state.pollTimer = null; }
 }
 
@@ -203,13 +200,16 @@ export function paintConsole(lines) {
 export function renderStatus(j) {
   const b = $('statusBadge');
   if (b) {
-    if (j.running) {
-      b.className = 'badge b-run';
-      b.innerHTML = '<span class="badge-dot-live"></span>运行中 · ' + j.elapsed_s + 's';
-    } else if (j.finished_ok || (j.exit_code === 0 && j.archived)) {
-      b.className = 'badge b-ok'; b.textContent = '完成';
+    const finished = !j.running && !j.stopped
+      && (j.finished_ok || (j.exit_code === 0 && j.archived));
+    b.hidden = finished;
+    if (finished) {
+      b.textContent = '';
     } else if (j.stopped) {
-      b.className = 'badge b-err'; b.textContent = '已终止（未产出报告）';
+      b.className = 'badge b-err'; b.textContent = '已终止';
+    } else if (j.running) {
+      b.className = 'badge b-run';
+      b.textContent = '运行中 · ' + j.elapsed_s + 's';
     } else if (j.exit_code != null) {
       b.className = 'badge b-err'; b.textContent = '异常退出（退出码 ' + j.exit_code + '）';
     } else {
@@ -217,14 +217,42 @@ export function renderStatus(j) {
     }
   }
 
+  const termination = $('terminationReason');
+  if (termination) {
+    termination.hidden = !j.stopped;
+    termination.textContent = j.stopped ? (j.termination_reason || '本轮测试已终止') : '';
+  }
+
   const cl = $('consoleLive');
   if (cl) cl.style.display = j.running ? 'inline-flex' : 'none';
 
   if (Array.isArray(j.cases) && j.cases.length) {
-    state.RUN_CASES = j.cases;
+    state.RUN_CASES = j.cases.map((serverCase, index) => {
+      const current = state.RUN_CASES.find(c => c.case_id === serverCase.case_id)
+        || state.RUN_CASES[index];
+      return { ...current, ...serverCase, status: serverCase.status || current?.status || '' };
+    });
     renderRunCases();
   }
+  syncCollectedCases(j.lines);
   paintConsole(j.lines);
+}
+
+function syncCollectedCases(lines) {
+  if (!Array.isArray(lines) || !state.RUN_CASES.length) return;
+  let changed = false;
+  for (const line of lines) {
+    const match = String(line).match(/已收取\s+(CASE-\d+)\s+·.*·\s+(通过|断言失败|UI 失败)/);
+    if (!match) continue;
+    const current = state.RUN_CASES.find(c => c.case_id === match[1]);
+    if (!current) continue;
+    const status = match[2] === '通过' ? 'PASS' : match[2] === 'UI 失败' ? 'UI_FAIL' : 'FAIL';
+    if (current.status !== status) {
+      current.status = status;
+      changed = true;
+    }
+  }
+  if (changed) renderRunCases();
 }
 
 export async function goToLatestHistory(runId) {
@@ -252,7 +280,7 @@ export function initHome() {
   const btnStop = $('btnStop');
   if (btnStop) {
     btnStop.onclick = async () => {
-      if (!confirm('确定终止当前测试？\n\n测试进程会被停止，本轮不产出报告，\n已经跑完的用例结果也会一并丢弃。\n被测应用不受影响，继续常驻。')) return;
+      if (!confirm('确定终止当前测试？\n\n测试进程和所有匹配的被测应用进程都会立即关闭，本轮不生成正式报告。')) return;
       btnStop.disabled = true;
       try {
         const r = await fetch('/api/run/stop', { method: 'POST' });
@@ -260,8 +288,10 @@ export function initHome() {
         if (!j.ok) alert('终止失败：' + (j.message || '未知错误'));
       } catch (e) {
         alert('请求失败：' + e.message);
+      } finally {
+        btnStop.disabled = false;
+        try { await pollStatus(); } catch (e) {}
       }
-      btnStop.disabled = false;
     };
   }
 

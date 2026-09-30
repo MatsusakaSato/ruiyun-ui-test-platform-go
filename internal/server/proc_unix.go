@@ -13,10 +13,12 @@ func procAttrNewSession() *syscall.SysProcAttr {
 	return &syscall.SysProcAttr{Setsid: true}
 }
 
-// terminateProcess 先发 SIGTERM，给进程留出优雅退出的机会
+// terminateProcess 强制终止测试进程，避免停止后继续执行并生成报告
 func terminateProcess(cmd *exec.Cmd) {
 	if cmd == nil || cmd.Process == nil {
 		return
 	}
-	_ = cmd.Process.Signal(syscall.SIGTERM)
+	if err := syscall.Kill(-cmd.Process.Pid, syscall.SIGKILL); err != nil {
+		_ = cmd.Process.Kill()
+	}
 }

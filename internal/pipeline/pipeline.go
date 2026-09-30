@@ -144,6 +144,9 @@ func RunUICases(cfg map[string]any, cases []map[string]any, uidriver *driver.Rui
 	}
 
 	for len(pending) > 0 || len(inflight) > 0 {
+		if uidriver.AppExited || !uidriver.CheckAppAlive() {
+			return results
+		}
 		// 1) 填满在途窗口
 		for len(pending) > 0 && len(inflight) < maxInflight {
 			p := pending[0]
@@ -191,6 +194,9 @@ func RunUICases(cfg map[string]any, cases []map[string]any, uidriver *driver.Rui
 
 			// 回到「新建任务」首页
 			if !uidriver.ResetToNewTask(15.0) {
+				if !uidriver.CheckAppAlive() {
+					return results
+				}
 				res.UIOk = false
 				st := uidriver.PageState()
 				if st["login_like"] == true {
@@ -223,11 +229,17 @@ func RunUICases(cfg map[string]any, cases []map[string]any, uidriver *driver.Rui
 				} else {
 					logger("        附件：投递失败 —— " + msgAtt)
 					res.UIError = "附件未投递：" + msgAtt
+					if !uidriver.CheckAppAlive() {
+						return results
+					}
 				}
 			}
 
 			before := uidriver.SnapshotSessions()
 			if err := uidriver.TypeText(prompt); err != nil {
+				if !uidriver.CheckAppAlive() {
+					return results
+				}
 				res.UIOk = false
 				res.UIError = fmt.Sprintf("界面操作出错: %v", err)
 				logger(fmt.Sprintf("        失败：%s", res.UIError))
@@ -239,6 +251,9 @@ func RunUICases(cfg map[string]any, cases []map[string]any, uidriver *driver.Rui
 
 			how, _ := uidriver.Send()
 			sess, err := uidriver.WaitNewSession(before, newSessTimeout)
+			if uidriver.AppExited {
+				return results
+			}
 			if err != nil || sess == "" {
 				st := uidriver.ComposerState()
 				res.UIError = fmt.Sprintf("发送后没有产生新会话日志（发送方式 %s；输入框里 %v 字，发送按钮 %v）",
@@ -290,11 +305,11 @@ func RunUICases(cfg map[string]any, cases []map[string]any, uidriver *driver.Rui
 				Rule:      "CONFIRM_MANUAL_NEEDED",
 				Severity:  "P0",
 				SessionID: res0.SessionID,
-				Detail:    "确认卡片自动点击连续 5 次失败，任务卡在等待人工授权。请在应用界面手动处理；处理后的结果仍会被正常采集，但该用例已标记需人工复核。",
+				Detail:    "检测到确认卡片，但自动处理未能推进，任务可能在等待人工授权。请在应用界面手动处理；处理后的结果仍会被正常采集，但该用例已标记需人工复核。",
 				Evidence:  "详见控制台「确认」相关日志，以及本用例时间线里的自动确认条目",
 			})
 			res0.UIOk = true
-			logger(fmt.Sprintf("        自动确认连续失败，需要你手动处理：用例 %s 卡在确认卡片，请在应用界面点一下", res0.CaseID))
+			logger(fmt.Sprintf("        确认卡片需要人工处理：用例 %s，请在应用界面完成授权", res0.CaseID))
 		}
 
 		var dirs []string
@@ -308,6 +323,9 @@ func RunUICases(cfg map[string]any, cases []map[string]any, uidriver *driver.Rui
 		}
 
 		settled := uidriver.WaitSomeSettled(dirs, caseTimeout, 3.0, pairs, uidriver.AutoConfirmCycleS)
+		if uidriver.AppExited {
+			return results
+		}
 		settledMap := make(map[string]bool)
 		for _, s := range settled {
 			settledMap[s] = true
@@ -496,6 +514,10 @@ func RunPipeline(opts PipelineOptions) (int, error) {
 
 	results := RunUICases(cfg, cases, uidriver, logFn)
 	uidriver.Detach()
+	if uidriver.AppExited {
+		logFn("[终止] 被测应用已退出，测试已终止，本轮不生成正式报告")
+		return 3, nil
+	}
 	if closeApp, _ := appCfg["close_app_after_run"].(bool); closeApp {
 		uidriver.KillApp()
 		logFn("  · 已按 close_app_after_run=true 关闭应用进程")

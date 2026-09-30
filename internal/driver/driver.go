@@ -114,6 +114,7 @@ type RuiyunUIDriver struct {
 	InputSelector      string
 	LaunchedByUs       bool
 	ReusedExisting     bool
+	AppExited          bool
 	RestartIfNoPort    bool
 	UIReadyTimeout     float64
 	AutoConfirm        bool
@@ -191,7 +192,7 @@ func NewRuiyunUIDriver(cfg map[string]any) *RuiyunUIDriver {
 		autoConfirm = ac
 	}
 
-	var confirmKeywords []string
+	confirmKeywords := make([]string, 0)
 	if kws, ok := app["confirm_keywords"].([]any); ok {
 		for _, kw := range kws {
 			confirmKeywords = append(confirmKeywords, fmt.Sprintf("%v", kw))
@@ -460,6 +461,19 @@ func (d *RuiyunUIDriver) KillApp() {
 		d.Proc = nil
 		d.LaunchedByUs = false
 	}
+}
+
+// CheckAppAlive 检查被测应用进程是否仍在运行
+func (d *RuiyunUIDriver) CheckAppAlive() bool {
+	if d.AppExited {
+		return false
+	}
+	if strings.TrimSpace(d.Binary) == "" || len(sysutil.RunningAppPIDs(d.Binary)) > 0 {
+		return true
+	}
+	d.AppExited = true
+	citeEmit("[应用] 检测到被测应用进程已退出")
+	return false
 }
 
 func (d *RuiyunUIDriver) Shutdown() {
@@ -1024,6 +1038,9 @@ func (d *RuiyunUIDriver) SnapshotSessions() map[string]bool {
 func (d *RuiyunUIDriver) WaitNewSession(before map[string]bool, timeoutS float64) (string, error) {
 	deadline := time.Now().Add(time.Duration(timeoutS * float64(time.Second)))
 	for time.Now().Before(deadline) {
+		if !d.CheckAppAlive() {
+			return "", fmt.Errorf("被测应用已退出")
+		}
 		current := d.SnapshotSessions()
 		var newestDir string
 		var newestMtime int64
@@ -1042,7 +1059,10 @@ func (d *RuiyunUIDriver) WaitNewSession(before map[string]bool, timeoutS float64
 		if newestDir != "" {
 			return newestDir, nil
 		}
-		time.Sleep(800 * time.Millisecond)
+		time.Sleep(500 * time.Millisecond)
+	}
+	if !d.CheckAppAlive() {
+		return "", fmt.Errorf("被测应用已退出")
 	}
 	return "", nil
 }
@@ -1284,15 +1304,36 @@ func (d *RuiyunUIDriver) qcardHandle(ownerSess string) map[string]any {
 	return nil
 }
 
+func compactConfirmError(err error) string {
+	if err == nil {
+		return "未知错误"
+	}
+	msg := strings.TrimSpace(err.Error())
+	runes := []rune(msg)
+	if len(runes) > 240 {
+		msg = string(runes[:240]) + "…"
+	}
+	return msg
+}
+
 func (d *RuiyunUIDriver) confirmFail(msg string) {
 	d.ConfirmCDPStreak++
-	citeEmit(fmt.Sprintf("[确认] 第 %d 次失败：%s", d.ConfirmCDPStreak, msg))
+	if d.ConfirmCDPStreak == 1 || d.ConfirmCDPStreak == 5 {
+		citeEmit(fmt.Sprintf("[自动确认] Runtime.evaluate 连续失败（%d 次）：%s", d.ConfirmCDPStreak, msg))
+	}
 	if d.ConfirmCDPStreak >= 5 {
 		d.AutoConfirm = false
-		d.ConfirmHumanNeeded = true
-		d.ConfirmHumanSess = d.ownerSess("")
-		citeEmit("[确认] 连续 5 次失败，已停用自动确认，需要你在应用界面手动点一下确认卡片")
+		citeEmit("[自动确认] 连续 5 次执行失败，已停用自动点击；当前状态不代表存在待处理确认卡片")
 	}
+}
+
+func autoConfirmScript(confirmKeywords []string) string {
+	if confirmKeywords == nil {
+		confirmKeywords = []string{}
+	}
+	prefJSON, _ := json.Marshal(confirmKeywords)
+	denyJSON, _ := json.Marshal(DenyWords)
+	return fmt.Sprintf(AutoConfirmJSTemplate, prefJSON, denyJSON)
 }
 
 func (d *RuiyunUIDriver) maybeAutoConfirm(skipQCard bool, qcardOwner string) map[string]any {
@@ -1301,9 +1342,7 @@ func (d *RuiyunUIDriver) maybeAutoConfirm(skipQCard bool, qcardOwner string) map
 	}
 	if len(d.ConfirmEvents) >= d.ConfirmMaxClicks {
 		d.AutoConfirm = false
-		d.ConfirmHumanNeeded = true
-		d.ConfirmHumanSess = d.ownerSess(qcardOwner)
-		citeEmit(fmt.Sprintf("[确认] 自动确认累计已达 %d 次，已停用，需要你在应用界面手动处理后续确认", d.ConfirmMaxClicks))
+		citeEmit(fmt.Sprintf("[确认] 自动确认累计已达 %d 次，已停用自动点击；当前状态不代表存在待处理确认卡片", d.ConfirmMaxClicks))
 		return nil
 	}
 
@@ -1313,20 +1352,19 @@ func (d *RuiyunUIDriver) maybeAutoConfirm(skipQCard bool, qcardOwner string) map
 		}
 	}
 
-	prefJSON, _ := json.Marshal(d.ConfirmKeywords)
-	denyJSON, _ := json.Marshal(DenyWords)
-	expr := fmt.Sprintf(AutoConfirmJSTemplate, prefJSON, denyJSON)
+	expr := autoConfirmScript(d.ConfirmKeywords)
 
 	val, err := d.CDP.EvalJS(expr, 10*time.Second, false)
 	if err != nil {
+		firstErr := err
 		d.Detach()
 		if !d.Attach(15.0) {
-			d.confirmFail("CDP 连接异常（重连失败）")
+			d.confirmFail("首次错误：" + compactConfirmError(firstErr) + "；重连页面失败")
 			return nil
 		}
 		val, err = d.CDP.EvalJS(expr, 10*time.Second, false)
 		if err != nil {
-			d.confirmFail("CDP 连接异常（重连后仍失败）")
+			d.confirmFail("首次错误：" + compactConfirmError(firstErr) + "；重连后错误：" + compactConfirmError(err))
 			return nil
 		}
 	}
@@ -1400,6 +1438,9 @@ func (d *RuiyunUIDriver) WaitSettled(sessDir string, timeoutS, quietS float64) b
 	lastChange := time.Now()
 
 	for time.Now().Before(deadline) {
+		if !d.CheckAppAlive() {
+			return false
+		}
 		if d.maybeAutoConfirm(false, "") != nil {
 			lastChange = time.Now()
 		}
@@ -1611,6 +1652,9 @@ func (d *RuiyunUIDriver) WaitSomeSettled(sessions []string, timeoutS, quietS flo
 	nextCycle := time.Now().Add(time.Duration(cycleS * float64(time.Second)))
 
 	for time.Now().Before(deadline) && len(remaining) > 0 {
+		if !d.CheckAppAlive() {
+			return settled
+		}
 		if len(inflightPairs) > 0 && cycleS > 0 && !d.ViewCycleDisabled && time.Now().After(nextCycle) {
 			remMap := make(map[string]bool)
 			for _, r := range remaining {

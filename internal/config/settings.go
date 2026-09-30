@@ -106,6 +106,14 @@ type AppOverrides struct {
 }
 
 func settingsFile() string {
+	configDir, err := os.UserConfigDir()
+	if err != nil || configDir == "" {
+		configDir = DefaultWorkspace()
+	}
+	return filepath.Join(configDir, "ruiyun-ui-test-platform", ".app_settings.json")
+}
+
+func legacySettingsFile() string {
 	return filepath.Join(RootDir, ".app_settings.json")
 }
 
@@ -118,7 +126,14 @@ func LoadOverrides() AppOverrides {
 	path := settingsFile()
 	data, err := os.ReadFile(path)
 	if err != nil {
-		return AppOverrides{}
+		legacyPath := legacySettingsFile()
+		if filepath.Clean(legacyPath) == filepath.Clean(path) {
+			return AppOverrides{}
+		}
+		data, err = os.ReadFile(legacyPath)
+		if err != nil {
+			return AppOverrides{}
+		}
 	}
 	var ov AppOverrides
 	if err := json.Unmarshal(data, &ov); err != nil {
@@ -127,6 +142,12 @@ func LoadOverrides() AppOverrides {
 	ov.AppBinary = strings.TrimSpace(ov.AppBinary)
 	ov.SessionRoot = strings.TrimSpace(ov.SessionRoot)
 	ov.UserWorkspace = strings.TrimSpace(ov.UserWorkspace)
+	if _, err := os.Stat(path); os.IsNotExist(err) {
+		if migrated, err := SaveOverrides(ov.AppBinary, ov.SessionRoot, ov.UserWorkspace); err == nil {
+			_ = os.Remove(legacySettingsFile())
+			ov = migrated
+		}
+	}
 	return ov
 }
 
@@ -150,6 +171,9 @@ func SaveOverrides(appBinary, sessionRoot, userWs string) (AppOverrides, error) 
 		return AppOverrides{}, err
 	}
 
+	if err := os.MkdirAll(filepath.Dir(target), 0700); err != nil {
+		return AppOverrides{}, err
+	}
 	if err := os.WriteFile(tmp, data, 0600); err != nil {
 		return AppOverrides{}, err
 	}
@@ -166,6 +190,7 @@ func ClearOverrides() {
 	configMu.Lock()
 	defer configMu.Unlock()
 	_ = os.Remove(settingsFile())
+	_ = os.Remove(legacySettingsFile())
 }
 
 // DefaultWorkspace 默认用户工作区目录

@@ -16,6 +16,13 @@
 .main{height:100vh;overflow-y:auto;overflow-x:hidden;display:flex;flex-direction:column;min-width:0;
   scrollbar-width:thin;scrollbar-color:var(--line) transparent}
 .main:has(#pageHistory.on),.main.main-history{overflow:hidden}
+.main.main-cases{overflow:hidden}
+.main.main-cases #pageCases.on{flex:1;min-height:0;overflow:hidden}
+.main.main-cases #pageCases>.wrap{height:100%;display:flex;flex-direction:column;min-height:0}
+.main.main-cases #pageCases>.wrap>.card{flex:1;min-height:0;display:flex;flex-direction:column}
+.main.main-cases #paneLib:not([hidden]){flex:1;min-height:0;display:flex;flex-direction:column;overflow:hidden}
+.main.main-cases #paneQueue:not([hidden]){flex:1;min-height:0;overflow-y:auto}
+.main.main-cases #paneLib .lib-table{flex:1;min-height:0;max-height:none;overscroll-behavior:contain}
 .page{display:none;padding-bottom:24px}
 .page.on{display:block}
 .page[hidden]{display:none}
@@ -73,4 +80,12 @@ header{background:var(--card);border-bottom:1px solid var(--line);position:stick
   .nav-item{margin-bottom:0;padding:7px 12px}
   .side-ft{display:none}
   .main{height:auto;overflow:visible}
+  .main.main-cases{height:auto;overflow:visible}
+  .main.main-cases #pageCases.on{flex:0 0 auto;min-height:auto;overflow:visible}
+  .app:has(.main.main-cases #paneLib:not([hidden])){height:100vh;height:100dvh;overflow:hidden;grid-template-rows:auto minmax(0,1fr)}
+  .app:has(.main.main-cases #paneLib:not([hidden])) .main.main-cases{height:auto;min-height:0;overflow:hidden}
+  .app:has(.main.main-cases #paneLib:not([hidden])) .main.main-cases #pageCases.on{flex:1;min-height:0;overflow:hidden}
 }
+
+.termination-reason{max-width:280px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;
+  color:#b91c1c;font-size:11.5px}

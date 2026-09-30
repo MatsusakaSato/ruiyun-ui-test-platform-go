@@ -32,10 +32,6 @@
   color:#38bdf8;background:rgba(56,189,248,.12);border:1px solid rgba(56,189,248,.3);
   padding:1px 7px;border-radius:12px;font-family:ui-monospace,Menlo,monospace;
 }
-.console-live .live-dot {
-  width:5px;height:5px;border-radius:50%;background:#38bdf8;
-  animation:pulseDot 1s ease-in-out infinite;
-}
 
 /* ---------- 首页：当前用例 ---------- */
 .home-sec{display:flex;align-items:center;gap:8px;font-size:13px;font-weight:600;
@@ -54,8 +50,13 @@
 .run-empty{color:var(--tx3);font-size:12.5px;padding:10px 2px}
 
 .run-row.is-executing {
-  background:#eff6ff;border-left:3px solid var(--accent);
-  padding-left:8px;border-radius:4px;
+  background:#f8fafc;border-radius:4px;
+}
+.run-row.is-collected {
+  background:#f0fdf4;
+}
+.run-row.is-collected.is-failed {
+  background:#fff7ed;
 }
 
 /* 运行进度条卡片 */
@@ -70,23 +71,9 @@
 .rpb-title {
   display:flex;align-items:center;gap:7px;color:var(--tx);font-weight:600;
 }
-.spinner-blue {
-  display:inline-block;width:13px;height:13px;
-  border:2px solid rgba(37,99,235,.25);border-top-color:#2563eb;
-  border-radius:50%;animation:spin .75s linear infinite;
-}
 .rpb-pct {
   font-family:ui-monospace,Menlo,monospace;font-weight:700;
   color:var(--accent);font-size:13px;
-}
-.rpb-track {
-  height:7px;background:#e2e8f0;border-radius:99px;overflow:hidden;
-}
-.rpb-bar {
-  height:100%;
-  background:linear-gradient(90deg, #2563eb 0%, #3b82f6 100%);
-  border-radius:99px;
-  transition:width .3s ease;
 }
 
 /* 首页用例全部测试完成 Banner */

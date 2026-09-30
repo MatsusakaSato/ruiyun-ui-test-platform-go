@@ -72,8 +72,8 @@ const SendButtonJSTemplate = `
 
 const AutoConfirmJSTemplate = `
 (() => {
-  const prefer = %s;
-  const deny   = %s;
+  const prefer = %s || [];
+  const deny   = %s || [];
   // 导航/Tab 类组件永不是选项（实测首页 Tab: home-page__tab / tabs）
   const navRe = /(^|[\s_-])(tab|tabs|nav|menu|toolbar|panel)([\s_-]|$)/i;
   const inChatArea = (el) => {

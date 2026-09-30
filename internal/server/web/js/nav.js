@@ -18,7 +18,9 @@ export function switchPage(name) {
   document.querySelectorAll('.nav-item').forEach(b => {
     b.classList.toggle('on', b.dataset.page === name);
   });
-  document.querySelector('.main')?.classList.toggle('main-history', name === 'history');
+  const main = document.querySelector('.main');
+  main?.classList.toggle('main-history', name === 'history');
+  main?.classList.toggle('main-cases', name === 'cases');
   try { localStorage.setItem(state.PAGE_KEY, name); } catch (e) {}
   if (name === 'history') renderHistoryPane();
 }

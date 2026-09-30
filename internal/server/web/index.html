@@ -37,6 +37,7 @@
 
 <header><div class="wrap hd">
   <span class="badge b-idle" id="statusBadge">空闲</span>
+  <span class="termination-reason" id="terminationReason" hidden></span>
   <div class="spacer"></div>
   <span class="opt" id="wrapEnv">环境
     <select id="optEnv"></select>
@@ -96,7 +97,7 @@
     <div class="console-hd">
       <span class="ch-t">运行日志</span>
       <span class="ch-new" id="consoleNew"></span>
-      <span class="console-live" id="consoleLive" style="display:none"><span class="live-dot"></span>实时输出</span>
+      <span class="console-live" id="consoleLive" style="display:none">实时输出</span>
       <span class="spacer"></span>
       <button class="console-btn" id="btnConsoleH" title="点击循环切换高度（140px / 240px / 450px）">210px</button>
       <button class="console-btn" id="btnConsole" title="收起或展开运行日志">收起</button>

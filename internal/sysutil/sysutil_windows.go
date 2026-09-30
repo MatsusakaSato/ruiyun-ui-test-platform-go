@@ -81,6 +81,20 @@ func KillProcesses(binaryPath string) error {
 	return nil
 }
 
+// KillProcessesNow 立即强制关闭所有匹配应用进程及其子进程
+func KillProcessesNow(binaryPath string) error {
+	var failures []string
+	for _, pid := range RunningAppPIDs(binaryPath) {
+		if err := exec.Command("taskkill", "/F", "/T", "/PID", strconv.Itoa(pid)).Run(); err != nil {
+			failures = append(failures, fmt.Sprintf("pid %d: %v", pid, err))
+		}
+	}
+	if len(failures) > 0 {
+		return fmt.Errorf("强制关闭应用进程失败：%s", strings.Join(failures, "; "))
+	}
+	return nil
+}
+
 // SpawnProcess 拉起独立会话的应用进程
 func SpawnProcess(args []string, env []string) (*exec.Cmd, error) {
 	if len(args) == 0 {

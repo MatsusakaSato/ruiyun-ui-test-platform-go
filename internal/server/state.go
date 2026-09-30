@@ -12,12 +12,14 @@ import (
 	"sync"
 	"time"
 
-	"gopkg.in/yaml.v3"
 	"ruiyun-ui-test-platform-go/internal/canon"
 	"ruiyun-ui-test-platform-go/internal/config"
 	"ruiyun-ui-test-platform-go/internal/evaluator"
 	"ruiyun-ui-test-platform-go/internal/llm"
 	"ruiyun-ui-test-platform-go/internal/rounds"
+	"ruiyun-ui-test-platform-go/internal/sysutil"
+
+	"gopkg.in/yaml.v3"
 )
 
 // MaxLogLines 控制台回放缓冲上限
@@ -37,16 +39,18 @@ type RunOptions struct {
 
 // RunState 同一时刻只允许一轮运行
 type RunState struct {
-	mu             sync.Mutex
-	proc           *exec.Cmd
-	runID          string
-	startedAt      float64
-	lines          []string
-	exitCode       *int
-	consolePath    string
-	stopped        bool
-	queue          []map[string]any
-	queueFilledFor string
+	mu                sync.Mutex
+	proc              *exec.Cmd
+	runID             string
+	startedAt         float64
+	lines             []string
+	exitCode          *int
+	consolePath       string
+	stopped           bool
+	terminationReason string
+	procDone          bool
+	queue             []map[string]any
+	queueFilledFor    string
 
 	allowLAN bool
 	selfExe  string
@@ -76,6 +80,8 @@ func (s *RunState) Start(opts RunOptions) (bool, string) {
 	s.lines = nil
 	s.exitCode = nil
 	s.stopped = false
+	s.terminationReason = ""
+	s.procDone = false
 	s.queue = []map[string]any{}
 	for i, c := range opts.CaseItems {
 		id := strOr(c["id"], "")
@@ -153,7 +159,7 @@ func (s *RunState) processAlive() bool {
 	if s.proc == nil || s.proc.Process == nil {
 		return false
 	}
-	return s.proc.ProcessState == nil
+	return !s.procDone
 }
 
 func (s *RunState) pump(cmd *exec.Cmd, stdout io.ReadCloser, runDir string) {
@@ -171,6 +177,10 @@ func (s *RunState) pump(cmd *exec.Cmd, stdout io.ReadCloser, runDir string) {
 		text := strings.TrimRight(sc.Text(), "\r\n")
 		s.mu.Lock()
 		s.lineLocked(text)
+		if strings.HasPrefix(text, "[终止] ") && !s.stopped {
+			s.stopped = true
+			s.terminationReason = strings.TrimPrefix(text, "[终止] ")
+		}
 		s.mu.Unlock()
 		if logf != nil {
 			_, _ = logf.WriteString(sc.Text() + "\n")
@@ -195,6 +205,7 @@ func (s *RunState) pump(cmd *exec.Cmd, stdout io.ReadCloser, runDir string) {
 	s.mu.Lock()
 	c := code
 	s.exitCode = &c
+	s.procDone = true
 	archived := false
 	if st, err := os.Stat(filepath.Join(config.RoundsDir(), s.runID, "round_summary.json")); err == nil && !st.IsDir() {
 		archived = true
@@ -216,25 +227,25 @@ func (s *RunState) Stop() (bool, string) {
 	}
 	proc := s.proc
 	s.stopped = true
+	s.terminationReason = "用户手动终止测试"
 	s.mu.Unlock()
 
+	cfg, _ := config.LoadConfigDict()
+	eff := config.EffectiveConfig(cfg)
+	app, _ := eff["app"].(map[string]any)
+	binary := strings.TrimSpace(fmt.Sprintf("%v", app["binary"]))
+	var appErr error
+	if binary != "" && binary != "<nil>" {
+		appErr = sysutil.KillProcessesNow(binary)
+	}
 	terminateProcess(proc)
-	go func() {
-		done := make(chan struct{})
-		go func() {
-			_ = proc.Wait()
-			close(done)
-		}()
-		select {
-		case <-done:
-		case <-time.After(3 * time.Second):
-			_ = proc.Process.Kill()
-		}
-	}()
 	s.mu.Lock()
-	s.lineLocked("[平台] 已收到手动终止指令，正在停止测试进程…")
+	if appErr != nil {
+		s.terminationReason += "；关闭被测应用失败：" + appErr.Error()
+	}
+	s.lineLocked("[平台] " + s.terminationReason)
 	s.mu.Unlock()
-	return true, "已发送终止信号"
+	return true, "已终止测试并关闭被测应用进程"
 }
 
 // Status /api/run/status 的响应体
@@ -264,16 +275,17 @@ func (s *RunState) Status() map[string]any {
 		lines = append(lines, s.lines...)
 	}
 	return map[string]any{
-		"running":     running,
-		"run_id":      s.runID,
-		"started_at":  s.startedAt,
-		"elapsed_s":   elapsed,
-		"exit_code":   exitCode,
-		"archived":    doneOK,
-		"finished_ok": finishedOK,
-		"stopped":     s.stopped,
-		"lines":       lines,
-		"cases":       s.queueStatusLocked(doneOK),
+		"running":            running,
+		"run_id":             s.runID,
+		"started_at":         s.startedAt,
+		"elapsed_s":          elapsed,
+		"exit_code":          exitCode,
+		"archived":           doneOK,
+		"finished_ok":        finishedOK,
+		"stopped":            s.stopped,
+		"termination_reason": s.terminationReason,
+		"lines":              lines,
+		"cases":              s.queueStatusLocked(doneOK),
 	}
 }
 

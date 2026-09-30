@@ -44,7 +44,7 @@ button{cursor:pointer;border:none;border-radius:9px;font-size:13px;font-weight:6
 .btn-run{background:var(--accent);color:#fff;padding:8px 18px;transition:all .15s ease}
 .btn-run:hover{background:#1d4ed8}
 .btn-run:disabled{background:#94a3b8;cursor:not-allowed}
-.btn-run.is-running{background:#2563eb;cursor:wait;opacity:.92}
+.btn-run.is-running{background:#2563eb;cursor:default}
 .btn-ghost{background:#eef2f7;color:var(--tx2);padding:6px 12px;font-weight:500}
 .btn-primary{background:var(--accent);color:#fff;padding:7px 16px}
 .btn-primary:hover{background:#1d4ed8}
@@ -62,35 +62,10 @@ button{cursor:pointer;border:none;border-radius:9px;font-size:13px;font-weight:6
 .badge.b-approx{background:#fef3c7;color:#b45309;font-weight:500;cursor:help}
 
 /* ---------- 动效指示器 ---------- */
-@keyframes spin { from { transform:rotate(0deg); } to { transform:rotate(360deg); } }
-@keyframes pulseDot { 0%, 100% { opacity:1; transform:scale(1); } 50% { opacity:.3; transform:scale(.75); } }
 @keyframes progressStripes { from { background-position:0 0; } to { background-position:28px 0; } }
 @keyframes subtleGlow { 0%, 100% { box-shadow:0 0 0 0 rgba(37,99,235,0); } 50% { box-shadow:0 0 0 3px rgba(37,99,235,.15); } }
-
-.btn-spinner {
-  display:inline-block;width:12px;height:12px;
-  border:2px solid rgba(255,255,255,.35);border-top-color:#fff;
-  border-radius:50%;animation:spin .75s linear infinite;
-  vertical-align:-1.5px;margin-right:6px;
-}
-.badge-dot-live {
-  display:inline-block;width:6px;height:6px;border-radius:50%;
-  background:#1d4ed8;margin-right:5px;vertical-align:1px;
-  animation:pulseDot 1.2s ease-in-out infinite;
-}
 .b-executing {
   background:#eff6ff;color:#1d4ed8;border:1px solid #bfdbfe;
-}
-.spinner-inline {
-  display:inline-block;width:9px;height:9px;
-  border:1.5px solid rgba(29,78,216,.25);border-top-color:#1d4ed8;
-  border-radius:50%;animation:spin .75s linear infinite;
-  vertical-align:-1px;margin-right:4px;
-}
-.dot-pulse {
-  display:inline-block;width:5px;height:5px;border-radius:50%;
-  background:#94a3b8;margin-right:4px;vertical-align:1px;
-  animation:pulseDot 1.4s ease-in-out infinite;
 }
 
 /* ---------- 基础通用表格 ---------- */
