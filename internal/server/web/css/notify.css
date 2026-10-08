@@ -1,11 +1,17 @@
-/* ---------- 发送通知页：平铺布局（无卡片 / 无阴影 / 无圆角容器） ---------- */
-.nf-wrap{max-width:900px}
-#pageNotify{padding-top:16px}
+/* ---------- 发送通知页：整页卡片（轻投影 + 细边框） ---------- */
+.nf-wrap{max-width:1180px}
+#pageNotify{padding-top:16px;padding-bottom:20px}
+
+/* 卡片铺满整屏：高度按视口撑开，内容不足时底部操作条贴底 */
+.nf-card{background:var(--card);border:1px solid var(--line);border-radius:14px;
+  box-shadow:var(--shadow-card);padding:20px 22px;
+  min-height:calc(100vh - 132px);display:flex;flex-direction:column;gap:16px}
 #pageNotify h3.sec{margin-bottom:0}
 .nf-sub{margin-left:7px;font-size:11.5px;font-weight:400;color:var(--tx3)}
 
-/* 区块之间用间距分隔，不用卡片包裹 */
-.nf-block{margin-top:16px}
+.nf-block{margin-top:0}
+/* 内容区吃掉卡片剩余高度，textarea 跟着长高 */
+.nf-grow{flex:1 1 auto;display:flex;flex-direction:column;min-height:220px}
 
 /* 必填标识 */
 .req{color:var(--p0);font-weight:700;margin-left:2px}
@@ -17,16 +23,18 @@
 .nf-editor-hd{display:flex;align-items:center;gap:10px;margin-bottom:7px;flex-wrap:wrap}
 .nf-editor-hd label{font-size:12px;font-weight:600;color:var(--tx2)}
 .nf-editor-acts{margin-left:auto;display:flex;gap:8px}
-#pageNotify textarea{width:100%;border:1px solid var(--line);border-radius:9px;padding:10px 12px;
-  font-size:13px;line-height:1.75;color:var(--tx);background:#fff;font-family:inherit;resize:vertical}
+#pageNotify textarea{width:100%;flex:1 1 auto;min-height:180px;
+  border:1px solid var(--line);border-radius:9px;padding:10px 12px;
+  font-size:13px;line-height:1.75;color:var(--tx);background:#fff;font-family:inherit;
+  resize:vertical}
 
 /* 内容区底部：校验提示 + 字数统计 */
-.nf-meta{display:flex;align-items:center;gap:10px;margin-top:5px;min-height:16px}
+.nf-meta{display:flex;align-items:center;gap:10px;margin-top:6px;min-height:16px}
 .fhint.err{color:var(--p0)}
 
-/* 底部操作条：模板选择 + 说明 + 发送按钮（细分隔线，非卡片） */
+/* 底部操作条：贴卡片底部，细分隔线 */
 .nf-foot{display:flex;align-items:center;gap:10px;flex-wrap:wrap;
-  margin-top:18px;padding-top:15px;border-top:1px solid var(--line2)}
+  margin-top:auto;padding-top:15px;border-top:1px solid var(--line2)}
 #notifyTpl{max-width:220px;padding:7px 10px;font-size:12.5px}
 .nf-foot-hint{flex:1 1 auto;min-width:0}
 .nf-foot .btn-primary{min-width:104px}
@@ -42,7 +50,7 @@
 @media(prefers-reduced-motion:reduce){.btn-primary.is-busy::before{animation:none}}
 
 /* 结果提示 */
-#notifyResult{line-height:1.7;margin-top:12px}
+#notifyResult{line-height:1.7}
 
 /* ---------- 预设模板列表（管理弹窗） ---------- */
 .nf-tpl-row{display:flex;align-items:center;gap:10px;padding:9px 10px;
@@ -55,13 +63,24 @@
 .nf-tpl-prev{font-size:11px;color:var(--tx3);margin-top:2px;
   overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .nf-tpl-acts{display:flex;gap:6px;flex-shrink:0}
+
+/* 就地编辑：在列表行内展开，不另开弹窗 */
+.nf-tpl-row.editing{display:block;padding:11px 12px;background:#f8fafc}
+.nf-tpl-edit{display:flex;flex-direction:column;gap:8px}
+.nf-tpl-edit .nf-edit-name,.nf-tpl-edit .nf-edit-content{
+  width:100%;border:1px solid var(--line);border-radius:9px;padding:8px 11px;
+  font-size:12.5px;color:var(--tx);background:#fff;font-family:inherit}
+.nf-tpl-edit .nf-edit-content{line-height:1.7;resize:vertical;min-height:96px}
+.nf-edit-acts{display:flex;align-items:center;gap:8px;flex-wrap:wrap}
 .nf-tpl-empty{color:var(--tx3);font-size:12px;text-align:center;padding:38px 12px;line-height:1.9}
 .nf-tpl-empty b{display:block;color:var(--tx2);font-size:12.5px;margin-bottom:4px}
 
-/* ---------- 窄屏 ---------- */
+/* ---------- 窄屏：卡片收回内边距，不再强撑满屏 ---------- */
 @media(max-width:640px){
-  #pageNotify{padding-top:12px}
-  .nf-block{margin-top:13px}
+  #pageNotify{padding-top:12px;padding-bottom:14px}
+  .nf-card{padding:15px 14px;border-radius:12px;min-height:0;gap:13px}
+  .nf-grow{min-height:180px}
+  #pageNotify textarea{min-height:150px}
   #notifyGroup{max-width:none}
   .nf-foot{gap:9px}
   #notifyTpl{flex:1 1 auto;max-width:none}

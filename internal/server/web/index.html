@@ -269,47 +269,49 @@
 <!-- ============ 发送通知：手动发钉钉群消息（平铺布局） ============ -->
 <section class="page" id="pageNotify" hidden>
 <div class="wrap nf-wrap">
-  <h3 class="sec">发送通知<span class="nf-sub">把消息直接发送到钉钉群</span></h3>
+  <div class="nf-card">
+    <h3 class="sec">发送通知<span class="nf-sub">把消息直接发送到钉钉群</span></h3>
 
-  <!-- 收件人 -->
-  <div class="nf-block">
-    <div class="fld">
-      <label for="notifyGroup">收件人 <span class="req" title="必填">*</span></label>
-      <select id="notifyGroup">
-        <option value="official">正式群</option>
-        <option value="test">测试群</option>
-      </select>
-      <span class="fhint" id="notifyGroupHint">正式群发送前会弹确认窗口；测试群可直接发送</span>
-    </div>
-  </div>
-
-  <!-- 通知内容（右侧提供「存入预设」） -->
-  <div class="nf-block">
-    <div class="nf-editor-hd">
-      <label for="notifyMsg">通知内容 <span class="req" title="必填">*</span></label>
-      <div class="nf-editor-acts">
-        <button class="btn-ghost" id="btnTplSave" title="把当前输入框内容保存为预设模板">＋ 存入预设</button>
+    <!-- 收件人 -->
+    <div class="nf-block">
+      <div class="fld">
+        <label for="notifyGroup">收件人 <span class="req" title="必填">*</span></label>
+        <select id="notifyGroup">
+          <option value="official">正式群</option>
+          <option value="test">测试群</option>
+        </select>
+        <span class="fhint" id="notifyGroupHint">正式群发送前会弹确认窗口；测试群可直接发送</span>
       </div>
     </div>
-    <textarea id="notifyMsg" rows="8" placeholder="填入要发送到钉钉群的通知内容…"></textarea>
-    <div class="nf-meta">
-      <span class="fhint err" id="notifyMsgHint" hidden>通知内容不能为空</span>
-      <span class="spacer"></span>
-      <span class="nf-count" id="notifyCount">0 字</span>
+
+    <!-- 通知内容（右侧提供「存入预设」） -->
+    <div class="nf-block nf-grow">
+      <div class="nf-editor-hd">
+        <label for="notifyMsg">通知内容 <span class="req" title="必填">*</span></label>
+        <div class="nf-editor-acts">
+          <button class="btn-ghost" id="btnTplSave" title="把当前输入框内容保存为预设模板">＋ 存入预设</button>
+        </div>
+      </div>
+      <textarea id="notifyMsg" rows="6" placeholder="填入要发送到钉钉群的通知内容…"></textarea>
+      <div class="nf-meta">
+        <span class="fhint err" id="notifyMsgHint" hidden>通知内容不能为空</span>
+        <span class="spacer"></span>
+        <span class="nf-count" id="notifyCount">0 字</span>
+      </div>
     </div>
-  </div>
 
-  <!-- 底部操作条：模板选择 + 说明 + 发送 -->
-  <div class="nf-foot">
-    <select id="notifyTpl" title="选择预设模板，内容会填入上方输入框"></select>
-    <button class="btn-ghost" id="btnTplManage" title="重命名 / 删除预设模板">管理</button>
-    <span class="fhint nf-foot-hint">机器人与密钥写在服务端，消息发出后无法撤回</span>
-    <span class="spacer"></span>
-    <button class="btn-primary" id="btnNotifySend" disabled>发送</button>
-  </div>
+    <!-- 底部操作条：模板选择 + 说明 + 发送 -->
+    <div class="nf-foot">
+      <select id="notifyTpl" title="选择预设模板，内容会填入上方输入框"></select>
+      <button class="btn-ghost" id="btnTplManage" title="重命名 / 删除预设模板">管理</button>
+      <span class="fhint nf-foot-hint">机器人与密钥写在服务端，消息发出后无法撤回</span>
+      <span class="spacer"></span>
+      <button class="btn-primary" id="btnNotifySend" disabled>发送</button>
+    </div>
 
-  <!-- 发送结果 -->
-  <div class="probe-box" id="notifyResult" style="display:none"></div>
+    <!-- 发送结果 -->
+    <div class="probe-box" id="notifyResult" style="display:none"></div>
+  </div>
 </div>
 </section>
 

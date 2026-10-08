@@ -202,6 +202,58 @@ func RenameNotifyTemplate(id, name, customPath string) (bool, string, map[string
 	return true, fmt.Sprintf("已重命名为「%s」", name), item
 }
 
+// UpdateNotifyTemplate 编辑模板：同时更新名称与内容。
+// 名称必填、不可与其它模板重复（排除自身），内容不可为空。
+func UpdateNotifyTemplate(id, name, content, customPath string) (bool, string, map[string]any) {
+	id = strings.TrimSpace(id)
+	name = strings.TrimSpace(name)
+	content = strings.TrimSpace(content)
+	if id == "" {
+		return false, "缺少模板 id", nil
+	}
+	if name == "" {
+		return false, "模板名称为必填", nil
+	}
+	if content == "" {
+		return false, "模板内容不能为空", nil
+	}
+	if err := initNotifyTplTable(customPath); err != nil {
+		return false, fmt.Sprintf("初始化数据库失败: %v", err), nil
+	}
+
+	dbMu.Lock()
+	defer dbMu.Unlock()
+
+	taken, err := nameTaken(name, id, customPath)
+	if err != nil {
+		return false, fmt.Sprintf("查询模板失败: %v", err), nil
+	}
+	if taken {
+		return false, "已存在同名模板，请换一个名称", nil
+	}
+
+	db, err := GetConnection(customPath)
+	if err != nil {
+		return false, fmt.Sprintf("连接数据库失败: %v", err), nil
+	}
+	defer db.Close()
+
+	res, err := db.Exec(
+		"UPDATE notify_templates SET name = ?, content = ?, updated_at = datetime('now', 'localtime') WHERE id = ?",
+		name, content, id)
+	if err != nil {
+		return false, fmt.Sprintf("保存失败: %v", err), nil
+	}
+	if n, _ := res.RowsAffected(); n == 0 {
+		return false, "模板不存在或已被删除", nil
+	}
+	item, err := getNotifyTpl(id, customPath)
+	if err != nil {
+		return false, fmt.Sprintf("读取模板失败: %v", err), nil
+	}
+	return true, fmt.Sprintf("已保存预设「%s」", name), item
+}
+
 // DeleteNotifyTemplate 删除模板，返回被删模板名
 func DeleteNotifyTemplate(id, customPath string) (bool, string) {
 	id = strings.TrimSpace(id)

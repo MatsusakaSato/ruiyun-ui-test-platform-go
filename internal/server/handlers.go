@@ -490,6 +490,9 @@ func (s *Server) handleNotifyTemplatesPost(w http.ResponseWriter, r *http.Reques
 	case "rename":
 		ok, msg, item := testcasedb.RenameNotifyTemplate(id, name, "")
 		writeJSON(w, codeFor(ok, 400), map[string]any{"ok": ok, "message": msg, "item": item})
+	case "update":
+		ok, msg, item := testcasedb.UpdateNotifyTemplate(id, name, content, "")
+		writeJSON(w, codeFor(ok, 400), map[string]any{"ok": ok, "message": msg, "item": item})
 	case "delete":
 		ok, msg := testcasedb.DeleteNotifyTemplate(id, "")
 		writeJSON(w, codeFor(ok, 400), map[string]any{"ok": ok, "message": msg})

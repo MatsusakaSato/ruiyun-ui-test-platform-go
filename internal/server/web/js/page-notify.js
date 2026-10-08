@@ -8,7 +8,7 @@ const TPL_API = '/api/notify/templates';
 // 是否正在发送（避免连点重复发送）
 let sending = false;
 let tpls = [];
-// 保存弹窗处于「重命名」模式时，记录正在改的模板 id；null = 新建
+// 管理列表中处于「就地编辑」的模板 id；null = 都不在编辑态
 let editingId = null;
 
 /* ---------------- 模板读写（服务端 SQLite） ---------------- */
@@ -113,7 +113,8 @@ function renderTplOptions() {
   });
 }
 
-// 管理弹窗的列表（含空状态提示）
+// 管理弹窗的列表（含空状态提示）。
+// 编辑是**在本窗口内就地展开**的：不另开弹窗，避免两层弹窗互相遮挡。
 function renderTplList() {
   const box = $('nfTplList');
   $('nfManageCount').textContent = tpls.length ? `共 ${tpls.length} 个` : '';
@@ -125,40 +126,126 @@ function renderTplList() {
   }
   box.innerHTML = tpls.map(t => {
     const prev = String(t.content || '').replace(/\s+/g, ' ').slice(0, 48) || '（空内容）';
+    if (editingId === t.id) {
+      // 编辑态：名称 + 内容 + 保存/取消，都在这一行内展开
+      return `<div class="nf-tpl-row editing">
+        <div class="nf-tpl-edit">
+          <input class="nf-edit-name" type="text" placeholder="模板名称" autocomplete="off"/>
+          <textarea class="nf-edit-content" rows="5" placeholder="模板内容"></textarea>
+          <div class="nf-edit-acts">
+            <span class="fhint err nf-edit-hint" hidden></span>
+            <span class="spacer"></span>
+            <button class="btn-ghost nf-edit-cancel">取消</button>
+            <button class="btn-primary nf-edit-save">保存</button>
+          </div>
+        </div>
+      </div>`;
+    }
     return `<div class="nf-tpl-row">
       <div class="nf-tpl-main">
         <div class="nf-tpl-name">${esc(t.name)}</div>
         <div class="nf-tpl-prev">${esc(prev)}</div>
       </div>
       <div class="nf-tpl-acts">
-        <button class="btn-ghost nf-tpl-rename" data-id="${esc(t.id)}">重命名</button>
+        <button class="btn-ghost nf-tpl-edit" data-id="${esc(t.id)}">编辑</button>
         <button class="btn-ghost nf-tpl-del" data-id="${esc(t.id)}">删除</button>
       </div>
     </div>`;
   }).join('');
 
-  box.querySelectorAll('.nf-tpl-rename').forEach(b => {
-    b.onclick = () => openSaveModal('rename', b.dataset.id);
+  // 编辑态：回填原值并聚焦名称
+  if (editingId) {
+    const t = tpls.find(x => x.id === editingId);
+    const nameEl = box.querySelector('.nf-edit-name');
+    const contentEl = box.querySelector('.nf-edit-content');
+    if (t && nameEl && contentEl) {
+      nameEl.value = t.name || '';
+      contentEl.value = t.content || '';
+      nameEl.focus();
+      nameEl.select();
+    }
+    const cancelBtn = box.querySelector('.nf-edit-cancel');
+    if (cancelBtn) cancelBtn.onclick = () => { editingId = null; renderTplList(); };
+
+    const saveBtn = box.querySelector('.nf-edit-save');
+    if (saveBtn) saveBtn.onclick = () => submitEditTpl(editingId);
+    return;
+  }
+
+  box.querySelectorAll('.nf-tpl-edit').forEach(b => {
+    b.onclick = () => { editingId = b.dataset.id; renderTplList(); };
   });
   box.querySelectorAll('.nf-tpl-del').forEach(b => {
     b.onclick = () => delTpl(b.dataset.id);
   });
 }
 
-/* ---------------- 模板：保存 / 重命名 / 删除 ---------------- */
+// 提交就地编辑（名称 + 内容）
+async function submitEditTpl(id) {
+  const box = $('nfTplList');
+  const nameEl = box.querySelector('.nf-edit-name');
+  const contentEl = box.querySelector('.nf-edit-content');
+  const hintEl = box.querySelector('.nf-edit-hint');
+  const name = (nameEl.value || '').trim();
+  const content = (contentEl.value || '').trim();
 
-function openSaveModal(mode, id) {
-  editingId = mode === 'rename' ? id : null;
-  const t = tpls.find(x => x.id === id);
-  $('nfSaveTitle').textContent = mode === 'rename' ? '重命名模板' : '存入预设';
+  if (!name) {
+    hintEl.textContent = '模板名称不能为空';
+    hintEl.hidden = false;
+    nameEl.focus();
+    return;
+  }
+  if (!content) {
+    hintEl.textContent = '模板内容不能为空';
+    hintEl.hidden = false;
+    contentEl.focus();
+    return;
+  }
+  const dup = tpls.some(t => t.name === name && t.id !== id);
+  if (dup) {
+    hintEl.textContent = '已存在同名模板，请换一个名称';
+    hintEl.hidden = false;
+    nameEl.focus();
+    return;
+  }
+  hintEl.hidden = true;
 
-  const content = mode === 'rename' && t ? t.content : $('notifyMsg').value.trim();
+  const btn = box.querySelector('.nf-edit-save');
+  btn.disabled = true;
+  try {
+    const j = await apiTpl({ action: 'update', id, name, content });
+    if (j.ok) {
+      editingId = null;
+      await loadTpls();
+      renderTplOptions();
+      renderTplList();
+      showResult('ok', '✅ ' + (j.message || '已保存'));
+    } else {
+      hintEl.textContent = j.message || '保存失败';
+      hintEl.hidden = false;
+    }
+  } catch (e) {
+    hintEl.textContent = '保存出错：' + e;
+    hintEl.hidden = false;
+  } finally {
+    btn.disabled = false;
+  }
+}
+
+/* ---------------- 模板：新增 / 就地编辑 / 删除 ---------------- */
+
+// 存入预设弹窗（只负责新增；改模板走管理列表里的就地编辑）
+function openSaveModal() {
+  editingId = null;
+  $('nfSaveTitle').textContent = '存入预设';
+
+  const content = $('notifyMsg').value.trim();
   if (!content) {
     showResult('err', '通知内容为空，先写点内容再存入预设');
     $('notifyMsg').focus();
     return;
   }
-  $('nfTplName').value = mode === 'rename' && t ? t.name : '';
+  $('nfTplName').value = '';
   $('nfSavePreview').textContent = content;
   $('nfTplNameHint').hidden = true;
   $('nfSaveMask').classList.add('on');
@@ -189,19 +276,16 @@ async function submitSaveTpl() {
   }
   hint.hidden = true;
 
-  const wasRename = editingId !== null;
   const btn = $('nfSaveOk');
   btn.disabled = true;
   try {
-    const j = wasRename
-      ? await apiTpl({ action: 'rename', id: editingId, name })
-      : await apiTpl({ action: 'add', name, content: $('nfSavePreview').textContent });
+    const j = await apiTpl({ action: 'add', name, content: $('nfSavePreview').textContent });
     if (j.ok) {
       await loadTpls();
       renderTplOptions();
       renderTplList();
       closeSaveModal();
-      showResult('ok', '✅ ' + (j.message || (wasRename ? '已重命名' : '已存入预设')));
+      showResult('ok', '✅ ' + (j.message || '已存入预设'));
     } else {
       // 服务端兜底校验（如并发下重名）→ 提示留在弹窗里
       hint.textContent = j.message || '保存失败';
@@ -265,7 +349,7 @@ export async function initNotify() {
     e.target.value = '';
   };
 
-  $('btnTplSave').onclick = () => openSaveModal('save', null);
+  $('btnTplSave').onclick = () => openSaveModal();
   $('btnTplManage').onclick = async () => {
     await loadTpls();
     renderTplList();
