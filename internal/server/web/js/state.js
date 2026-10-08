@@ -9,7 +9,7 @@ export const state = {
   currentTab: 'trace',
 
   // 路由与页面
-  PAGES: ['home', 'cases', 'history'],
+  PAGES: ['home', 'cases', 'history', 'notify'],
   PAGE_KEY: 'ruiyun_page',
   currentPage: 'home',
 

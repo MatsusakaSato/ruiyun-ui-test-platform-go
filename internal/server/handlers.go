@@ -18,6 +18,7 @@ import (
 	"ruiyun-ui-test-platform-go/internal/cdp"
 	"ruiyun-ui-test-platform-go/internal/config"
 	"ruiyun-ui-test-platform-go/internal/llm"
+	"ruiyun-ui-test-platform-go/internal/notify"
 	"ruiyun-ui-test-platform-go/internal/rounds"
 	"ruiyun-ui-test-platform-go/internal/sysutil"
 	"ruiyun-ui-test-platform-go/internal/testcasedb"
@@ -374,6 +375,34 @@ func (s *Server) handleEnvPost(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, codeFor(ok, 400), out)
 }
 
+// handleNotifySend 发送钉钉群通知（「发送通知」页）。
+// 请求体 {"message": "...", "group": "official"|"test"}；
+// 统一返回 {"ok": bool, "message": string}。
+func (s *Server) handleNotifySend(w http.ResponseWriter, r *http.Request) {
+	body := readJSONBody(r)
+	msg := strings.TrimSpace(strOr(body["message"], ""))
+	group := strings.TrimSpace(strOr(body["group"], ""))
+	if msg == "" {
+		writeJSON(w, 400, map[string]any{"ok": false, "message": "通知内容不能为空"})
+		return
+	}
+	if group == "" {
+		group = "official"
+	}
+	res, err := notify.SendCustomRobotGroupMessageTo(group, msg, "")
+	if err != nil {
+		writeJSON(w, 502, map[string]any{"ok": false, "message": "钉钉消息发送出错：" + err.Error()})
+		return
+	}
+	if !res.OK() {
+		writeJSON(w, 502, map[string]any{
+			"ok": false, "message": "钉钉消息" + res.Describe()})
+		return
+	}
+	writeJSON(w, 200, map[string]any{
+		"ok": true, "message": "已发送到" + notify.GroupLabel(group)})
+}
+
 func (s *Server) handleRunStart(w http.ResponseWriter, r *http.Request) {
 	body := readJSONBody(r)
 	ok, msg := s.state.Start(RunOptions{
@@ -433,6 +462,41 @@ func (s *Server) handleLLMConfigPost(w http.ResponseWriter, r *http.Request) {
 		out[k] = v
 	}
 	writeJSON(w, 200, out)
+}
+
+// ------------------------------------------------------------------ 通知预设模板
+
+func (s *Server) handleNotifyTemplatesGet(w http.ResponseWriter) {
+	items, err := testcasedb.ListNotifyTemplates("")
+	if err != nil {
+		writeJSON(w, 500, map[string]any{
+			"ok": false, "message": fmt.Sprintf("读取预设模板失败：%v", err), "items": []any{}})
+		return
+	}
+	writeJSON(w, 200, map[string]any{"ok": true, "items": items})
+}
+
+func (s *Server) handleNotifyTemplatesPost(w http.ResponseWriter, r *http.Request) {
+	body := readJSONBody(r)
+	action := strings.TrimSpace(strOr(body["action"], ""))
+	id := strings.TrimSpace(strOr(body["id"], ""))
+	name := strOr(body["name"], "")
+	content := strOr(body["content"], "")
+
+	switch action {
+	case "add":
+		ok, msg, item := testcasedb.AddNotifyTemplate(name, content, "")
+		writeJSON(w, codeFor(ok, 400), map[string]any{"ok": ok, "message": msg, "item": item})
+	case "rename":
+		ok, msg, item := testcasedb.RenameNotifyTemplate(id, name, "")
+		writeJSON(w, codeFor(ok, 400), map[string]any{"ok": ok, "message": msg, "item": item})
+	case "delete":
+		ok, msg := testcasedb.DeleteNotifyTemplate(id, "")
+		writeJSON(w, codeFor(ok, 400), map[string]any{"ok": ok, "message": msg})
+	default:
+		writeJSON(w, 400, map[string]any{
+			"ok": false, "message": "未知操作（支持 add / rename / delete）"})
+	}
 }
 
 func (s *Server) handlePresetCasesPost(w http.ResponseWriter, r *http.Request) {

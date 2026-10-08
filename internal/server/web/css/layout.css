@@ -7,7 +7,8 @@
 .side .brand small{display:block;font-size:10.5px;font-weight:400;color:var(--tx3);margin-top:3px}
 .nav-item{display:flex;align-items:center;gap:9px;width:100%;text-align:left;
   padding:9px 11px;border:none;background:none;border-radius:9px;cursor:pointer;
-  font-size:13px;font-weight:600;font-family:inherit;color:var(--tx2);margin-bottom:3px}
+  font-size:13px;font-weight:600;font-family:inherit;color:var(--tx2);margin-bottom:3px;
+  transition:background .15s,color .15s}
 .nav-item:hover{background:#f1f5f9;color:var(--tx)}
 .nav-item.on{background:#eff6ff;color:var(--accent)}
 .nav-item .ni-ico{font-size:14px;width:17px;text-align:center}
@@ -28,7 +29,8 @@
 .page[hidden]{display:none}
 
 /* ---------- 顶栏 ---------- */
-header{background:var(--card);border-bottom:1px solid var(--line);position:sticky;top:0;z-index:20}
+header{background:var(--card);border-bottom:1px solid var(--line);position:sticky;top:0;z-index:20;
+  box-shadow:var(--shadow-card)}
 .hd{display:flex;align-items:center;gap:14px;padding:12px 0;flex-wrap:wrap}
 .hd h1{font-size:17px;font-weight:700}
 .hd .ver{font-size:12px;color:var(--tx3)}
@@ -38,7 +40,7 @@ header{background:var(--card);border-bottom:1px solid var(--line);position:stick
 .settings-wrap{position:relative}
 .settings-menu{display:none;position:absolute;top:calc(100% + 6px);right:0;z-index:60;
   background:var(--card);border:1px solid var(--line);border-radius:10px;
-  box-shadow:0 8px 24px rgba(15,23,42,.12);padding:6px;min-width:200px}
+  box-shadow:var(--shadow-pop);padding:6px;min-width:200px}
 .settings-menu.on{display:block}
 .sm-item{display:flex;align-items:center;gap:8px;width:100%;text-align:left;
   border:none;background:none;padding:8px 10px;border-radius:8px;cursor:pointer;
@@ -85,6 +87,15 @@ header{background:var(--card);border-bottom:1px solid var(--line);position:stick
   .app:has(.main.main-cases #paneLib:not([hidden])){height:100vh;height:100dvh;overflow:hidden;grid-template-rows:auto minmax(0,1fr)}
   .app:has(.main.main-cases #paneLib:not([hidden])) .main.main-cases{height:auto;min-height:0;overflow:hidden}
   .app:has(.main.main-cases #paneLib:not([hidden])) .main.main-cases #pageCases.on{flex:1;min-height:0;overflow:hidden}
+}
+
+/* 手机竖屏：进一步收紧留白与间距 */
+@media(max-width:640px){
+  .wrap{padding:0 12px}
+  .hd{gap:10px;padding:10px 0}
+  .card{padding:13px}
+  .side{padding:8px 10px}
+  .grid{gap:12px;margin-top:12px}
 }
 
 .termination-reason{max-width:280px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;

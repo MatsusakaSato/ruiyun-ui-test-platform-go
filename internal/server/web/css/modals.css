@@ -1,10 +1,14 @@
 /* ---------- 模态弹窗基础 ---------- */
 .modal-mask{position:fixed;inset:0;background:rgba(15,23,42,.45);z-index:50;display:none;
-  align-items:flex-start;justify-content:center;padding:38px 16px}
+  align-items:flex-start;justify-content:center;padding:38px 16px;
+  backdrop-filter:blur(2px);-webkit-backdrop-filter:blur(2px)}
 .modal-mask.on{display:flex}
 .modal{background:var(--card);border-radius:14px;width:min(900px,100%);
   max-height:calc(100vh - 76px);display:flex;flex-direction:column;
-  box-shadow:0 18px 50px rgba(15,23,42,.32);overflow:hidden}
+  box-shadow:var(--shadow-pop);overflow:hidden;
+  animation:modalIn .18s ease-out}
+@keyframes modalIn{from{opacity:0;transform:translateY(-8px) scale(.98)}to{opacity:1;transform:none}}
+@media(prefers-reduced-motion:reduce){.modal{animation:none}}
 .modal-hd{display:flex;align-items:center;gap:10px;padding:13px 18px;border-bottom:1px solid var(--line)}
 .modal-hd h3{font-size:14.5px;font-weight:700}
 .modal-hd .msub{font-size:11.5px;color:var(--tx3)}

@@ -34,6 +34,7 @@ internal/       各功能模块，核心：
   testcasedb/   用例库（SQLite）
   logparser/ trajectory/  日志解析与轨迹重建
   assertor/ evaluator/    缺陷断言与评估
+  notify/       钉钉群通知（流水线收尾推送结果摘要）
   canon/        文本归一化与数值舍入
 scripts/        构建与开发启动脚本
 ```

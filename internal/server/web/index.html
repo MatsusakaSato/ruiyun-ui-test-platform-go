@@ -11,6 +11,7 @@
 <link rel="stylesheet" href="/css/home.css"/>
 <link rel="stylesheet" href="/css/cases.css"/>
 <link rel="stylesheet" href="/css/history.css"/>
+<link rel="stylesheet" href="/css/notify.css"/>
 <link rel="stylesheet" href="/css/modals.css"/>
 </head>
 <body>
@@ -27,6 +28,8 @@
       <span class="ni-ico">📝</span>测试用例</button>
     <button class="nav-item" data-page="history" onclick="switchPage('history')">
       <span class="ni-ico">🗂</span>历史记录</button>
+    <button class="nav-item" data-page="notify" onclick="switchPage('notify')">
+      <span class="ni-ico">📢</span>发送通知</button>
   </nav>
   <div class="side-ft">
     <span id="ver"></span>
@@ -263,6 +266,53 @@
 </div>
 </section>
 
+<!-- ============ 发送通知：手动发钉钉群消息（平铺布局） ============ -->
+<section class="page" id="pageNotify" hidden>
+<div class="wrap nf-wrap">
+  <h3 class="sec">发送通知<span class="nf-sub">把消息直接发送到钉钉群</span></h3>
+
+  <!-- 收件人 -->
+  <div class="nf-block">
+    <div class="fld">
+      <label for="notifyGroup">收件人 <span class="req" title="必填">*</span></label>
+      <select id="notifyGroup">
+        <option value="official">正式群</option>
+        <option value="test">测试群</option>
+      </select>
+      <span class="fhint" id="notifyGroupHint">正式群发送前会弹确认窗口；测试群可直接发送</span>
+    </div>
+  </div>
+
+  <!-- 通知内容（右侧提供「存入预设」） -->
+  <div class="nf-block">
+    <div class="nf-editor-hd">
+      <label for="notifyMsg">通知内容 <span class="req" title="必填">*</span></label>
+      <div class="nf-editor-acts">
+        <button class="btn-ghost" id="btnTplSave" title="把当前输入框内容保存为预设模板">＋ 存入预设</button>
+      </div>
+    </div>
+    <textarea id="notifyMsg" rows="8" placeholder="填入要发送到钉钉群的通知内容…"></textarea>
+    <div class="nf-meta">
+      <span class="fhint err" id="notifyMsgHint" hidden>通知内容不能为空</span>
+      <span class="spacer"></span>
+      <span class="nf-count" id="notifyCount">0 字</span>
+    </div>
+  </div>
+
+  <!-- 底部操作条：模板选择 + 说明 + 发送 -->
+  <div class="nf-foot">
+    <select id="notifyTpl" title="选择预设模板，内容会填入上方输入框"></select>
+    <button class="btn-ghost" id="btnTplManage" title="重命名 / 删除预设模板">管理</button>
+    <span class="fhint nf-foot-hint">机器人与密钥写在服务端，消息发出后无法撤回</span>
+    <span class="spacer"></span>
+    <button class="btn-primary" id="btnNotifySend" disabled>发送</button>
+  </div>
+
+  <!-- 发送结果 -->
+  <div class="probe-box" id="notifyResult" style="display:none"></div>
+</div>
+</section>
+
 </div><!-- .main -->
 </div><!-- .app -->
 
@@ -393,6 +443,69 @@
       <button class="btn-ghost" id="appCfgReset" title="删除本机覆盖，回退 config.yaml / 内置默认">恢复默认</button>
       <button class="btn-ghost" id="appCfgCancel">取消</button>
       <button class="btn-primary" id="appCfgSave">保存</button>
+    </div>
+  </div>
+</div>
+
+<!-- ============ 发送通知确认弹窗（正式群） ============ -->
+<div class="modal-mask" id="notifyMask">
+  <div class="modal llm-modal" role="dialog" aria-label="确认发送到正式群">
+    <div class="modal-hd">
+      <h3>确认发送到正式群</h3>
+      <span class="msub">消息将直接发到正式群，所有成员可见</span>
+      <button class="mclose" id="notifyClose" title="关闭">✕</button>
+    </div>
+    <div class="llm-body">
+      <div class="probe-box" id="notifyConfirmText" style="white-space:pre-wrap"></div>
+      <span class="fhint">确认后立即发送，发送后无法撤回。</span>
+    </div>
+    <div class="modal-ft">
+      <span class="mcount"></span>
+      <button class="btn-ghost" id="notifyCancel">取消</button>
+      <button class="btn-primary" id="notifyConfirmOk">确认发送</button>
+    </div>
+  </div>
+</div>
+
+<!-- ============ 预设模板：保存 / 重命名 ============ -->
+<div class="modal-mask" id="nfSaveMask">
+  <div class="modal llm-modal" role="dialog" aria-label="保存预设模板">
+    <div class="modal-hd">
+      <h3 id="nfSaveTitle">存入预设</h3>
+      <span class="msub">保存在本机浏览器，刷新后仍可用</span>
+      <button class="mclose" id="nfSaveClose" title="关闭">✕</button>
+    </div>
+    <div class="llm-body">
+      <div class="fld">
+        <label for="nfTplName">模板名称 <span class="req" title="必填">*</span></label>
+        <input id="nfTplName" type="text" placeholder="如：每日测试汇报" autocomplete="off" spellcheck="false"/>
+        <span class="fhint err" id="nfTplNameHint" hidden></span>
+      </div>
+      <div class="fld">
+        <label>模板内容</label>
+        <div class="probe-box" id="nfSavePreview"></div>
+      </div>
+    </div>
+    <div class="modal-ft">
+      <span class="mcount"></span>
+      <button class="btn-ghost" id="nfSaveCancel">取消</button>
+      <button class="btn-primary" id="nfSaveOk">保存</button>
+    </div>
+  </div>
+</div>
+
+<!-- ============ 预设模板：管理（重命名 / 删除） ============ -->
+<div class="modal-mask" id="nfManageMask">
+  <div class="modal llm-modal" role="dialog" aria-label="管理预设模板">
+    <div class="modal-hd">
+      <h3>预设模板</h3>
+      <span class="msub" id="nfManageCount"></span>
+      <button class="mclose" id="nfManageClose" title="关闭">✕</button>
+    </div>
+    <div class="modal-list" id="nfTplList"></div>
+    <div class="modal-ft">
+      <span class="mcount"></span>
+      <button class="btn-ghost" id="nfManageDone">关闭</button>
     </div>
   </div>
 </div>

@@ -2,6 +2,7 @@
 .case-tabs{display:flex;gap:6px;margin-bottom:14px;border-bottom:1px solid var(--line2);padding-bottom:10px}
 .ctab{padding:6px 14px;border-radius:8px;background:transparent;border:1px solid var(--line);
   font-size:12.5px;font-weight:600;color:var(--tx2);font-family:inherit}
+.ctab:hover:not(.on){border-color:var(--accent);color:var(--tx)}
 .ctab.on{background:var(--accent);border-color:var(--accent);color:#fff}
 
 /* ---------- 预设用例库 ---------- */
@@ -50,7 +51,7 @@
 .padd-body{display:none;margin-top:10px}
 .padd-body.show{display:block}
 .padd-card{background:#fff;border:1px solid var(--line);border-radius:10px;padding:13px;
-  display:flex;flex-direction:column;gap:12px;box-shadow:0 1px 2px rgba(15,23,42,.04)}
+  display:flex;flex-direction:column;gap:12px;box-shadow:var(--shadow-card)}
 .fld textarea{border:1px solid var(--line);border-radius:9px;padding:9px 11px;font-size:12.5px;
   color:var(--tx);background:#fff;font-family:inherit;line-height:1.6;resize:vertical;min-height:70px;
   transition:border-color .15s,box-shadow .15s}
@@ -82,7 +83,7 @@
 .case-row .del{flex-shrink:0;width:32px;height:32px;background:#fef2f2;color:#b91c1c;border-radius:8px;font-size:15px;line-height:1}
 .case-row .del:hover{background:#fee2e2}
 .hint{font-size:11.5px;color:var(--tx3);margin-top:4px}
-.hint.warn{color:var(--warn)}
+.hint.warn{color:var(--p1)}
 .case-ft{display:flex;align-items:center;gap:12px;margin-top:14px;padding-top:13px;
   border-top:1px solid var(--line2);flex-wrap:wrap}
 .case-ft-hint{font-size:11.5px;color:var(--tx3)}

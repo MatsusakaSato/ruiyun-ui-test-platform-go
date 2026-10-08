@@ -1,0 +1,43 @@
+# air 配置 —— Go 热重载（make dev 会调用）
+#
+# 分工：
+#   air        → 监听 *.go，自动重新编译并重启服务
+#   开发模式   → 监听 web/*，直接读磁盘 + 浏览器自动刷新（internal/server/dev.go）
+#
+# 前端 web/* 被排除在 air 的监听之外：它由开发模式从磁盘读取，
+# 改 HTML/CSS/JS 不需要重新编译，交给 air 反而会触发无谓的整包重启。
+# 因此只有 Go 代码改动才会走到 air 的重启流程。
+
+root = "."
+tmp_dir = "bin"
+
+[build]
+# 用项目自带的构建脚本，保证与 make build 产物一致（含版本信息）
+cmd = "./scripts/build.sh build"
+# 带 RUYIYUN_DEV=1 启动：静态资源走磁盘 + 注入热更新脚本
+full_bin = "RUYIYUN_DEV=1 ./bin/ruiyun serve"
+include_ext = ["go"]
+exclude_dir = [
+  "bin",
+  "dist",
+  "report",
+  "artifacts",
+  "logs",
+  "tests",
+  ".git",
+  ".workbuddy",
+  "internal/server/web",
+]
+exclude_file = []
+# 合并短时间内的多次保存，避免连续改动触发多次编译
+delay = 500
+# 编译失败时保留上一个可运行版本继续服务，修复后自动重试
+stop_on_error = false
+send_interrupt = true
+kill_delay = 800
+
+[log]
+time = true
+
+[misc]
+clean_on_exit = false

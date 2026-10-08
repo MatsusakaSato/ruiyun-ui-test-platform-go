@@ -266,6 +266,10 @@ func (s *Server) doGet(w http.ResponseWriter, r *http.Request) {
 			writeText(w, 404, "dashboard 未找到")
 			return
 		}
+		// 开发模式：注入热更新脚本（生产构建不会走到这里）
+		if DevEnabled() {
+			data = injectDevLiveReload(data)
+		}
 		writeBody(w, 200, data, "text/html; charset=utf-8")
 		return
 	}
@@ -314,6 +318,12 @@ func (s *Server) doGet(w http.ResponseWriter, r *http.Request) {
 	case p == "/api/eval/status":
 		writeJSON(w, 200, s.eval.Status())
 		return
+	case p == "/api/notify/templates":
+		s.handleNotifyTemplatesGet(w)
+		return
+	case p == "/api/dev/events":
+		s.handleDevEvents(w, r)
+		return
 	}
 	writeText(w, 404, "not found")
 }
@@ -357,6 +367,10 @@ func (s *Server) doPost(w http.ResponseWriter, r *http.Request) {
 		s.handleUploadDelete(w, r)
 	case "/api/reveal":
 		s.handleReveal(w, r)
+	case "/api/notify/send":
+		s.handleNotifySend(w, r)
+	case "/api/notify/templates":
+		s.handleNotifyTemplatesPost(w, r)
 	default:
 		writeText(w, 404, "not found")
 	}

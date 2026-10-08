@@ -52,9 +52,9 @@
   .b-pass{background:#dcfce7;color:#15803d}
   .b-fail{background:#fee2e2;color:#b91c1c}
   .b-uifail{background:#fef3c7;color:#92400e}
-  .b-p0{background:#fee2e2;color:#b91c1c}
-  .b-p1{background:#ffedd5;color:#c2410c}
-  .b-p2{background:#fef9c3;color:#a16207}
+  .b-stable{background:#fee2e2;color:#b91c1c}
+  .b-likely{background:#ffedd5;color:#c2410c}
+  .b-flaky{background:#fef9c3;color:#a16207}
   .b-skill{background:#ede9fe;color:#6d28d9}
   .chip{display:inline-block;padding:1px 7px;border-radius:5px;background:#eef2f7;
         color:var(--tx2);font-size:11px;margin:1px 3px 1px 0;font-family:ui-monospace,Menlo,monospace}
@@ -105,8 +105,8 @@
     <span><b>应用版本</b> 2.0.17</span>
     <span><b>Bundle</b> com.yanxiu.srtclaw</span>
     <span><b>运行模式</b> UI 自动化</span>
-    <span><b>生成时间</b> 2026-09-30 15:09:11</span>
-    <span><b>总耗时</b> 8.8s</span>
+    <span><b>生成时间</b> 2026-09-30 17:32:05</span>
+    <span><b>总耗时</b> 38.5s</span>
   </div>
 </header>
 
@@ -122,7 +122,7 @@
   <div class="kpi">
     <div class="label">问题发现</div>
     <div class="value v-ok">0</div>
-    <div class="foot">P0 阻断 0 · P1 严重 0</div>
+    <div class="foot">未命中任何规则</div>
   </div>
 </div>
 
@@ -148,24 +148,25 @@
     </span>
     <b>用例 1</b>
     <span class="mono">CASE-001</span>
-    <span class="mono" style="color:var(--tx3)">sess_1a0f1253b3c_f9c0ad</span>
+    <span class="mono" style="color:var(--tx3)">sess_1a0f1a79abc_5f936d</span>
   </div>
 
-  <div class="case-prompt"><b>提示词：</b>你好</div>
+  <div class="case-prompt"><b>提示词：</b>针对议论文滥用不明网络金句问题，设计学术诚信专项反馈，要求学生溯源查证、规范转述或替换素材，补充个人独立分析内容。</div>
   
   
 
   
   <h3>调用链路（执行顺序）</h3>
   
-    <div class="mono" style="color:var(--tx3)">纯文本应答，无工具调用</div>
+    <div class="chain"><span class="ct">convert_markdown_to_docx</span> → <span class="ct">write_memory</span> → <span class="ct">edit_memory</span></div>
+    <div class="mono" style="color:var(--tx3);margin-top:4px">3 次调用 · 2 步思考 · 答复 683 字</div>
   
 
   
   <h3>客观信息</h3>
   <div class="tbl-wrap">
   <table>
-    <tr><td>平台实测耗时</td><td style="text-align:right"><b>8.9s</b></td></tr>
+    <tr><td>平台实测耗时</td><td style="text-align:right"><b>38.5s</b></td></tr>
     <tr><td>首响延迟（提问 → 模型响应）</td><td style="text-align:right"><b>—</b></td></tr>
     <tr><td>生成时长</td><td style="text-align:right"><b>—</b></td></tr>
     <tr><td>会话时长</td><td style="text-align:right"><b>—</b></td></tr>
@@ -194,8 +195,8 @@
 
 
 <div class="note" style="margin-top:26px">
-  <b>判定与口径说明</b><br/>
-  · 本报告全部数据来自本轮 1 条用例产生的会话日志，不含任何历史数据。<br/>
+  <b>判定与说明</b><br/>
+  · 报告数据来自本轮 1 条用例产生的会话日志。<br/>
   · 「问题发现」基于 12 条断言规则（阈值见 config.yaml），不对生成内容的质量做评价。<br/>
   · token 为字符量折算的估算值（应用日志未记录官方 usage）；步骤级耗时日志未记录，耗时仅到会话/消息级。<br/>
   · 复现率由 UI 自动化重复执行同一配方统计，&lt;3 次样本的结论仅供参考。
