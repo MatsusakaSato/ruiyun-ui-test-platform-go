@@ -12,7 +12,7 @@ LDFLAGS := -s -w -X main.Version=$(VERSION) -X main.Commit=$(COMMIT) -X main.Bui
 
 PLATFORMS := darwin/arm64 darwin/amd64 linux/amd64 linux/arm64 windows/amd64
 
-.PHONY: build dev dist
+.PHONY: build dev dist release
 
 # 编译到 bin/ruiyun（注入 git 版本号，`ruiyun version` 会显示）
 build:
@@ -49,6 +49,17 @@ dist:
 	@cd dist && { shasum -a 256 ruiyun-* 2>/dev/null || sha256sum ruiyun-*; } > checksums.txt
 	@echo "打包完成："
 	@ls -lh dist
+
+# 用 GitHub Release 发布当前版本，且不附带任何正文说明
+release: dist
+	@command -v gh >/dev/null 2>&1 || { echo "请先安装 GitHub CLI: https://cli.github.com/"; exit 1; }
+	@tag="$(VERSION)"; \
+	if ! gh release view "$$tag" >/dev/null 2>&1; then \
+		echo "创建 GitHub Release: $$tag（正文为空）..."; \
+		gh release create "$$tag" dist/ruiyun-* --title "$$tag" --notes "" --verify-tag; \
+	else \
+		echo "GitHub Release $$tag 已存在，跳过创建。"; \
+	fi
 
 # 开发模式（前台热重载，Ctrl-C 退出）：
 #   web/*（HTML/CSS/JS）→ 服务直接读磁盘，免编译，浏览器经 SSE 自动刷新
