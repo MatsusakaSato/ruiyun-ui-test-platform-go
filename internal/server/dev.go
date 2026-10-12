@@ -14,7 +14,7 @@ import (
 
 // ------------------------------------------------------------------ 开发模式
 //
-// 环境变量 RUYIYUN_DEV=1 时启用（scripts/dev.sh 会带上）：
+// 环境变量 RUYIYUN_DEV=1 时启用（`ruiyun dev` 会带上）：
 //   - 静态资源改为**从磁盘读取** internal/server/web/，改 HTML/CSS/JS 不用重新编译
 //   - 提供 SSE 端点 /api/dev/events，文件变动时通知浏览器刷新（css 单独热替换）
 //
@@ -190,3 +190,5 @@ func injectDevLiveReload(html []byte) []byte {
 	}
 	return []byte(s[:idx] + devLiveReloadScript + s[idx:])
 }
+
+// builtin-watch-probe

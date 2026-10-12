@@ -1,8 +1,9 @@
 // 睿云智能工作台 · UI 测试平台统一入口。
 //
-// 四个子命令：
+// 五个子命令：
 //
 //	ruiyun serve     可视化平台本地服务（默认子命令）
+//	ruiyun dev       开发模式：热更新（改前端免编译 / 改 Go 自动重启）
 //	ruiyun pipeline  三段式流水线（UI 自动化 → 日志校验 → 报告）
 //	ruiyun repro     复现率验证器
 //	ruiyun discover  UI 诊断工具：导出 DOM 中可交互元素
@@ -62,6 +63,8 @@ func main() {
 	switch cmd {
 	case "serve":
 		os.Exit(runServe(args))
+	case "dev":
+		os.Exit(runDev(args))
 	case "pipeline":
 		os.Exit(runPipeline(args))
 	case "repro":
@@ -91,6 +94,9 @@ func usage() {
 
 子命令：
   serve       启动可视化平台本地服务（默认）
+  dev         开发模式：热更新（前台）
+               · 改 web/ 下的 HTML/CSS/JS 免编译，浏览器自动刷新
+               · 改 *.go 自动重新编译并重启（优先用 air，没装则用内置监听）
   pipeline    执行三段式流水线（UI 自动化 → 日志校验 → 报告）
   repro       复现率验证器
   discover    UI 诊断工具：导出 DOM 中可交互元素
@@ -100,6 +106,7 @@ func usage() {
 示例：
   ruiyun                              # 启动平台服务（127.0.0.1:8765）
   ruiyun serve --port 8765 --allow-lan
+  ruiyun dev                          # 前台开发模式（实时看编译日志）
   ruiyun pipeline --cases 1 --run-id run_20260101_000000
   ruiyun version
 `)

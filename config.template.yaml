@@ -29,7 +29,7 @@ app:
   #   false（默认）→ 运行结束后应用保持运行，下次运行探测到调试端口直接复用；
   #                  未运行时才启动（按需唤醒）。
   #   true         → 运行结束后关闭「由平台启动的」实例（复用的实例不受影响）。
-  # 需要手动关掉应用时用界面「✕ 关闭实例」，或 launch_app_dev.sh / launch_app_dev.ps1 --stop。
+  # 需要手动关掉应用时用界面「✕ 关闭实例」。
   # ----------------------------------------------------------------
   # 自动确认：agent 大任务常会先列计划/请求命令授权，等用户点确认，
   # 若无人干预会静默产出「假通过」（答复=计划书，任务未执行）。
@@ -66,7 +66,7 @@ app:
   #   production → 空档案，走应用内置默认值（即生产环境）
   #   留空 ""    → 不注入任何变量（界面「环境」下拉里的「不注入」项）
   # 优先级：调用方已显式 export 的 SRTCLAW_* 变量 > 此处档案 > 应用内置默认，
-  # 因此 launch_app_dev.sh / launch_app_dev.ps1 等手动切换方式不受影响。
+  # 因此调用方自行 export 的 SRTCLAW_* 变量（手动切换环境）不受影响。
   #
   # 界面「环境」下拉的选项**完全来自这里**：key 即下拉值，dev / production 两个
   # 保留 key 会显示成中文标签，其余 key 按原样显示为自定义档案。
@@ -82,7 +82,7 @@ app:
       SRTCLAW_INSTITUTION_API_BASE_URL: "https://ruiyun-api-dev.3ren.cn"
       SRTCLAW_TEACHING_API_BASE_URL: "https://api-dev.3ren.cn"
       SRTCLAW_UPDATE_API_URL: "https://appadmin-test.yanxiu.com/app/log/uploadDeviceLog/release.do"
-      # 与 launch_app_dev.sh / launch_app_dev.ps1 保持一致的旧名（应用可能读其中任一）
+      # 旧名别名（应用可能读其中任一）
       JIUWENCLAW_UPDATE_API_URL: "https://appadmin-test.yanxiu.com/app/log/uploadDeviceLog/release.do"
     production: {}   # 空档案 = 使用应用内置默认（生产域名）
 

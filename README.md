@@ -11,7 +11,7 @@
 
 ```bash
 make build           # 编译到 bin/ruiyun
-make cross-compile   # 交叉编译到 dist/
+make dist            # 交叉编译到 dist/（多平台包 + SHA-256 校验和）
 
 ruiyun serve                      # 启动平台（默认），访问 http://127.0.0.1:8765
 ruiyun pipeline --cases 1         # 跑流水线：UI 自动化 → 日志校验 → 报告
@@ -36,16 +36,13 @@ internal/       各功能模块，核心：
   assertor/ evaluator/    缺陷断言与评估
   notify/       钉钉群通知（流水线收尾推送结果摘要）
   canon/        文本归一化与数值舍入
-scripts/        构建与开发启动脚本
 ```
 
-开发：
+开发（热重载）：
 
 ```bash
-make fmt / vet / lint
+make dev             # 热重载：改 web/* 免编译即时生效，改 *.go 自动重编译重启
 go test ./...
-
-./scripts/launch_app_dev.sh --detach   # 后台启动被测应用（--dry-run / --stop 可选）
 ```
 
 ## 注意

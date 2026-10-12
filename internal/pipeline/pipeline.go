@@ -111,7 +111,7 @@ func RunUICases(cfg map[string]any, cases []map[string]any, uidriver *driver.Rui
 	collect := func(res *models.CaseResult, sess string, done bool, tSend float64) {
 		if !done {
 			res.WaitedLimit = true
-			res.WaitNote = fmt.Sprintf("已达等待上限（%.0f 分钟），按已落盘日志出结果", caseTimeout/60.0)
+			res.WaitNote = fmt.Sprintf("已达等待上限（%.0f 分钟）", caseTimeout/60.0)
 		}
 		res.ConfirmEvents = eventsForSession(uidriver.ConfirmEvents, sess, tSend)
 		res.AutoConfirms = len(res.ConfirmEvents)

@@ -12,10 +12,11 @@ root = "."
 tmp_dir = "bin"
 
 [build]
-# 用项目自带的构建脚本，保证与 make build 产物一致（含版本信息）
-cmd = "./scripts/build.sh build"
+# 输出到 bin/ruiyun.dev 而不是 bin/ruiyun，因为 runner（ruiyun dev）自己就是
+# bin/ruiyun，热重载时覆盖正在执行的二进制会报 ETXTBSY
+cmd = "go build -trimpath -o bin/ruiyun.dev ./cmd/ruiyun"
 # 带 RUYIYUN_DEV=1 启动：静态资源走磁盘 + 注入热更新脚本
-full_bin = "RUYIYUN_DEV=1 ./bin/ruiyun serve"
+full_bin = "RUYIYUN_DEV=1 ./bin/ruiyun.dev serve"
 include_ext = ["go"]
 exclude_dir = [
   "bin",
