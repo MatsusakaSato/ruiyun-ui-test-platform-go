@@ -44,11 +44,18 @@ export const state = {
   // 本轮队列用例与附件库
   CASES: [{ prompt: '', attachments: [] }],
   UPLOADS: [],
+  // 附件库弹窗的目标：-1 未打开 / 数字 = 队列行序号 / 'caseadd' = 新增用例对话框
   LIB_FOR: -1,
 
+  // 新增用例对话框内待保存的附件（{ name, path, size }），提交时取 path 数组入库
+  CA_ATTS: [],
+  CA_ATT_MAX: 5,
+
   // 预设用例库
+  // 筛选条件：scenes / targets 为空数组表示不限；attachment 取 ''（不限）/ 'yes' / 'no'，
+  // 与后端 GET /api/preset-cases 的 scene、targets（逗号拼接）、attachment 参数一一对应。
   LIB_LIMIT: 50,
-  LIB: { keyword: '', scene: '', targets: [], attachment: '', offset: 0 },
+  LIB: { keyword: '', scenes: [], targets: [], attachment: '', offset: 0 },
   LIB_ROWS: [],
   LIB_TOTAL: 0,
   LIB_SCENES: [],

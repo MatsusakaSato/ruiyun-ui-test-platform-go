@@ -699,11 +699,11 @@ export function evEmpty() {
     <div style="font-size:15px;font-weight:600;color:var(--tx);margin-bottom:8px">该轮次尚未进行质量评估</div>
     <div style="font-size:12.5px;color:var(--tx2);margin-bottom:18px;line-height:1.6;max-width:540px;margin-left:auto;margin-right:auto">
       调用大模型对用例的<b>结果质量</b>、<b>安全可靠</b>与 <b>Agent 系统能力</b>进行多维度自动化打分。
-      ${cfg ? '' : '<br><span style="color:var(--tx3);font-size:11.5px">（提示：需在右上角「⚙ 设置 → 模型设置」中配置好可用模型）</span>'}
+      ${cfg ? '' : '<br><span style="color:var(--tx3);font-size:11.5px">（提示：需在右上角「设置 → 模型设置」中配置好可用模型）</span>'}
     </div>
     <div style="display:flex;gap:10px;justify-content:center;align-items:center">
       <button class="btn-primary" style="padding:8px 22px" onclick="startEval()">开始评估</button>
-      ${cfg ? '' : '<button class="btn-ghost" onclick="openLlm()">⚙ 配置模型</button>'}
+      ${cfg ? '' : '<button class="btn-ghost" onclick="openLlm()">配置模型</button>'}
     </div>
   </div>`;
 }

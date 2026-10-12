@@ -203,11 +203,9 @@ export function initExcelImport() {
         state.LIB.offset = 0;
         state.PSEL = new Set();
         await loadPresetLib();
-        const pMsg = $('paddMsg');
-        if (pMsg) {
-          pMsg.textContent = '✓ ' + (d.message || '导入完成');
-          pMsg.style.color = '';
-        }
+        // 导入结果落在用例库工具条上的提示位（原来挂在已移除的内联新增表单里，位置隐藏时看不见）
+        const pMsg = $('libMsg');
+        if (pMsg) pMsg.textContent = d.message || '导入完成';
       } catch (e) {
         alert('请求失败：' + e.message);
       } finally {

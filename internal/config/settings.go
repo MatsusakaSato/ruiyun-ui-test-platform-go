@@ -313,6 +313,19 @@ func SecretsPath() string {
 	return dst
 }
 
+// NotifySecretsPath 通知机器人配置文件：工作区/.notify_secrets.json。
+// 与 .llm_secrets.json 平行：都属于「不该进 config.yaml、也不该进版本库」的本机密钥。
+func NotifySecretsPath() string {
+	ws := UserWorkspace()
+	dst := filepath.Join(ws, ".notify_secrets.json")
+	legacy := []string{filepath.Join(RootDir, ".notify_secrets.json")}
+	migrateFirst(legacy, dst)
+	if ws != DefaultWorkspace() {
+		migrateLegacy(filepath.Join(DefaultWorkspace(), ".notify_secrets.json"), dst)
+	}
+	return dst
+}
+
 // LoadConfigDict 加载解析 config.yaml 为字典
 func LoadConfigDict() (map[string]any, error) {
 	cp := ConfigPath()

@@ -157,7 +157,7 @@ export function setRunning(v) {
       b.textContent = '测试运行中…';
       b.classList.add('is-running');
     } else {
-      b.textContent = '▶ 运行测试';
+      b.textContent = '运行测试';
       b.classList.remove('is-running');
     }
   });
@@ -198,25 +198,7 @@ export function paintConsole(lines) {
 }
 
 export function renderStatus(j) {
-  const b = $('statusBadge');
-  if (b) {
-    const finished = !j.running && !j.stopped
-      && (j.finished_ok || (j.exit_code === 0 && j.archived));
-    b.hidden = finished;
-    if (finished) {
-      b.textContent = '';
-    } else if (j.stopped) {
-      b.className = 'badge b-err'; b.textContent = '已终止';
-    } else if (j.running) {
-      b.className = 'badge b-run';
-      b.textContent = '运行中 · ' + j.elapsed_s + 's';
-    } else if (j.exit_code != null) {
-      b.className = 'badge b-err'; b.textContent = '异常退出（退出码 ' + j.exit_code + '）';
-    } else {
-      b.className = 'badge b-idle'; b.textContent = '空闲';
-    }
-  }
-
+  // 顶部不再有状态徽章：运行中 / 已终止 / 异常退出只由终止原因文案与运行日志体现
   const termination = $('terminationReason');
   if (termination) {
     termination.hidden = !j.stopped;

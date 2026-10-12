@@ -323,7 +323,7 @@ func (s *Server) handlePresetCasesGet(w http.ResponseWriter, r *http.Request) {
 		return out
 	}
 	res, err := testcasedb.QueryPresetCases(
-		one("keyword", ""), one("scene", ""),
+		one("keyword", ""), splitCSV(one("scene", "")),
 		splitCSV(one("targets", "")), one("attachment", ""),
 		splitCSV(one("ids", "")), limit, offset, one("order", "desc"), "")
 	if err != nil {
@@ -375,8 +375,95 @@ func (s *Server) handleEnvPost(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, codeFor(ok, 400), out)
 }
 
+// handleNotifyConfigGet 通知页配置面板的群列表（token / secret 已打码）
+func (s *Server) handleNotifyConfigGet(w http.ResponseWriter) {
+	writeJSON(w, 200, notify.PublicRobots())
+}
+
+// handleNotifyConfigPost 保存 / 清空通知页的群配置。
+//
+//	{"action":"save","robots":[{"key","name","token","secret"}]}
+//	{"action":"clear"}            清空自定义，回落内置默认
+//	{"action":"reveal","key":"…"} 取某群的明文 token / secret
+//
+// 约定：token / secret 留空表示「沿用原来的值」（前端只回显打码提示，不回传明文）。
+// 新群没有原值可沿用，token 留空则直接报错——空 token 存下来也发不出去。
+func (s *Server) handleNotifyConfigPost(w http.ResponseWriter, r *http.Request) {
+	body := readJSONBody(r)
+	switch strings.TrimSpace(strOr(body["action"], "")) {
+	case "save":
+		cur, _ := notify.LoadRobots()
+		byKey := make(map[string]notify.RobotEntry, len(cur))
+		for _, c := range cur {
+			byKey[c.Key] = c
+		}
+
+		raw := toMapList(body["robots"])
+		entries := make([]notify.RobotEntry, 0, len(raw))
+		for i, m := range raw {
+			key := strings.TrimSpace(strOr(m["key"], ""))
+			if key == "" {
+				key = fmt.Sprintf("custom-%d", i+1)
+			}
+			name := strings.TrimSpace(strOr(m["name"], ""))
+			token := strings.TrimSpace(strOr(m["token"], ""))
+			secret := strings.TrimSpace(strOr(m["secret"], ""))
+			if old, ok := byKey[key]; ok {
+				if token == "" {
+					token = old.Token
+				}
+				if secret == "" {
+					secret = old.Secret
+				}
+			}
+			if token == "" {
+				label := name
+				if label == "" {
+					label = key
+				}
+				writeJSON(w, 400, map[string]any{
+					"ok": false, "message": fmt.Sprintf("「%s」缺少 Token，没法发送", label)})
+				return
+			}
+			entries = append(entries, notify.RobotEntry{Key: key, Name: name, Token: token, Secret: secret})
+		}
+		if len(entries) == 0 {
+			writeJSON(w, 400, map[string]any{
+				"ok": false, "message": "至少保留一个群；想恢复内置的正式群 / 测试群请点「恢复默认」"})
+			return
+		}
+		if err := notify.SaveRobots(entries); err != nil {
+			writeJSON(w, 500, map[string]any{
+				"ok": false, "message": fmt.Sprintf("保存失败：%v", err)})
+			return
+		}
+		out := notify.PublicRobots()
+		out["message"] = fmt.Sprintf("已保存 %d 个群", len(entries))
+		writeJSON(w, 200, out)
+
+	case "clear":
+		notify.ClearRobots()
+		out := notify.PublicRobots()
+		out["message"] = "已恢复内置的正式群 / 测试群"
+		writeJSON(w, 200, out)
+
+	case "reveal":
+		key := strings.TrimSpace(strOr(body["key"], ""))
+		res, ok := notify.RevealRobot(key)
+		if !ok {
+			writeJSON(w, 404, map[string]any{"ok": false, "message": "群不存在（可能已被删除）"})
+			return
+		}
+		writeJSON(w, 200, res)
+
+	default:
+		writeJSON(w, 400, map[string]any{
+			"ok": false, "message": "未知操作（支持 save / clear / reveal）"})
+	}
+}
+
 // handleNotifySend 发送钉钉群通知（「发送通知」页）。
-// 请求体 {"message": "...", "group": "official"|"test"}；
+// 请求体 {"message": "...", "group": "<配置里的群 key>"}；
 // 统一返回 {"ok": bool, "message": string}。
 func (s *Server) handleNotifySend(w http.ResponseWriter, r *http.Request) {
 	body := readJSONBody(r)
@@ -511,8 +598,25 @@ func (s *Server) handlePresetCasesPost(w http.ResponseWriter, r *http.Request) {
 		if item == nil {
 			item = body
 		}
+		// 附件路径是「先落盘、再提交」，中间可能已被附件库删除（或从库里挑中的文件被删）。
+		// 这类悬空路径入库只会在运行时变成「附件不存在，未投递」，所以在写入前就剔除，
+		// 并把剔除清单回传前端提示。其余正常附件照常入库，不因个别失效而整单失败。
+		skipped := dropMissingAttachments(item)
+		if len(skipped) > 0 {
+			// 前端的 attachment 标记是按「挂了几个附件」自动算出来的；附件被剔除后要跟着回落，
+			// 否则会留下「标记需要附件、却一个附件都没有」的脏数据。
+			if atts, ok := item["attachments"].([]any); ok && len(atts) == 0 {
+				if labels, ok := item["labels"].(map[string]any); ok {
+					labels["attachment"] = false
+				}
+			}
+		}
 		ok, msg, c := testcasedb.AddPresetCase(item, "")
-		writeJSON(w, codeFor(ok, 400), map[string]any{"ok": ok, "message": msg, "case": c})
+		out := map[string]any{"ok": ok, "message": msg, "case": c}
+		if len(skipped) > 0 {
+			out["skipped_attachments"] = skipped
+		}
+		writeJSON(w, codeFor(ok, 400), out)
 	case "add_many":
 		items := toMapList(body["items"])
 		ok, msg, added := testcasedb.AddPresetCases(items, false, "")
@@ -525,6 +629,46 @@ func (s *Server) handlePresetCasesPost(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, 400, map[string]any{
 			"ok": false, "message": "未知操作（支持 add / add_many / delete）"})
 	}
+}
+
+// dropMissingAttachments 剔除 item["attachments"] 里在本机不存在的路径，返回被剔除的清单。
+// 附件入库的是绝对路径，投递时由 driver 直接读文件；把已经不存在的路径写进库，
+// 只会在运行时才暴露成「附件不存在，未投递」。目录同样视为无效：附件必须是文件。
+func dropMissingAttachments(item map[string]any) []string {
+	raw, ok := item["attachments"]
+	if !ok || raw == nil {
+		return nil
+	}
+	var kept []any
+	var skipped []string
+	keep := func(p string) {
+		s := strings.TrimSpace(p)
+		if s == "" {
+			return
+		}
+		if st, err := os.Stat(s); err != nil || st.IsDir() {
+			skipped = append(skipped, s)
+			return
+		}
+		kept = append(kept, s)
+	}
+	switch list := raw.(type) {
+	case []any:
+		for _, v := range list {
+			keep(fmt.Sprintf("%v", v))
+		}
+	case []string:
+		for _, v := range list {
+			keep(v)
+		}
+	default:
+		return nil
+	}
+	if len(skipped) == 0 {
+		return nil
+	}
+	item["attachments"] = kept
+	return skipped
 }
 
 func (s *Server) handlePresetImport(w http.ResponseWriter, r *http.Request) {
@@ -872,7 +1016,16 @@ func (s *Server) handleUploadDelete(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	_ = os.Remove(filepath.Dir(target)) // 空壳目录一并清理（非空时忽略）
-	writeJSON(w, 200, map[string]any{"ok": true, "message": "已从附件库删除"})
+
+	// 已入库的用例可能还引用着这个路径，不摘掉就是悬空路径，
+	// 只会在运行时投递时才报「附件不存在」。清单更新失败不影响文件已删除的事实，只回报原因。
+	out := map[string]any{"ok": true, "message": "已从附件库删除"}
+	if cleaned, err := testcasedb.RemoveAttachmentFromAllCases(target, ""); err != nil {
+		out["message"] = fmt.Sprintf("已从附件库删除；用例引用清理失败：%v", err)
+	} else {
+		out["cleaned_cases"] = cleaned
+	}
+	writeJSON(w, 200, out)
 }
 
 func (s *Server) handleReveal(w http.ResponseWriter, r *http.Request) {

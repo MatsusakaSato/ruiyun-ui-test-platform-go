@@ -5,7 +5,7 @@ import { state } from './state.js';
 import { initConsole } from './console.js';
 import { initNav, switchPage, renderHistoryPane, loadEnv, refreshAppStatus, loadAutoClick } from './nav.js';
 import { initHome, renderRunCases, doRun, setRunning, renderStatus, goToLatestHistory } from './page-home.js';
-import { initCases, loadUploads, pickAttach, uploadFiles, openLib, closeLib, rmAttach, savePreset, renderCases, delCase, setCaseTab, syncCaseState, loadPresetLib } from './page-cases.js';
+import { initCases, loadUploads, pickAttach, uploadFiles, openLib, closeLib, rmAttach, rmCaAttach, savePreset, renderCases, delCase, setCaseTab, syncCaseState, loadPresetLib } from './page-cases.js';
 import { initExcelImport } from './excel-import.js';
 import { initHistory, loadRounds, openRound, delRound, setTab, pickCase, startEval, stopEval, refreshEvalStatus, pollEval, openRoundById, copyRoundId } from './page-history.js';
 import { initModals, loadLLM, openLlm, revealCfgPath } from './modals.js';
@@ -21,6 +21,7 @@ Object.assign(window, {
   revealCfgPath,
   revealInFinder,
   rmAttach,
+  rmCaAttach,
   pickAttach,
   openLib,
   closeLib,

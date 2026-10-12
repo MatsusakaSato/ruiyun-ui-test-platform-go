@@ -218,3 +218,82 @@ func TestAddPresetCases_BatchDeduplication(t *testing.T) {
 		t.Errorf("expected total 2 on replace, got %d", totalRep)
 	}
 }
+
+func TestRemoveAttachmentFromAllCases(t *testing.T) {
+	dbPath := createTempDB(t)
+
+	// a：两个附件，其中一个将被删；删完仍有附件 → 保留「需要附件」标记
+	if ok, msg, _ := AddPresetCase(map[string]any{
+		"prompt":      "带两个附件的用例",
+		"attachments": []string{"/tmp/up/keep.docx", "/tmp/up/gone.pdf"},
+	}, dbPath); !ok {
+		t.Fatalf("add a failed: %s", msg)
+	}
+	// b：只挂一个附件，删完变空
+	if ok, msg, _ := AddPresetCase(map[string]any{
+		"prompt":      "只挂一个附件的用例",
+		"attachments": []string{"/tmp/up/gone.pdf"},
+	}, dbPath); !ok {
+		t.Fatalf("add b failed: %s", msg)
+	}
+	// c：只有标记、没有附件路径 → 不该被这次清理碰到
+	if ok, msg, _ := AddPresetCase(map[string]any{
+		"prompt": "只要附件不下文件",
+		"labels": map[string]any{"attachment": true},
+	}, dbPath); !ok {
+		t.Fatalf("add c failed: %s", msg)
+	}
+
+	// 路径带冗余段也要能匹配上（按 filepath.Clean 归一化后比较）
+	n, err := RemoveAttachmentFromAllCases("/tmp/up/./sub/../gone.pdf", dbPath)
+	if err != nil {
+		t.Fatalf("RemoveAttachmentFromAllCases failed: %v", err)
+	}
+	if n != 2 {
+		t.Errorf("expected 2 cases cleaned, got %d", n)
+	}
+
+	cases, err := GetPresetCases(dbPath)
+	if err != nil {
+		t.Fatalf("GetPresetCases failed: %v", err)
+	}
+	byPrompt := map[string]map[string]any{}
+	for _, c := range cases {
+		byPrompt[c["prompt"].(string)] = c
+	}
+
+	a := byPrompt["带两个附件的用例"]
+	if got, _ := a["attachments"].([]string); len(got) != 1 || got[0] != "/tmp/up/keep.docx" {
+		t.Errorf("a 应只剩 keep.docx，实际 %v", a["attachments"])
+	}
+	if labels, _ := a["labels"].(map[string]any); labels == nil || labels["attachment"] != true {
+		t.Errorf("a 还有附件，应保持「需要附件」，labels=%v", a["labels"])
+	}
+
+	b := byPrompt["只挂一个附件的用例"]
+	if got, _ := b["attachments"].([]string); len(got) != 0 {
+		t.Errorf("b 的附件应被清空，实际 %v", b["attachments"])
+	}
+	if labels, _ := b["labels"].(map[string]any); labels != nil {
+		if _, has := labels["attachment"]; has {
+			t.Errorf("b 附件清空后不该再标记「需要附件」，labels=%v", labels)
+		}
+	}
+
+	c := byPrompt["只要附件不下文件"]
+	if labels, _ := c["labels"].(map[string]any); labels == nil || labels["attachment"] != true {
+		t.Errorf("c 未被本次清理波及，标记应保留，labels=%v", c["labels"])
+	}
+
+	// 幂等：同一条路径再清一次不应有命中
+	if n, err := RemoveAttachmentFromAllCases("/tmp/up/gone.pdf", dbPath); err != nil || n != 0 {
+		t.Errorf("重复清理应为 0，实际 n=%d err=%v", n, err)
+	}
+	// 空路径直接返回，不误伤
+	if n, err := RemoveAttachmentFromAllCases("   ", dbPath); err != nil || n != 0 {
+		t.Errorf("空路径应直接返回 0，实际 n=%d err=%v", n, err)
+	}
+	if total, _ := CountCases(dbPath); total != 3 {
+		t.Errorf("清理引用不应删除用例，期望 3 条，实际 %d", total)
+	}
+}

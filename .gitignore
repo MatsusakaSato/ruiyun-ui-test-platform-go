@@ -19,6 +19,12 @@ coverage.html
 # 不是源码，不应提交。
 .app_settings.json
 
+# 本机密钥：大模型 Key、钉钉群机器人 Token/加签。都带 0600，
+# 默认落在工作区，但 settings.go 兼容「旧的仓库根目录位置」并会自动迁移，
+# 所以仓库根目录也一并忽略 —— 一旦误提交就是泄露真实 Token。
+.llm_secrets.json
+.notify_secrets.json
+
 # 助手（WorkBuddy）的项目记忆与配置目录
 .workbuddy/
 

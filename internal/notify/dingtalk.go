@@ -14,6 +14,7 @@ import (
 	"io"
 	"net/http"
 	"net/url"
+	"strings"
 	"time"
 )
 
@@ -22,40 +23,31 @@ const (
 	apiPath = "/robot/send"
 )
 
-// Robot 一个钉钉自定义机器人（token / secret 明文，沿用原脚本的做法，不读配置文件）
+// Robot 一个钉钉自定义机器人（token / secret）。
+// 具体取值来自配置：界面上配过就用配的，没配过回落到 config.go 里的 builtinRobots。
 type Robot struct {
 	Token  string
 	Secret string
 }
 
-// robots 群组表。正式 = 原脚本「正式」组；test = 原脚本「测试用」组。
-var robots = map[string]Robot{
-	// 正式
-	"official": {
-		Token:  "da06ba7eadce8271882a8c2f254deaf884876e5797151d57246f86ede81831b4",
-		Secret: "SEC6edbcbb663ecf7649505f7b0048fce73ba4dd062ab5cb92610a1472db0335844",
-	},
-	// 测试用
-	"test": {
-		Token:  "8df7a1da92bd3931adb6db868e0e63a0f216fb61498ca9ba5dc14139b5166341",
-		Secret: "SECb214460c10dfb43fb1bb2d9477195ad2b1698ba58dc96ab6768c8cdaa2a2233d",
-	},
-}
-
-// GroupLabel 群组的中文显示名（与前端下拉框文案一致）
+// GroupLabel 群的展示名（取自配置，见 config.go）；未知 key 原样返回，别编一个假名字
 func GroupLabel(group string) string {
-	if group == "test" {
-		return "测试群"
+	if r, ok := Lookup(group); ok {
+		return r.Name
 	}
-	return "正式群"
+	return group
 }
 
 // endpointBase 允许单元测试替换为 httptest 服务器地址
 var endpointBase = apiHost
 
-// signURL 计算加签后的 webhook 地址。
-// 与原脚本一致：hmac.new(secret, f'{timestamp}\n{secret}', sha256) → base64 → quote_plus。
+// signURL 计算 webhook 地址。
+// 有 secret 时按原脚本加签：hmac.new(secret, f'{timestamp}\n{secret}', sha256) → base64 → quote_plus；
+// secret 留空表示该机器人用「自定义关键词」而不是「加签」，此时只带 access_token。
 func signURL(rb Robot, tsMilli int64) string {
+	if strings.TrimSpace(rb.Secret) == "" {
+		return fmt.Sprintf("%s%s?access_token=%s", endpointBase, apiPath, rb.Token)
+	}
 	stringToSign := fmt.Sprintf("%d\n%s", tsMilli, rb.Secret)
 	mac := hmac.New(sha256.New, []byte(rb.Secret))
 	mac.Write([]byte(stringToSign))
@@ -91,12 +83,14 @@ func SendCustomRobotGroupMessage(msg, phone string) (*SendResult, error) {
 	return SendCustomRobotGroupMessageTo("official", msg, phone)
 }
 
-// SendCustomRobotGroupMessageTo 按群组发送：group 取 "official"（正式群）或 "test"（测试群）。
+// SendCustomRobotGroupMessageTo 按群发送。group 是配置里的 key：
+// 默认有 "official"（正式群）与 "test"（测试群），界面上加了群就用新 key。
 func SendCustomRobotGroupMessageTo(group, msg, phone string) (*SendResult, error) {
-	rb, ok := robots[group]
+	entry, ok := Lookup(group)
 	if !ok {
-		return nil, fmt.Errorf("未知群组：%s（只支持 official / test）", group)
+		return nil, fmt.Errorf("未知群组：%s（请先在发送通知页点齿轮添加）", strings.TrimSpace(group))
 	}
+	rb := Robot{Token: entry.Token, Secret: entry.Secret}
 
 	body := map[string]any{
 		"at": map[string]any{

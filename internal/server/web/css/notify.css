@@ -75,6 +75,32 @@
 .nf-tpl-empty{color:var(--tx3);font-size:12px;text-align:center;padding:38px 12px;line-height:1.9}
 .nf-tpl-empty b{display:block;color:var(--tx2);font-size:12.5px;margin-bottom:4px}
 
+/* ---------- 群机器人配置（标题行右侧的齿轮 + 弹窗） ---------- */
+/* 推到标题行最右：h3.sec 是 flex，gear 靠在「发送通知」右侧比跟着副标题走更稳 */
+.nf-gear{margin-left:auto;width:24px;height:24px;padding:0;flex-shrink:0;
+  display:inline-flex;align-items:center;justify-content:center;
+  border:none;border-radius:7px;background:none;cursor:pointer;
+  font-size:13px;line-height:1;color:var(--tx3);
+  transition:background .15s,color .15s}
+.nf-gear:hover{background:#f1f5f9;color:var(--tx)}
+
+/* 弹窗本体：让列表成为唯一的滚动区，添加按钮与提示常驻底部 */
+#notifyCfgMask .llm-body{flex:1 1 auto;min-height:0;overflow:hidden}
+.nf-cfg-list{flex:1 1 auto;min-height:120px;overflow-y:auto;
+  display:flex;flex-direction:column;gap:10px}
+.nf-cfg-empty{color:var(--tx3);font-size:12px;text-align:center;padding:34px 12px}
+.nf-cfg-add{align-self:flex-start;flex-shrink:0}
+
+.nf-cfg-row{border:1px solid var(--line);border-radius:11px;padding:11px 12px;
+  display:flex;flex-direction:column;gap:9px;background:#fff}
+.nf-cfg-hd{display:flex;align-items:center;gap:8px}
+.nf-cfg-name{flex:1 1 auto;min-width:0;border:1px solid var(--line);border-radius:9px;
+  padding:8px 11px;font-size:12.5px;font-weight:600;color:var(--tx);
+  background:#fff;font-family:inherit}
+.nf-cfg-name:focus{outline:none;border-color:var(--accent);box-shadow:0 0 0 3px rgba(37,99,235,.12)}
+.nf-cfg-hd .btn-ghost{flex-shrink:0}
+.nf-cfg-row .fld label{font-size:11.5px}
+
 /* ---------- 窄屏：卡片收回内边距，不再强撑满屏 ---------- */
 @media(max-width:640px){
   #pageNotify{padding-top:12px;padding-bottom:14px}

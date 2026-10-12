@@ -7,6 +7,7 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
+	"runtime"
 	"sort"
 	"strconv"
 	"strings"
@@ -214,7 +215,8 @@ func GetPresetCases(customPath string) ([]map[string]any, error) {
 }
 
 // QueryPresetCases 预设用例库分页与条件筛选查询
-func QueryPresetCases(keyword, scene string, targets []string, attachment string, ids []string, limit, offset int, order, customPath string) (map[string]any, error) {
+// scenes / targets 为多选筛选（空切片表示不限），attachment 取 "" / "yes" / "no"
+func QueryPresetCases(keyword string, scenes, targets []string, attachment string, ids []string, limit, offset int, order, customPath string) (map[string]any, error) {
 	_, err := InitDB(customPath)
 	if err != nil {
 		return nil, err
@@ -227,12 +229,12 @@ func QueryPresetCases(keyword, scene string, targets []string, attachment string
 
 	// 1. 全局筛选属性
 	scRows, err := db.Query("SELECT DISTINCT scene FROM testcases WHERE scene != '' ORDER BY scene")
-	scenes := []string{} // 必须是非 nil 空切片：nil 切片会 JSON 序列化成 null
+	allScenes := []string{} // 必须是非 nil 空切片：nil 切片会 JSON 序列化成 null
 	if err == nil {
 		for scRows.Next() {
 			var sc string
 			_ = scRows.Scan(&sc)
-			scenes = append(scenes, sc)
+			allScenes = append(allScenes, sc)
 		}
 		scRows.Close()
 	}
@@ -278,10 +280,20 @@ func QueryPresetCases(keyword, scene string, targets []string, attachment string
 		params = append(params, kwParam, kwParam, kwParam)
 	}
 
-	sc := strings.TrimSpace(scene)
-	if sc != "" {
-		whereClauses = append(whereClauses, "scene = ?")
-		params = append(params, sc)
+	// 多选场景同样是「或」语义：命中任意一个即算匹配（scene 列仍是单值，
+	// 多选只是把多个候选值放进 IN，不改变存储格式与去重键）。
+	var scList []string
+	for _, sc := range scenes {
+		if s := strings.TrimSpace(sc); s != "" {
+			scList = append(scList, s)
+		}
+	}
+	if len(scList) > 0 {
+		ph := strings.TrimRight(strings.Repeat("?,", len(scList)), ",")
+		whereClauses = append(whereClauses, fmt.Sprintf("scene IN (%s)", ph))
+		for _, s := range scList {
+			params = append(params, s)
+		}
 	}
 
 	// 严格只认 yes / no，其余值一律忽略筛选。
@@ -366,7 +378,7 @@ func QueryPresetCases(keyword, scene string, targets []string, attachment string
 		"total":   total,
 		"offset":  offset,
 		"limit":   limit,
-		"scenes":  scenes,
+		"scenes":  allScenes,
 		"targets": allTargets,
 	}, nil
 }
@@ -799,6 +811,101 @@ func DeletePresetCases(ids []string, customPath string) (bool, string, int) {
 	_ = db.QueryRow("SELECT COUNT(*) FROM testcases").Scan(&remaining)
 
 	return true, fmt.Sprintf("已删除 %d 条（预设剩余 %d 条）", removed, remaining), int(removed)
+}
+
+// RemoveAttachmentFromAllCases 从所有用例的 attachments 中摘掉指定路径（附件库删文件后调用），
+// 返回被清理的用例数。
+//
+// 附件库删掉的文件若仍被用例引用，库里留下的就是悬空路径，只有真正跑用例时才会暴露成
+// 「附件不存在，未投递」。所以在删除文件的同时同步摘掉引用。
+// 摘完变空数组的用例会把 attachment 标记一并归零——「需要附件」是随附件来的；
+// 仍留有其它附件的用例保持标记不变。
+func RemoveAttachmentFromAllCases(path, customPath string) (int, error) {
+	target := strings.TrimSpace(path)
+	if target == "" {
+		return 0, nil
+	}
+	if abs, err := filepath.Abs(target); err == nil {
+		target = abs
+	}
+	target = filepath.Clean(target)
+
+	if _, err := InitDB(customPath); err != nil {
+		return 0, err
+	}
+
+	dbMu.Lock()
+	defer dbMu.Unlock()
+
+	db, err := GetConnection(customPath)
+	if err != nil {
+		return 0, err
+	}
+	defer db.Close()
+
+	rows, err := db.Query("SELECT id, attachments FROM testcases WHERE attachments NOT IN ('', '[]')")
+	if err != nil {
+		return 0, err
+	}
+
+	type update struct {
+		id    string
+		atts  string
+		empty bool
+	}
+	var updates []update
+	for rows.Next() {
+		var id, raw string
+		if err := rows.Scan(&id, &raw); err != nil {
+			continue
+		}
+		var list []string
+		if json.Unmarshal([]byte(raw), &list) != nil {
+			continue
+		}
+		kept := make([]string, 0, len(list))
+		hit := false
+		for _, p := range list {
+			if samePath(p, target) {
+				hit = true
+				continue
+			}
+			kept = append(kept, p)
+		}
+		if !hit {
+			continue
+		}
+		// make 出来的非 nil 空切片会编码成 []，而不是 null —— 前端按数组解析
+		encoded, _ := json.Marshal(kept)
+		updates = append(updates, update{id: id, atts: string(encoded), empty: len(kept) == 0})
+	}
+	rows.Close()
+	if err := rows.Err(); err != nil {
+		return 0, err
+	}
+
+	for _, u := range updates {
+		flag := 1
+		if u.empty {
+			flag = 0
+		}
+		if _, err := db.Exec(
+			"UPDATE testcases SET attachments = ?, attachment = ?, updated_at = datetime('now','localtime') WHERE id = ?",
+			u.atts, flag, u.id); err != nil {
+			return 0, err
+		}
+	}
+	return len(updates), nil
+}
+
+// samePath 判断两个附件路径是否指向同一文件。
+// Windows 路径大小写不敏感，其余平台按字节比较。
+func samePath(a, b string) bool {
+	ca, cb := filepath.Clean(a), filepath.Clean(b)
+	if runtime.GOOS == "windows" {
+		return strings.EqualFold(ca, cb)
+	}
+	return ca == cb
 }
 
 // GetPresetLabelsIndex 生成评估器专用索引：CleanWhitespace(prompt) -> labels

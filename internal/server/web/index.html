@@ -39,36 +39,25 @@
 <div class="main">
 
 <header><div class="wrap hd">
-  <span class="badge b-idle" id="statusBadge">空闲</span>
   <span class="termination-reason" id="terminationReason" hidden></span>
   <div class="spacer"></div>
   <span class="opt" id="wrapEnv">环境
     <select id="optEnv"></select>
-    <span class="q" data-tip="只有「开发」与「线上」两种环境。
-应用【启动时】注入对应环境变量，运行中的实例改不了：
-- 应用未运行 → 可切换，选择后写入 config.yaml，下次启动生效
-- 应用运行中 → 选择器置灰，需先点「✕ 关闭实例」
-注意：切换环境只影响下次启动。">?</span>
   </span>
-  <span class="opt">
-    <button class="btn-ghost" id="btnCloseApp" title="关闭应用实例">✕ 关闭实例</button>
-    <span class="q" data-tip="关闭当前运行的应用实例（含手动从 Dock 启动的）。
-关闭后可重新选择环境，下次运行时会按所选环境启动。
-测试运行期间不可关闭。">?</span>
-  </span>
+  <button class="btn-ghost" id="btnCloseApp" title="关闭应用实例">关闭实例</button>
   <span class="opt settings-wrap">
-    <button class="btn-ghost" id="btnSettings">⚙ 设置 ▾</button>
+    <button class="btn-ghost" id="btnSettings">设置 ▾</button>
     <div class="settings-menu" id="settingsMenu">
-      <button class="sm-item" data-act="app">🖥 应用与工作区</button>
+      <button class="sm-item" data-act="app">应用与工作区</button>
       <button class="sm-item" data-act="model" id="smModel"><span class="llm-dot" id="llmDot"></span>模型设置</button>
       <button class="sm-item" data-act="inflight" id="smInflight"
               title="同时执行的用例上限，点开可改（1–20）">
-        <span>⚡ 并发数</span>
+        <span>并发数</span>
         <b class="sm-val" id="smInflightVal">5</b>
       </button>
       <button class="sm-item" data-act="autoclick" id="smAutoClick"
               title="开启后，平台会替你点击确认卡片、作答选项卡（拒绝/取消类按钮永不点）">
-        <span>⚡ 自动点击确认</span>
+        <span>自动点击确认</span>
         <span class="sw" id="swAutoClick"><i></i></span>
       </button>
       <div class="im-panel" id="inflightPanel">
@@ -81,16 +70,8 @@
         <div class="im-ft">1 = 一条跑完再跑下一条</div>
       </div>
     </div>
-    <span class="q" data-tip="设置二级菜单：
-- 应用与工作区：被测应用路径 / 会话日志目录 / 用户工作区目录，
-  每个路径旁的 📁 按钮可在访达（macOS）/ 资源管理器（Windows）中打开当前生效路径
-- 模型设置：供应商地址与 API Key（用于质量评估）
-- 自动点击确认：替你点确认卡片、作答选项卡，只对下次运行生效
-- 并发数：同时执行的用例上限
-工作区内含预设用例、附件库、轮次归档与 config.yaml。">?</span>
   </span>
-  <button class="btn-run" id="btnRun" title="顺序执行「本轮要跑的」全部用例">▶ 运行测试</button>
-  <button class="btn-stop" id="btnStop" style="display:none" title="终止当前测试（本轮不产出报告）">■ 终止测试</button>
+  <button class="btn-stop" id="btnStop" style="display:none" title="终止当前测试（本轮不产出报告）">终止测试</button>
 </div></header>
 
 <!-- ============ 首页：运行台（只有运行日志 + 当前用例） ============ -->
@@ -105,7 +86,7 @@
       <button class="console-btn" id="btnConsoleH" title="点击循环切换高度（140px / 240px / 450px）">210px</button>
       <button class="console-btn" id="btnConsole" title="收起或展开运行日志">收起</button>
     </div>
-    <div class="console" id="console"><span class="ln-none">暂无日志。点右上角的「▶ 运行测试」后，这里会实时显示每一步的输出。</span></div>
+    <div class="console" id="console"><span class="ln-none">暂无日志。到「测试用例 → 本轮要跑的」右下角点「运行测试」后，这里会实时显示每一步的输出。</span></div>
     <div class="console-resizer" id="consoleResizer" title="按住拖拽调整高度，双击重置默认高度">
       <span class="resizer-bar"></span>
     </div>
@@ -134,6 +115,7 @@
     <div id="paneLib">
       <div class="lib-bar">
         <input class="lib-kw" id="libKw" placeholder="搜索提问 / 名称 / 编号（回车即查）"/>
+        <span class="fhint" id="libMsg"></span>
         <div class="spacer"></div>
         <button class="btn-ghost" id="btnLibImport"
                 title="从 Excel（.xlsx / .xlsm）或 CSV 批量导入用例">📄 从 Excel 导入</button>
@@ -142,41 +124,25 @@
         <input type="file" id="libFile" accept=".xlsx,.xlsm,.csv,.txt" style="display:none"/>
       </div>
       <div class="lib-filters">
-        <div class="mf-row"><span class="mf-label">场景</span><span id="libScenes" class="chips"></span></div>
-        <div class="mf-row"><span class="mf-label">测试目标</span><span id="libTargets" class="chips"></span></div>
-        <div class="mf-row"><span class="mf-label">附件</span><span id="libAtt" class="chips"></span></div>
-      </div>
-
-      <div class="padd-body" id="paddBody">
-        <div class="padd-card">
-          <div class="fld">
-            <label for="paddPrompt">提问 <span style="color:var(--p0)">*</span></label>
-            <textarea id="paddPrompt" rows="3" placeholder="填入要加入预设的问题原文（必填）…"></textarea>
+        <div class="msel" id="mselScene">
+          <div class="msel-box" id="mselSceneBox" role="button" tabindex="0"
+               aria-haspopup="listbox" aria-expanded="false">
+            <span class="msel-lb">场景</span>
+            <span class="msel-tags" id="mselSceneTags"></span>
+            <span class="msel-caret">▾</span>
           </div>
-          <div class="padd-row">
-            <div class="fld" style="flex:0 0 180px">
-              <label for="paddScene">场景（选填）</label>
-              <input id="paddScene" list="paddScenes" placeholder="如：备课" autocomplete="off"/>
-              <datalist id="paddScenes"></datalist>
-            </div>
-            <div class="fld" style="flex:1 1 260px">
-              <label>测试目标（选填，可多选）</label>
-              <span class="padd-chips" id="paddTargets">
-                <label><input type="checkbox" value="word"/>word</label>
-                <label><input type="checkbox" value="ppt"/>ppt</label>
-                <label><input type="checkbox" value="html"/>html</label>
-                <label><input type="checkbox" value="pdf"/>pdf</label>
-                <label><input type="checkbox" value="excel"/>excel</label>
-                <label><input type="checkbox" value="network"/>network</label>
-              </span>
-            </div>
-            <div class="fld" style="flex:0 0 auto;margin-left:auto">
-              <label>&nbsp;</label>
-              <button class="btn-primary" id="paddOk">保存为新预设</button>
-            </div>
-          </div>
-          <div class="fhint" id="paddMsg"></div>
+          <div class="msel-pop" id="mselScenePop" role="listbox" aria-multiselectable="true" hidden></div>
         </div>
+        <div class="msel" id="mselTarget">
+          <div class="msel-box" id="mselTargetBox" role="button" tabindex="0"
+               aria-haspopup="listbox" aria-expanded="false">
+            <span class="msel-lb">测试目标</span>
+            <span class="msel-tags" id="mselTargetTags"></span>
+            <span class="msel-caret">▾</span>
+          </div>
+          <div class="msel-pop" id="mselTargetPop" role="listbox" aria-multiselectable="true" hidden></div>
+        </div>
+        <label class="msel-check"><input type="checkbox" id="libAtt"/><span id="libAttText"></span></label>
       </div>
 
       <div class="lib-table" id="libTable"></div>
@@ -208,6 +174,9 @@
       </div>
       <div id="caseRows"></div>
       <div class="hint" id="caseHint">队列还是空的。到「预设用例库」勾选用例后点「加入本轮」，或直接「+ 添加一行」。</div>
+      <div class="queue-ft">
+        <button class="btn-run" id="btnRun" title="顺序执行「本轮要跑的」全部用例">运行测试</button>
+      </div>
     </div>
   </div>
 </div>
@@ -270,7 +239,10 @@
 <section class="page" id="pageNotify" hidden>
 <div class="wrap nf-wrap">
   <div class="nf-card">
-    <h3 class="sec">发送通知<span class="nf-sub">把消息直接发送到钉钉群</span></h3>
+    <h3 class="sec">发送通知<span class="nf-sub">把消息直接发送到钉钉群</span>
+      <button class="nf-gear" id="btnNotifyCfg" type="button"
+              title="配置群机器人" aria-label="配置群机器人">⚙</button>
+    </h3>
 
     <!-- 收件人 -->
     <div class="nf-block">
@@ -304,7 +276,7 @@
     <div class="nf-foot">
       <select id="notifyTpl" title="选择预设模板，内容会填入上方输入框"></select>
       <button class="btn-ghost" id="btnTplManage" title="重命名 / 删除预设模板">管理</button>
-      <span class="fhint nf-foot-hint">机器人与密钥写在服务端，消息发出后无法撤回</span>
+      <span class="fhint nf-foot-hint">群机器人在齿轮里配置；消息发出后无法撤回</span>
       <span class="spacer"></span>
       <button class="btn-primary" id="btnNotifySend" disabled>发送</button>
     </div>
@@ -335,22 +307,6 @@
       <span class="mcount" id="impxCount"></span>
       <button class="btn-ghost" id="impxCancel">取消</button>
       <button class="btn-primary" id="impxOk">加入用例库</button>
-    </div>
-  </div>
-</div>
-
-<!-- ============ 附件库弹窗（为某条用例挑选已上传的附件） ============ -->
-<div class="modal-mask" id="libMask">
-  <div class="modal lib-modal" role="dialog" aria-label="附件库">
-    <div class="modal-hd">
-      <h3>附件库</h3>
-      <span class="msub" id="libSub"></span>
-      <button class="mclose" id="libClose" title="关闭">✕</button>
-    </div>
-    <div class="modal-list" id="libList"></div>
-    <div class="modal-ft">
-      <span class="mcount" id="libCount"></span>
-      <button class="btn-primary" id="libDone">完成</button>
     </div>
   </div>
 </div>
@@ -453,8 +409,8 @@
 <div class="modal-mask" id="notifyMask">
   <div class="modal llm-modal" role="dialog" aria-label="确认发送到正式群">
     <div class="modal-hd">
-      <h3>确认发送到正式群</h3>
-      <span class="msub">消息将直接发到正式群，所有成员可见</span>
+      <h3 id="notifyConfirmTitle">确认发送到正式群</h3>
+      <span class="msub" id="notifyConfirmSub">消息将直接发到正式群，所有成员可见</span>
       <button class="mclose" id="notifyClose" title="关闭">✕</button>
     </div>
     <div class="llm-body">
@@ -508,6 +464,102 @@
     <div class="modal-ft">
       <span class="mcount"></span>
       <button class="btn-ghost" id="nfManageDone">关闭</button>
+    </div>
+  </div>
+</div>
+
+<!-- ============ 新增用例对话框 ============ -->
+<div class="modal-mask" id="caseAddMask">
+  <div class="modal case-add-modal" role="dialog" aria-modal="true" aria-labelledby="caseAddTitle">
+    <div class="modal-hd">
+      <h3 id="caseAddTitle">新增用例</h3>
+      <button class="mclose" id="caseAddClose" title="关闭">✕</button>
+    </div>
+    <div class="case-add-body">
+      <div class="ca-row">
+        <div class="fld">
+          <label for="caName">用例名称</label>
+          <input id="caName" autocomplete="off" spellcheck="false" placeholder="留空自动编号"/>
+        </div>
+        <div class="fld">
+          <label for="caScene">场景</label>
+          <input id="caScene" list="caScenes" autocomplete="off" placeholder="如：备课"/>
+          <datalist id="caScenes"></datalist>
+        </div>
+      </div>
+
+      <div class="fld">
+        <label>测试目标</label>
+        <span class="ca-chips" id="caTargets">
+          <label><input type="checkbox" value="word"/>word</label>
+          <label><input type="checkbox" value="ppt"/>ppt</label>
+          <label><input type="checkbox" value="html"/>html</label>
+          <label><input type="checkbox" value="pdf"/>pdf</label>
+          <label><input type="checkbox" value="excel"/>excel</label>
+          <label><input type="checkbox" value="network"/>network</label>
+        </span>
+      </div>
+
+      <div class="fld">
+        <label>附件</label>
+        <div class="ca-att-bar">
+          <button type="button" class="cl-att" id="caAttPick">上传附件</button>
+          <button type="button" class="cl-att" id="caAttLib">从附件库选</button>
+          <input type="file" multiple style="display:none" id="caAttFile"/>
+        </div>
+        <div class="cl-tags" id="caAtts"></div>
+      </div>
+
+      <div class="fld">
+        <label for="caPrompt">提问 <span style="color:var(--p0)">*</span></label>
+        <textarea id="caPrompt" rows="4" placeholder="填入要存档、要发给被测应用的问题原文（必填）"></textarea>
+      </div>
+    </div>
+    <div class="modal-ft">
+      <span class="mcount fhint err" id="caHint" hidden></span>
+      <button class="btn-ghost" id="caseAddCancel">取消</button>
+      <button class="btn-primary" id="caseAddOk">保存</button>
+    </div>
+  </div>
+</div>
+
+<!-- ============ 附件库弹窗（为队列用例或新增用例挑选已上传的附件） ============
+     必须排在 #caseAddMask 之后：两者 z-index 相同，叠放顺序由 DOM 顺序决定，
+     放在前面会被新增用例对话框盖住。 -->
+<div class="modal-mask" id="libMask">
+  <div class="modal lib-modal" role="dialog" aria-label="附件库">
+    <div class="modal-hd">
+      <h3>附件库</h3>
+      <span class="msub" id="libSub"></span>
+      <button class="mclose" id="libClose" title="关闭">✕</button>
+    </div>
+    <div class="modal-list" id="libList"></div>
+    <div class="modal-ft">
+      <span class="mcount" id="libCount"></span>
+      <button class="btn-primary" id="libDone">完成</button>
+    </div>
+  </div>
+</div>
+
+<!-- ============ 群机器人配置弹窗（发送通知页的齿轮） ============
+     列表由 JS 渲染（可增删群），这里只留外壳。 -->
+<div class="modal-mask" id="notifyCfgMask">
+  <div class="modal llm-modal" role="dialog" aria-modal="true" aria-labelledby="nfCfgTitle">
+    <div class="modal-hd">
+      <h3 id="nfCfgTitle">群机器人</h3>
+      <span class="msub" id="nfCfgSub"></span>
+      <button class="mclose" id="nfCfgClose" title="关闭">✕</button>
+    </div>
+    <div class="llm-body">
+      <div class="nf-cfg-list" id="nfCfgList"></div>
+      <button class="btn-ghost nf-cfg-add" id="nfCfgAdd" type="button">＋ 添加群</button>
+      <span class="fhint">Token 与加签密钥留空表示不改动已保存的值；不填加签密钥则按「自定义关键词」方式发送</span>
+    </div>
+    <div class="modal-ft">
+      <span class="mcount fhint err" id="nfCfgHint" hidden></span>
+      <button class="btn-ghost" id="nfCfgReset" title="清空自定义配置，回到内置的正式群 / 测试群">恢复默认</button>
+      <button class="btn-ghost" id="nfCfgCancel">取消</button>
+      <button class="btn-primary" id="nfCfgSave">保存</button>
     </div>
   </div>
 </div>

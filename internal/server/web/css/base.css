@@ -68,10 +68,9 @@ button:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
 
 /* ---------- 徽章 ---------- */
 .badge{display:inline-block;padding:1px 9px;border-radius:20px;font-size:11px;font-weight:600;line-height:18px}
-.b-run{background:#dbeafe;color:#1d4ed8}
 .b-idle{background:#f1f5f9;color:#64748b}
 .b-ok,.b-pass{background:#dcfce7;color:#15803d}
-.b-err,.b-fail{background:#fee2e2;color:#b91c1c}
+.b-fail{background:#fee2e2;color:#b91c1c}
 .b-uifail{background:#ffedd5;color:#c2410c}
 .badge.b-approx{background:#fef3c7;color:#b45309;font-weight:500;cursor:help}
 

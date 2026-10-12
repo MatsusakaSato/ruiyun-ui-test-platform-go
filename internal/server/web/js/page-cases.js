@@ -56,12 +56,35 @@ export function closeLib() {
   state.LIB_FOR = -1;
 }
 
+// 附件库弹窗当前服务的附件列表：数字 = 队列行序号，'caseadd' = 新增用例对话框。
+// 两处的附件都存成 { name, path, size }，对话框那份是待保存的暂存区。
+function attsFor(target) {
+  if (target === 'caseadd') {
+    if (!state.CA_ATTS) state.CA_ATTS = [];
+    return state.CA_ATTS;
+  }
+  const c = state.CASES[target];
+  if (!c) return null;
+  if (!c.attachments) c.attachments = [];
+  return c.attachments;
+}
+
+// 预设库里存的是绝对路径数组，队列里要的是 { name, path }，文件名取路径末段
+function attsFromPaths(list) {
+  return (list || []).map(p => {
+    const s = String(p);
+    return { name: s.split(/[\\/]/).pop() || s, path: s };
+  });
+}
+
 export function renderLib() {
-  const c = state.CASES[state.LIB_FOR];
-  if (!c) { closeLib(); return; }
-  const used = new Set((c.attachments || []).map(a => a.path));
+  const atts = attsFor(state.LIB_FOR);
+  if (!atts) { closeLib(); return; }
+  const isCa = state.LIB_FOR === 'caseadd';
+  const used = new Set(atts.map(a => a.path));
   const sub = $('libSub');
-  if (sub) sub.textContent = `第 ${state.LIB_FOR + 1} 条用例 · 库中 ${state.UPLOADS.length} 个文件`;
+  if (sub) sub.textContent = (isCa ? '新增用例' : `第 ${state.LIB_FOR + 1} 条用例`)
+    + ` · 库中 ${state.UPLOADS.length} 个文件`;
 
   const list = $('libList');
   if (list) {
@@ -75,19 +98,25 @@ export function renderLib() {
             + `<span class="lib-del" data-path="${esc(f.path)}" title="从附件库删除（不可撤销）">删除</span>`
             + `<span class="lib-add">${on ? '已引用' : '+ 添加'}</span></div></div>`;
         }).join('')
-      : '<div class="modal-empty">附件库为空：关闭后点用例行的「📎 附件」上传</div>';
+      : '<div class="modal-empty">附件库为空：先点「上传附件」传一个</div>';
   }
   const count = $('libCount');
-  if (count) count.textContent = `本用例已引用 ${used.size} 个附件 · 点击行即加入`;
+  if (count) count.textContent = (isCa ? '已选' : '本用例已引用')
+    + ` ${used.size} 个附件 · 点击行即加入`;
 }
 
 export function addFromLib(i, k) {
   const f = state.UPLOADS[k];
-  if (!f || !state.CASES[i]) return;
-  if (!state.CASES[i].attachments) state.CASES[i].attachments = [];
-  if (state.CASES[i].attachments.some(a => a.path === f.path)) return;
-  state.CASES[i].attachments.push({ name: f.name, path: f.path, size: f.size });
-  renderCases();
+  const atts = attsFor(i);
+  if (!f || !atts) return;
+  if (atts.some(a => a.path === f.path)) return;
+  if (i === 'caseadd' && atts.length >= state.CA_ATT_MAX) {
+    caseAddHint(`附件最多 ${state.CA_ATT_MAX} 个`);
+    return;
+  }
+  atts.push({ name: f.name, path: f.path, size: f.size });
+  if (i === 'caseadd') renderCaAtts();
+  else renderCases();
   renderLib();
 }
 
@@ -104,7 +133,9 @@ export async function delUpload(p) {
     if (!j.ok) { alert('删除失败：' + (j.message || '未知错误')); return; }
     state.UPLOADS = state.UPLOADS.filter(f => f.path !== p);
     state.CASES.forEach(c => { c.attachments = (c.attachments || []).filter(a => a.path !== p); });
+    state.CA_ATTS = (state.CA_ATTS || []).filter(a => a.path !== p);
     renderLib();
+    renderCaAtts();
     renderCases();
   } catch (e) {
     alert('请求失败：' + e.message);
@@ -174,13 +205,16 @@ export async function savePreset(i) {
   if (btn) btn.disabled = true;
   try {
     const labels = c.labels || {};
+    // 队列里已经挂好的附件要一并入库，否则存成预设后附件就丢了
+    const attachments = (c.attachments || []).map(a => a.path);
     const body = {
       action: 'add', prompt,
       labels: {
         scene: labels.scene || '',
         targets: labels.targets || [],
-        attachment: labels.attachment === true
-      }
+        attachment: labels.attachment === true || attachments.length > 0
+      },
+      attachments
     };
     const r = await fetch('/api/preset-cases', {
       method: 'POST',
@@ -196,7 +230,7 @@ export async function savePreset(i) {
       setTimeout(() => { btn.textContent = '☆ 存为预设'; btn.classList.remove('saved'); }, 2200);
     }
     state.LIB.keyword = '';
-    state.LIB.scene = '';
+    state.LIB.scenes = [];
     state.LIB.targets = [];
     state.LIB.attachment = '';
     state.LIB.offset = 0;
@@ -276,36 +310,129 @@ export const libSelTags = c => {
   let out = '';
   if (L.scene) out += `<span class="tag t-scene">${esc(L.scene)}</span>`;
   for (const t of (L.targets || [])) out += `<span class="tag">${esc(t)}</span>`;
-  if (L.attachment === true) out += '<span class="tag t-att">需附件</span>';
+  if (L.attachment === true) {
+    // 附件名塞在 data-atts 里，hover 时由 showAttTip 读出来浮个气泡
+    // （Excel 导入的老数据可能只标记了「要附件」却没记路径，那时 data-atts 为空）
+    const names = attsFromPaths(c.attachments).map(a => a.name);
+    out += `<span class="tag tag-att" data-atts="${esc(names.join('\n'))}">附件</span>`;
+  }
   return out;
 };
 
-export function chipHtml(group, listItems, val, text) {
-  const on = Array.isArray(val) ? val.includes(listItems) : (val === listItems);
-  return `<span class="chip-c${on ? ' active' : ''}" data-g="${group}" data-v="${esc(listItems)}">${esc(text)}</span>`;
+/* 附件标签的悬停气泡。
+   预设库表格是 .lib-table（overflow:auto）的滚动容器，纯 CSS 的 ::after 气泡会被容器裁掉，
+   所以气泡挂在 body 上用 fixed 定位，跟着标签的 rect 走。 */
+function hideAttTip() {
+  document.getElementById('attTip')?.remove();
 }
 
+function showAttTip(anchor) {
+  hideAttTip();
+  const names = anchor.dataset.atts || '';
+  const el = document.createElement('div');
+  el.id = 'attTip';
+  el.className = 'att-tip' + (names ? '' : ' muted');
+  el.textContent = names || '未记录文件名';
+  document.body.appendChild(el);
+
+  const r = anchor.getBoundingClientRect();
+  const w = el.offsetWidth;
+  const h = el.offsetHeight;
+  // 默认贴标签下方；下方放不下就翻到上方，两侧再夹一下别溢出视口
+  const below = r.bottom + 7;
+  const top = below + h <= window.innerHeight - 6 ? below : r.top - 7 - h;
+  el.style.top = Math.round(Math.max(6, Math.min(top, window.innerHeight - h - 6))) + 'px';
+  el.style.left = Math.round(Math.max(6, Math.min(r.left, window.innerWidth - w - 8))) + 'px';
+}
+
+/* ---------- 筛选控件：多选下拉 + 附件复选框 ----------
+   两个多选下拉共用一份渲染与交互逻辑。渲染时只替换「已选 tag 条」与「选项列表」两块
+   内部内容，不重建 .msel 外壳 —— 面板的展开状态（pop 的 hidden）不受列表刷新影响，
+   所以勾选一项触发查询后，面板仍是打开的，可以继续勾下一项。
+   可选值来自服务端返回的 state.LIB_SCENES / state.LIB_TARGETS（库中已有的去重标签）。 */
+const MSEL = {
+  scene: { wrap: 'mselScene', box: 'mselSceneBox', tags: 'mselSceneTags', pop: 'mselScenePop', list: 'LIB_SCENES', picked: 'scenes' },
+  target: { wrap: 'mselTarget', box: 'mselTargetBox', tags: 'mselTargetTags', pop: 'mselTargetPop', list: 'LIB_TARGETS', picked: 'targets' }
+};
+
+// 附件筛选三态循环：不限（''）→ 需要附件（yes）→ 不需要附件（no）
+// 底层值与原「需附件 / 不需附件」两个 chip 完全一致，'' 就是原来的「不筛此项」。
+// 文案自带「附件」二字（界面上不再有独立的「附件」标签）。
+const ATT_NEXT = { '': 'yes', yes: 'no', no: '' };
+const ATT_TEXT = { '': '不限附件', yes: '需要附件', no: '不需要附件' };
+
 export function renderLibFilters() {
-  const scenesEl = $('libScenes');
-  if (scenesEl) {
-    scenesEl.innerHTML = state.LIB_SCENES.length
-      ? state.LIB_SCENES.map(s => chipHtml('scene', s, state.LIB.scene, s)).join('')
-      : '<span class="fhint">库里还没有场景标签</span>';
+  for (const key of Object.keys(MSEL)) renderMsel(key);
+  renderAttFilter();
+}
+
+function renderMsel(key) {
+  const m = MSEL[key];
+  const picked = state.LIB[m.picked];
+  const tagsEl = $(m.tags);
+  if (tagsEl) {
+    // 未选时不占位：字段名（场景 / 测试目标）在 .msel-box 里常驻，本身即提示
+    tagsEl.innerHTML = picked.length
+      ? picked.map(v => `<span class="msel-tag">${esc(v)}`
+          + `<b class="msel-x" data-v="${esc(v)}" title="移除">×</b></span>`).join('')
+      : '';
   }
-  const targetsEl = $('libTargets');
-  if (targetsEl) {
-    targetsEl.innerHTML = state.LIB_TARGETS.length
-      ? state.LIB_TARGETS.map(t => chipHtml('target', t, state.LIB.targets, t)).join('')
-      : '<span class="fhint">还没有测试目标标签</span>';
+  const popEl = $(m.pop);
+  if (popEl) {
+    const opts = state[m.list] || [];
+    popEl.innerHTML = opts.length
+      ? opts.map(v => `<div class="msel-opt${picked.includes(v) ? ' on' : ''}" data-v="${esc(v)}" tabindex="0">`
+          + `<input type="checkbox" tabindex="-1" ${picked.includes(v) ? 'checked' : ''}/>`
+          + `<span>${esc(v)}</span></div>`).join('')
+      : '<div class="msel-none">无可选项</div>';
   }
-  const attEl = $('libAtt');
-  if (attEl) {
-    attEl.innerHTML = chipHtml('att', 'yes', state.LIB.attachment, '需附件')
-      + chipHtml('att', 'no', state.LIB.attachment, '不需附件');
+}
+
+function renderAttFilter() {
+  const cur = ATT_TEXT[state.LIB.attachment] ? state.LIB.attachment : '';
+  const txt = $('libAttText');
+  if (txt) txt.textContent = ATT_TEXT[cur];
+  const box = $('libAtt');
+  if (box) {
+    box.checked = cur === 'yes';
+    box.indeterminate = cur === '';
   }
+}
+
+function closeMsels() {
+  for (const key of Object.keys(MSEL)) {
+    const m = MSEL[key];
+    const pop = $(m.pop);
+    if (pop) pop.hidden = true;
+    $(m.wrap)?.classList.remove('open');
+    $(m.box)?.setAttribute('aria-expanded', 'false');
+  }
+}
+
+function toggleMsel(key) {
+  const m = MSEL[key];
+  const pop = $(m.pop);
+  if (!pop) return;
+  const open = pop.hidden;
+  closeMsels();
+  if (open) {
+    pop.hidden = false;
+    $(m.wrap)?.classList.add('open');
+    $(m.box)?.setAttribute('aria-expanded', 'true');
+  }
+}
+
+// 勾选 / 取消勾选一个可选值：改状态 → 只重绘这一个控件 → 重新查询（页码归零、清空所选）
+function pickMsel(key, v) {
+  const m = MSEL[key];
+  const cur = state.LIB[m.picked];
+  state.LIB[m.picked] = cur.includes(v) ? cur.filter(x => x !== v) : cur.concat(v);
+  renderMsel(key);
+  libQuery(true);
 }
 
 export function renderLibTable() {
+  hideAttTip();   // 整块重渲染会把标签换掉，气泡留着就成孤儿了
   const rows = state.LIB_ROWS;
   const tbl = $('libTable');
   if (tbl) {
@@ -360,11 +487,14 @@ export function syncLibSel() {
 }
 
 export async function loadPresetLib() {
+  // 筛选条件与后端 GET /api/preset-cases 的参数一一对应：
+  //   scene / targets 多个值用英文逗号拼接（单个值时与改造前的格式完全一致），空串表示不限
+  //   attachment 取 '' / 'yes' / 'no'
   const q = new URLSearchParams({
     limit: state.LIB_LIMIT,
     offset: state.LIB.offset,
     keyword: state.LIB.keyword,
-    scene: state.LIB.scene,
+    scene: state.LIB.scenes.join(','),
     targets: state.LIB.targets.join(','),
     attachment: state.LIB.attachment
   });
@@ -376,9 +506,9 @@ export async function loadPresetLib() {
     state.LIB_TARGETS = j.targets || [];
     state.PSEL = new Set([...state.PSEL].filter(id => state.LIB_ROWS.some(c => c.id === id)));
 
-    const paddScenes = $('paddScenes');
-    if (paddScenes) {
-      paddScenes.innerHTML = state.LIB_SCENES.map(s => `<option value="${esc(s)}"/>`).join('');
+    const caScenesEl = $('caScenes');
+    if (caScenesEl) {
+      caScenesEl.innerHTML = state.LIB_SCENES.map(s => `<option value="${esc(s)}"/>`).join('');
     }
     renderLibFilters();
     renderLibTable();
@@ -410,6 +540,167 @@ export async function delPresetOne(id) {
   } catch (e) {
     alert('请求失败：' + e.message);
   }
+}
+
+/* ---------- 新增用例对话框 ---------- */
+
+/* ---- 附件：上传到本机附件库，入库存的是落盘后的绝对路径 ---- */
+
+export function pickCaAttach() {
+  const el = $('caAttFile');
+  if (el) el.click();
+}
+
+export function renderCaAtts() {
+  const box = $('caAtts');
+  if (!box) return;
+  box.innerHTML = (state.CA_ATTS || []).map((a, j) =>
+    `<span class="tag t-att" title="${esc(a.path)}">${esc(a.name)}`
+    + `<b class="tag-x" onclick="rmCaAttach(${j})" title="移除该附件">×</b></span>`).join('');
+}
+
+export function rmCaAttach(j) {
+  (state.CA_ATTS || []).splice(j, 1);
+  renderCaAtts();
+}
+
+// 逐个上传到本机附件库；失败的文件只提示、不回滚已成功的，超出上限的直接忽略
+export async function uploadCaFiles(files) {
+  const arr = [...files];
+  if (!arr.length) return;
+  const atts = attsFor('caseadd');
+  const take = arr.slice(0, Math.max(state.CA_ATT_MAX - atts.length, 0));
+  const fails = [];
+  for (const f of take) {
+    try {
+      const b64 = await fileToBase64(f);
+      const r = await fetch('/api/upload', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ name: f.name, data_base64: b64 })
+      });
+      const j = await r.json().catch(() => ({ ok: false, message: '响应解析失败' }));
+      if (j.ok) atts.push({ name: j.name, path: j.path, size: j.size });
+      else fails.push(`${f.name}：${j.message || '上传失败'}`);
+    } catch (e) {
+      fails.push(`${f.name}：${e.message}`);
+    }
+  }
+  const overflow = arr.length - take.length;
+  await loadUploads();
+  renderCaAtts();
+  renderCases();
+  const msgs = [];
+  if (fails.length) msgs.push(`上传失败 —— ${fails.join('；')}`);
+  if (overflow > 0) msgs.push(`最多 ${state.CA_ATT_MAX} 个附件，已忽略 ${overflow} 个`);
+  caseAddHint(msgs.join(' · '));
+}
+
+export function openCaseAdd() {
+  const mask = $('caseAddMask');
+  if (!mask) return;
+  if ($('caName')) $('caName').value = '';
+  if ($('caScene')) $('caScene').value = '';
+  if ($('caPrompt')) $('caPrompt').value = '';
+  state.CA_ATTS = [];
+  renderCaAtts();
+  const caFile = $('caAttFile');
+  if (caFile) caFile.value = '';
+  $('caTargets')?.querySelectorAll('input').forEach(i => { i.checked = false; });
+  clearCaseAddHint();
+  mask.classList.add('on');
+  $('caPrompt')?.focus();
+}
+
+export function closeCaseAdd() {
+  $('caseAddMask')?.classList.remove('on');
+  clearCaseAddHint();
+}
+
+// 对话框底部的提示位：一条短句，空串即隐藏
+function caseAddHint(text) {
+  const el = $('caHint');
+  if (!el) return;
+  el.textContent = text || '';
+  el.hidden = !text;
+}
+
+function clearCaseAddHint() {
+  caseAddHint('');
+  $('caPrompt')?.closest('.fld')?.classList.remove('err');
+}
+
+async function submitCaseAdd() {
+  const promptEl = $('caPrompt');
+  const prompt = (promptEl?.value || '').trim();
+  if (!prompt) {
+    caseAddHint('提问不能为空');
+    promptEl?.closest('.fld')?.classList.add('err');
+    promptEl?.focus();
+    return;
+  }
+  promptEl.closest('.fld')?.classList.remove('err');
+
+  const name = ($('caName')?.value || '').trim();
+  const scene = ($('caScene')?.value || '').trim();
+  const targets = [...($('caTargets')?.querySelectorAll('input:checked') || [])].map(i => i.value);
+  // 附件以本机绝对路径数组入库；服务端还会逐个 os.Stat，不存在的剔除后回传 skipped_attachments
+  const attachments = (state.CA_ATTS || []).map(a => a.path);
+  // 「需要附件」不再手填：挂了附件就是需要，没挂就是不需要
+  const attachment = attachments.length > 0;
+
+  const okBtn = $('caseAddOk');
+  if (okBtn) okBtn.disabled = true;
+  caseAddHint('保存中…');
+  try {
+    const r = await fetch('/api/preset-cases', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        action: 'add', name, prompt,
+        labels: { scene, targets, attachment },
+        attachments
+      })
+    });
+    const j = await r.json().catch(() => ({ ok: false, message: '响应解析失败' }));
+    if (!j.ok) {
+      // 服务端校验（如重复用例）留在对话框里提示，不关窗、不清空输入
+      caseAddHint(j.message || '保存失败');
+      return;
+    }
+    const skipped = (j.skipped_attachments || []).length;
+    closeCaseAdd();
+
+    // 重置筛选条件与搜索关键字，确保新增用例直接在第一行立即可见，不被既有过滤条件隐藏
+    state.LIB.keyword = '';
+    state.LIB.scenes = [];
+    state.LIB.targets = [];
+    state.LIB.attachment = '';
+    state.LIB.offset = 0;
+    const kwEl = $('libKw');
+    if (kwEl) kwEl.value = '';
+
+    await loadPresetLib();
+    flashAddedCase(j.case && j.case.id);
+    if (skipped) {
+      const m = $('libMsg');
+      if (m) m.textContent = `已跳过 ${skipped} 个不存在的附件`;
+    }
+  } catch (e) {
+    caseAddHint('请求失败：' + e.message);
+  } finally {
+    if (okBtn) okBtn.disabled = false;
+  }
+}
+
+// 新增成功后高亮并滚动到这一行
+function flashAddedCase(id) {
+  if (!id) return;
+  const row = document.querySelector(`tr[data-id="${id}"]`);
+  if (!row) return;
+  row.classList.add('just-added');
+  row.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+  setTimeout(() => row.classList.remove('just-added'), 3000);
 }
 
 /* ---------- 注册事件 ---------- */
@@ -495,38 +786,60 @@ export function initCases() {
     });
   }
 
-  const libScenes = $('libScenes');
-  if (libScenes) {
-    libScenes.onclick = e => {
-      const el = e.target.closest('.chip-c');
-      if (!el) return;
-      state.LIB.scene = (state.LIB.scene === el.dataset.v) ? '' : el.dataset.v;
-      libQuery(true);
-    };
+  /* ---- 筛选：场景 / 测试目标（多选下拉）----
+     点触发器开合面板；点选项勾选/取消；点已选项上的 × 删除该值；Esc 或点面板外收起。
+     面板内的点击一律 stopPropagation：勾选会就地重绘选项/标签，被点的节点随即脱离 DOM，
+     放任事件冒泡到 document 会让「点外收起」的判定认不出它来自面板，从而误收起面板。 */
+  for (const key of Object.keys(MSEL)) {
+    const m = MSEL[key];
+    const box = $(m.box);
+    if (box) {
+      box.onclick = e => {
+        e.stopPropagation();
+        const x = e.target.closest('.msel-x');
+        if (x) { pickMsel(key, x.dataset.v); return; }
+        toggleMsel(key);
+      };
+      box.onkeydown = e => {
+        if (e.key !== 'Enter' && e.key !== ' ') return;
+        e.preventDefault();
+        toggleMsel(key);
+      };
+    }
+    const pop = $(m.pop);
+    if (pop) {
+      pop.onclick = e => {
+        e.stopPropagation();
+        const row = e.target.closest('.msel-opt');
+        if (!row) return;
+        pickMsel(key, row.dataset.v);
+      };
+      pop.onkeydown = e => {
+        if (e.key !== 'Enter' && e.key !== ' ') return;
+        const row = e.target.closest('.msel-opt');
+        if (!row) return;
+        e.preventDefault();
+        pickMsel(key, row.dataset.v);
+      };
+    }
   }
 
-  const libTargets = $('libTargets');
-  if (libTargets) {
-    libTargets.onclick = e => {
-      const el = e.target.closest('.chip-c');
-      if (!el) return;
-      const v = el.dataset.v;
-      state.LIB.targets = state.LIB.targets.includes(v)
-        ? state.LIB.targets.filter(x => x !== v)
-        : state.LIB.targets.concat(v);
-      libQuery(true);
-    };
-  }
-
+  /* ---- 筛选：附件（单个复选框，三态循环）---- */
   const libAtt = $('libAtt');
   if (libAtt) {
-    libAtt.onclick = e => {
-      const el = e.target.closest('.chip-c');
-      if (!el) return;
-      state.LIB.attachment = (state.LIB.attachment === el.dataset.v) ? '' : el.dataset.v;
+    libAtt.onchange = () => {
+      state.LIB.attachment = ATT_NEXT[state.LIB.attachment] || '';
+      renderAttFilter();
       libQuery(true);
     };
   }
+
+  document.addEventListener('click', e => {
+    if (!e.target.closest || !e.target.closest('.msel')) closeMsels();
+  });
+  document.addEventListener('keydown', e => {
+    if (e.key === 'Escape') closeMsels();
+  });
 
   const libPrev = $('libPrev');
   if (libPrev) libPrev.onclick = () => { state.LIB.offset = Math.max(0, state.LIB.offset - state.LIB_LIMIT); loadPresetLib(); };
@@ -562,6 +875,18 @@ export function initCases() {
       if (chk) chk.checked = state.PSEL.has(id);
       syncLibSel();
     };
+
+    // 「附件」标签的悬停气泡：只绑在容器上（表格会整块重渲染，绑行上会随重建丢掉）
+    libTable.addEventListener('mouseover', e => {
+      const t = e.target.closest('.tag-att');
+      if (t) showAttTip(t);
+    });
+    libTable.addEventListener('mouseout', e => {
+      if (e.target.closest('.tag-att')) hideAttTip();
+    });
+    // 表格自己滚动、或页面滚动时标签会移走，气泡不能留在原地
+    libTable.addEventListener('scroll', hideAttTip, true);
+    window.addEventListener('scroll', hideAttTip, true);
   }
 
   const libAll = $('libAll');
@@ -569,21 +894,44 @@ export function initCases() {
   const libNone = $('libNone');
   if (libNone) libNone.onclick = () => { state.PSEL.clear(); renderLibTable(); };
 
+  /* ---- 新增用例对话框：入口、关闭、提交、快捷键 ---- */
   const btnLibAdd = $('btnLibAdd');
-  if (btnLibAdd) {
-    btnLibAdd.onclick = () => {
-      const b = $('paddBody');
-      if (b) {
-        b.classList.toggle('show');
-        if (b.classList.contains('show')) {
-          $('paddPrompt')?.focus();
-        }
+  if (btnLibAdd) btnLibAdd.onclick = openCaseAdd;
+
+  const caseAddClose = $('caseAddClose');
+  if (caseAddClose) caseAddClose.onclick = closeCaseAdd;
+  const caseAddCancel = $('caseAddCancel');
+  if (caseAddCancel) caseAddCancel.onclick = closeCaseAdd;
+
+  const caAttPick = $('caAttPick');
+  if (caAttPick) caAttPick.onclick = pickCaAttach;
+  const caAttLib = $('caAttLib');
+  if (caAttLib) caAttLib.onclick = () => openLib('caseadd');
+  const caAttFile = $('caAttFile');
+  if (caAttFile) caAttFile.onchange = () => { uploadCaFiles(caAttFile.files); caAttFile.value = ''; };
+
+  const caseAddMask = $('caseAddMask');
+  if (caseAddMask) {
+    // 点遮罩空白处关闭（点对话框内部不关）
+    caseAddMask.onclick = e => { if (e.target === e.currentTarget) closeCaseAdd(); };
+    caseAddMask.addEventListener('keydown', e => {
+      if (e.key === 'Escape') {
+        // 附件库叠在对话框之上时，Esc 只关库（放行给全局处理）；
+        // 拦下来会连对话框一起关掉，用户就白填了
+        if ($('libMask')?.classList.contains('on')) return;
+        e.stopPropagation();   // 别让全局 Esc（关附件库）也插一脚
+        closeCaseAdd();
+        return;
       }
-    };
+      // Ctrl/⌘ + 回车 = 保存；单独回车留给 textarea 换行
+      if (e.key !== 'Enter' || e.isComposing || !(e.ctrlKey || e.metaKey)) return;
+      e.preventDefault();
+      submitCaseAdd();
+    });
   }
 
-  const paddBody = $('paddBody');
-  if (paddBody) paddBody.onclick = e => e.stopPropagation();
+  const caseAddOk = $('caseAddOk');
+  if (caseAddOk) caseAddOk.onclick = submitCaseAdd;
 
   const libDel = $('libDel');
   if (libDel) {
@@ -601,79 +949,12 @@ export function initCases() {
         if (!j.ok) { alert('删除失败：' + (j.message || '未知错误')); return; }
         state.PSEL = new Set();
         await loadPresetLib();
-        const pMsg = $('paddMsg');
-        if (pMsg) { pMsg.textContent = '✓ ' + j.message; pMsg.style.color = ''; }
+        const pMsg = $('libMsg');
+        if (pMsg) pMsg.textContent = j.message;
       } catch (e) {
         alert('请求失败：' + e.message);
       }
     };
-  }
-
-  const paddOk = $('paddOk');
-  if (paddOk) {
-    paddOk.onclick = async () => {
-      const prompt = $('paddPrompt')?.value.trim();
-      const msg = $('paddMsg');
-      if (!prompt) {
-        if (msg) { msg.textContent = '提问不能为空'; msg.style.color = '#b91c1c'; }
-        return;
-      }
-      const targets = [...($('paddTargets')?.querySelectorAll('input:checked') || [])].map(i => i.value);
-      const scene = $('paddScene')?.value.trim() || '';
-      paddOk.disabled = true;
-      if (msg) { msg.textContent = '保存中…'; msg.style.color = ''; }
-      try {
-        const r = await fetch('/api/preset-cases', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ action: 'add', prompt, labels: { scene, targets } })
-        });
-        const j = await r.json().catch(() => ({ ok: false, message: '响应解析失败' }));
-        if (!j.ok) {
-          if (msg) { msg.textContent = j.message || '保存失败'; msg.style.color = '#b91c1c'; }
-          return;
-        }
-        if ($('paddPrompt')) $('paddPrompt').value = '';
-        if ($('paddScene')) $('paddScene').value = '';
-        $('paddTargets')?.querySelectorAll('input').forEach(i => { i.checked = false; });
-        if (msg) { msg.textContent = '✓ ' + (j.message || '已成功添加'); msg.style.color = '#059669'; }
-
-        // 重置筛选条件与搜索关键字，确保新增用例直接在第一行立即可见，不被既有过滤条件过滤隐藏
-        state.LIB.keyword = '';
-        state.LIB.scene = '';
-        state.LIB.targets = [];
-        state.LIB.attachment = '';
-        state.LIB.offset = 0;
-        const kwEl = $('libKw');
-        if (kwEl) kwEl.value = '';
-
-        await loadPresetLib();
-
-        // 闪烁高亮新添加的用例行
-        const addedId = j.case && j.case.id;
-        if (addedId) {
-          const row = document.querySelector(`tr[data-id="${addedId}"]`);
-          if (row) {
-            row.classList.add('just-added');
-            row.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
-            setTimeout(() => row.classList.remove('just-added'), 3000);
-          }
-        }
-      } catch (e) {
-        if (msg) { msg.textContent = '请求失败：' + e.message; msg.style.color = '#b91c1c'; }
-      } finally {
-        paddOk.disabled = false;
-      }
-    };
-  }
-
-  const paddPrompt = $('paddPrompt');
-  if (paddPrompt) {
-    paddPrompt.addEventListener('keydown', e => {
-      if (e.key !== 'Enter' || e.isComposing || !(e.ctrlKey || e.metaKey)) return;
-      e.preventDefault();
-      $('paddOk')?.click();
-    });
   }
 
   const libToQueue = $('libToQueue');
@@ -688,7 +969,8 @@ export function initCases() {
         const p = (it.prompt || '').trim();
         if (!p) continue;
         if (have.has(p)) { dup++; continue; }
-        state.CASES.push({ prompt: p, labels: it.labels || {}, attachments: [] });
+        // 预设里存的附件路径要一起带回队列，否则运行时不会投递
+        state.CASES.push({ prompt: p, labels: it.labels || {}, attachments: attsFromPaths(it.attachments) });
         have.add(p);
       }
       renderCases();
@@ -697,7 +979,7 @@ export function initCases() {
       if (msg) {
         msg.className = 'hint';
         msg.textContent = `已加入本轮：共 ${state.CASES.filter(c => c.prompt.trim()).length} 条`
-          + (dup ? `（跳过 ${dup} 条重复提问）` : '') + '。到「首页」点「▶ 运行测试」即可开始。';
+          + (dup ? `（跳过 ${dup} 条重复提问）` : '') + '。点右下角「运行测试」即可开始。';
       }
     };
   }

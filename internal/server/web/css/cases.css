@@ -12,8 +12,39 @@
   font-size:12.5px;font-family:inherit;color:var(--tx)}
 .lib-kw:focus{outline:none;border-color:var(--accent)}
 
-.lib-filters{display:flex;flex-direction:column;gap:7px;margin-top:9px}
-.chips{display:flex;gap:5px;flex-wrap:wrap;align-items:center;min-height:20px}
+/* 三组筛选横向一排；窄窗口自动折行（下拉面板是绝对定位，折行不影响展开） */
+.lib-filters{display:flex;align-items:center;gap:10px 20px;flex-wrap:wrap;margin-top:9px}
+.lib-filters>*{flex:0 0 auto}
+
+/* ---------- 筛选：多选下拉（场景 / 测试目标） ---------- */
+.msel{position:relative;display:inline-block;min-width:172px;max-width:460px}
+.msel-box{display:flex;align-items:center;gap:6px;min-height:28px;padding:3px 9px;
+  border:1px solid var(--line);border-radius:8px;background:#fff;cursor:pointer;
+  font-size:12px;color:var(--tx);transition:border-color .15s,box-shadow .15s}
+.msel-box:hover{border-color:#c7d2fe}
+.msel.open .msel-box{border-color:var(--accent);box-shadow:var(--ring)}
+.msel-lb{flex-shrink:0;font-size:11.5px;color:var(--tx3)}
+.msel-tags{display:flex;flex:1;min-width:0;flex-wrap:wrap;gap:4px;align-items:center}
+.msel-tag{display:inline-flex;align-items:center;gap:3px;font-size:11.5px;font-weight:500;
+  color:var(--accent);background:#eff6ff;border:1px solid #bfdbfe;border-radius:6px;
+  padding:1px 5px;white-space:nowrap}
+.msel-x{font-style:normal;font-weight:700;line-height:1;color:var(--tx3);cursor:pointer}
+.msel-x:hover{color:var(--p0)}
+.msel-caret{margin-left:auto;flex-shrink:0;font-size:10px;color:var(--tx3)}
+.msel-pop{position:absolute;left:0;top:calc(100% + 4px);z-index:30;min-width:100%;max-height:238px;
+  overflow:auto;padding:4px;background:#fff;border:1px solid var(--line);border-radius:10px;
+  box-shadow:var(--shadow-pop)}
+.msel-pop[hidden]{display:none}
+.msel-opt{display:flex;align-items:center;gap:6px;padding:5px 8px;border-radius:7px;
+  font-size:12px;color:var(--tx2);cursor:pointer;white-space:nowrap}
+.msel-opt:hover{background:#f8fafc}
+.msel-opt:focus-visible{outline:2px solid var(--accent);outline-offset:-2px}
+.msel-opt input{flex-shrink:0;margin:0;accent-color:var(--accent);pointer-events:none}
+.msel-opt.on{color:var(--accent);font-weight:600;background:#f0f6ff}
+.msel-none{padding:6px 8px;font-size:11.5px;color:var(--tx3)}
+.msel-check{display:inline-flex;align-items:center;gap:6px;font-size:12px;color:var(--tx2);
+  cursor:pointer;user-select:none}
+.msel-check input{margin:0;accent-color:var(--accent);cursor:pointer}
 
 .lib-table{margin-top:11px;border:1px solid var(--line);border-radius:10px;
   overflow:auto;max-height:min(58vh,620px);overscroll-behavior:contain}
@@ -28,7 +59,20 @@
 .lib-table .lp{max-width:520px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;
   color:var(--tx2)}
 
+/* 预设库的「附件」标签：悬停时由 JS 在 body 上浮一个气泡列出附件名。
+   气泡不能做成 ::after —— 表格是 overflow:auto 的滚动容器，贴在行里的气泡会被裁掉；
+   而 position:fixed 的伪元素在容器滚动后不会跟着标签走，位置会错。 */
+.tag-att{background:#eff6ff;color:#1d4ed8;cursor:help}
+.att-tip{position:fixed;z-index:60;pointer-events:none;
+  background:#1e293b;color:#e2e8f0;font-size:11.5px;line-height:1.65;
+  padding:8px 11px;border-radius:9px;max-width:min(320px,70vw);
+  white-space:pre-line;overflow-wrap:anywhere;
+  box-shadow:0 6px 20px rgba(15,23,42,.28)}
+.att-tip.muted{color:#94a3b8}
+
 .lib-ft{display:flex;align-items:center;gap:10px;margin-top:12px;flex-wrap:wrap}
+/* 「本轮要跑的」底部：运行测试入口，靠右下角 */
+.queue-ft{display:flex;justify-content:flex-end;margin-top:14px}
 .lib-sel-wrap{display:inline-flex;align-items:center;gap:10px}
 .lib-sel-count{font-size:12px;color:var(--tx2);font-weight:500;user-select:none}
 .lib-sel-count b{color:var(--accent);font-weight:700;margin:0 1px}
@@ -46,25 +90,27 @@
 .tbl-empty{color:var(--tx3);font-size:12px;text-align:center;padding:26px 0}
 
 /* ---------- 新增用例表单 ---------- */
-.padd{padding:10px 14px;border-bottom:1px solid var(--line);background:#fafbfd}
-.padd-hd{display:flex;align-items:center;gap:10px;flex-wrap:wrap}
-.padd-body{display:none;margin-top:10px}
-.padd-body.show{display:block}
-.padd-card{background:#fff;border:1px solid var(--line);border-radius:10px;padding:13px;
-  display:flex;flex-direction:column;gap:12px;box-shadow:var(--shadow-card)}
+/* ---------- 新增用例对话框 ---------- */
+.case-add-modal{width:min(720px,94vw)}
+.case-add-body{padding:14px 18px 16px;display:flex;flex-direction:column;gap:13px;overflow-y:auto}
+.ca-row{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1fr);gap:14px}
+@media(max-width:640px){.ca-row{grid-template-columns:minmax(0,1fr)}}
 .fld textarea{border:1px solid var(--line);border-radius:9px;padding:9px 11px;font-size:12.5px;
   color:var(--tx);background:#fff;font-family:inherit;line-height:1.6;resize:vertical;min-height:70px;
   transition:border-color .15s,box-shadow .15s}
 .fld textarea:focus{outline:none;border-color:var(--accent);box-shadow:0 0 0 3px rgba(37,99,235,.12)}
-.padd-row{display:flex;gap:14px;align-items:flex-end;flex-wrap:wrap;margin-top:4px}
-.padd-chips{display:flex;gap:6px;flex-wrap:wrap;min-height:32px;align-items:center}
-.padd-chips label{display:inline-flex;align-items:center;gap:4px;font-size:11.5px;color:var(--tx2);
+.fld.err textarea,.fld.err input{border-color:var(--p0)}
+.ca-chips{display:flex;gap:6px;flex-wrap:wrap;min-height:32px;align-items:center}
+.ca-chips label{display:inline-flex;align-items:center;gap:4px;font-size:11.5px;color:var(--tx2);
   border:1px solid var(--line);border-radius:999px;padding:5px 11px;cursor:pointer;user-select:none;
   transition:border-color .15s,background .15s,color .15s}
-.padd-chips label input{accent-color:var(--accent);margin:0;cursor:pointer}
-.padd-chips label:hover{border-color:var(--accent)}
-.padd-chips label:has(input:checked){border-color:var(--accent);background:#eff6ff;
+.ca-chips label input{accent-color:var(--accent);margin:0;cursor:pointer}
+.ca-chips label:hover{border-color:var(--accent)}
+.ca-chips label:has(input:checked){border-color:var(--accent);background:#eff6ff;
   color:var(--accent);font-weight:600}
+.ca-att-bar{display:flex;gap:6px;align-items:center}
+#caAtts{margin-top:6px}
+#caAtts:empty{margin-top:0}
 .prow .pdel{margin-left:auto;color:#b91c1c;cursor:pointer;font-size:11.5px;padding:2px 8px;
   border-radius:8px;flex-shrink:0;opacity:.75}
 .prow .pdel:hover{background:#fee2e2;opacity:1}

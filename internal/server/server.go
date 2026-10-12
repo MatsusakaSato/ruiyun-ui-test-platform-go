@@ -321,6 +321,9 @@ func (s *Server) doGet(w http.ResponseWriter, r *http.Request) {
 	case p == "/api/notify/templates":
 		s.handleNotifyTemplatesGet(w)
 		return
+	case p == "/api/notify/config":
+		s.handleNotifyConfigGet(w)
+		return
 	case p == "/api/dev/events":
 		s.handleDevEvents(w, r)
 		return
@@ -367,6 +370,8 @@ func (s *Server) doPost(w http.ResponseWriter, r *http.Request) {
 		s.handleUploadDelete(w, r)
 	case "/api/reveal":
 		s.handleReveal(w, r)
+	case "/api/notify/config":
+		s.handleNotifyConfigPost(w, r)
 	case "/api/notify/send":
 		s.handleNotifySend(w, r)
 	case "/api/notify/templates":

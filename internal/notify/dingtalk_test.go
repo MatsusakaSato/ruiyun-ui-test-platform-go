@@ -9,7 +9,11 @@ import (
 )
 
 func TestSignURLFormat(t *testing.T) {
-	rb := robots["official"]
+	entry, ok := builtinByKey("official")
+	if !ok {
+		t.Fatal("内置群 official 丢失")
+	}
+	rb := Robot{Token: entry.Token, Secret: entry.Secret}
 	u := signURL(rb, 1700000000000)
 	for _, want := range []string{
 		"access_token=" + rb.Token,
@@ -27,12 +31,14 @@ func TestSignURLFormat(t *testing.T) {
 }
 
 func TestUnknownGroup(t *testing.T) {
+	t.Setenv("HOME", t.TempDir()) // 隔离：别读到本机真实的自定义群配置
 	if _, err := SendCustomRobotGroupMessageTo("nope", "x", ""); err == nil {
 		t.Fatal("未知群组应返回错误")
 	}
 }
 
 func TestSendTextWithStubServer(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
 	var gotPath string
 	var gotBody map[string]any
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -81,6 +87,7 @@ func TestSendTextWithStubServer(t *testing.T) {
 }
 
 func TestSendBadJSONResponse(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		_, _ = w.Write([]byte(`not-json`))
 	}))
