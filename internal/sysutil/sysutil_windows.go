@@ -26,6 +26,17 @@ func revealInFileManager(target string, isFile bool) (bool, string) {
 	return true, winPath
 }
 
+// openInDefaultApp 用默认程序打开文件（Windows: cmd /c start "" <file>）
+func openInDefaultApp(target string) (bool, string) {
+	winPath := filepath.Clean(target)
+	// 第一个空参数是 start 的「窗口标题」占位，去掉它会把带空格的路径当成标题
+	cmd := exec.Command("cmd", "/c", "start", "", winPath)
+	if err := cmd.Start(); err != nil {
+		return false, fmt.Sprintf("start 执行失败: %s", err)
+	}
+	return true, winPath
+}
+
 // RunningAppPIDs 获取匹配可执行文件名称的进程 pid 列表
 func RunningAppPIDs(binaryPath string) []int {
 	name := filepath.Base(binaryPath)

@@ -469,7 +469,7 @@ function renderCfgList() {
         <label>Token</label>
         <div class="pw-row">
           <input class="nf-cfg-token" type="password" value="${esc(r.token)}"
-                 placeholder="${r.tokenHint ? '已保存 ' + esc(r.tokenHint) + '，留空不改'
+                 placeholder="${r.tokenHint ? '已保存 ' + esc(r.tokenHint) + '，'
                                            : '机器人 Webhook 里的 access_token'}"
                  autocomplete="off" spellcheck="false"/>
           ${r.isNew ? '' : '<button class="btn-ghost nf-cfg-reveal" type="button">显示</button>'}
@@ -479,7 +479,7 @@ function renderCfgList() {
         <label>加签密钥（选填）</label>
         <div class="pw-row">
           <input class="nf-cfg-secret" type="password" value="${esc(r.secret)}"
-                 placeholder="${r.secretHint ? '已保存 ' + esc(r.secretHint) + '，留空不改'
+                 placeholder="${r.secretHint ? '已保存 ' + esc(r.secretHint) + '，'
                                             : 'SEC 开头；留空则按自定义关键词发送'}"
                  autocomplete="off" spellcheck="false"/>
         </div>

@@ -49,6 +49,37 @@ export async function doReveal(p) {
   }
 }
 
+/* 用系统默认程序打开本机文件（服务端执行，只放行附件库目录内的路径） */
+export async function doOpenFile(p) {
+  try {
+    const r = await fetch('/api/open', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ path: p })
+    });
+    const j = await r.json();
+    if (!j.ok) alert('无法打开文件：' + (j.message || '未知错误'));
+  } catch (e) {
+    alert('请求失败：' + e.message);
+  }
+}
+
+/* 复制文本到剪贴板；done 在复制动作结束后回调（无论成功与否，行为与 copyRoundId 一致） */
+export function copyText(text, done) {
+  const finish = () => { if (done) done(); };
+  if (!navigator.clipboard) {
+    const ta = document.createElement('textarea');
+    ta.value = text;
+    document.body.appendChild(ta);
+    ta.select();
+    try { document.execCommand('copy'); } catch (e) {}
+    document.body.removeChild(ta);
+    finish();
+    return;
+  }
+  navigator.clipboard.writeText(text).then(finish).catch(finish);
+}
+
 export async function revealInFinder(ev, el) {
   if (ev && ev.preventDefault) ev.preventDefault();
   const p = el.getAttribute('data-path');

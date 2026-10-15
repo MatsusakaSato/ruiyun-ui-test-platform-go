@@ -61,8 +61,8 @@ export function impxRender(d) {
       + `<div class="fld"><label>测试目标列（选填）</label><select id="impxTarget">${impxOptions(d.target_col, true)}</select></div>`
       + `<div class="fld"><label>附件列（选填）</label><select id="impxAttachment">${impxOptions(d.attachment_col, true)}</select></div>`
       + `<div class="fld"><label>导入模式</label><select id="impxMode">`
-      + `<option value="append" selected>追加导入（保留现有）</option>`
-      + `<option value="replace">覆盖导入（清空后重建）</option></select></div>`;
+      + `<option value="append" selected>追加导入</option>`
+      + `<option value="replace">覆盖导入</option></select></div>`;
   }
 
   const tbl = $('impxTable');

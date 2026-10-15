@@ -107,16 +107,23 @@
 <div class="wrap">
   <div class="card">
     <div class="case-tabs">
-      <button class="ctab on" id="ctabLib" onclick="setCaseTab('lib')">预设用例库</button>
-      <button class="ctab" id="ctabQueue" onclick="setCaseTab('queue')">本轮要跑的<span id="tabQueueCount" class="cnt"></span></button>
+      <button class="ctab on" id="ctabLib" onclick="setCaseTab('lib')">库</button>
+      <button class="ctab" id="ctabQueue" onclick="setCaseTab('queue')">待执行<span id="tabQueueCount" class="cnt"></span></button>
     </div>
 
     <!-- ---- 预设用例库：服务端分页 + 筛选，支持批量删除 / 批量加入本轮 ---- -->
     <div id="paneLib">
       <div class="lib-bar">
-        <input class="lib-kw" id="libKw" placeholder="搜索提问 / 名称 / 编号（回车即查）"/>
+        <input class="lib-kw" id="libKw" placeholder="搜索提问 / 名称 / 编号"/>
         <span class="fhint" id="libMsg"></span>
         <div class="spacer"></div>
+        <a class="btn-ghost btn-template" href="/resource/template.xlsx" download>
+          <svg aria-hidden="true" viewBox="0 0 16 16" width="15" height="15" fill="none">
+            <path d="M8 2.5v7m0 0 2.75-2.75M8 9.5 5.25 6.75M3 10.5v2h10v-2"
+                  stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>
+          </svg>
+          下载模板
+        </a>
         <button class="btn-ghost" id="btnLibImport"
                 title="从 Excel（.xlsx / .xlsm）或 CSV 批量导入用例">📄 从 Excel 导入</button>
         <button class="btn-ghost" id="btnLibAdd">+ 新增用例</button>
@@ -196,7 +203,7 @@
       </div>
       <div class="hf-item hf-kw-item">
         <label class="hf-label" for="histKw">关键字</label>
-        <input id="histKw" placeholder="轮次号 / 提问内容，回车即查"/>
+        <input id="histKw" placeholder="轮次号 / 提问内容"/>
       </div>
       <div class="hist-btns">
         <button class="btn-primary" id="histQuery">查询</button>
@@ -239,7 +246,7 @@
 <section class="page" id="pageNotify" hidden>
 <div class="wrap nf-wrap">
   <div class="nf-card">
-    <h3 class="sec">发送通知<span class="nf-sub">把消息直接发送到钉钉群</span>
+    <h3 class="sec">发送通知
       <button class="nf-gear" id="btnNotifyCfg" type="button"
               title="配置群机器人" aria-label="配置群机器人">⚙</button>
     </h3>
@@ -289,7 +296,6 @@
 
 </div><!-- .main -->
 </div><!-- .app -->
-
 <!-- ============ Excel 导入确认弹窗（预览 + 改列映射） ============ -->
 <div class="modal-mask" id="impxMask">
   <div class="modal impx-modal" role="dialog" aria-label="从 Excel 导入用例">
@@ -553,7 +559,6 @@
     <div class="llm-body">
       <div class="nf-cfg-list" id="nfCfgList"></div>
       <button class="btn-ghost nf-cfg-add" id="nfCfgAdd" type="button">＋ 添加群</button>
-      <span class="fhint">Token 与加签密钥留空表示不改动已保存的值；不填加签密钥则按「自定义关键词」方式发送</span>
     </div>
     <div class="modal-ft">
       <span class="mcount fhint err" id="nfCfgHint" hidden></span>

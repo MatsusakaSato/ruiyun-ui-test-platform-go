@@ -553,7 +553,7 @@ func AddPresetCase(item map[string]any, customPath string) (bool, string, map[st
 					_ = json.Unmarshal([]byte(etargetsStr), &etargets)
 				}
 				if CaseDedupeKey(eprompt, escene, etargets, eattachment == 1) == currDedupeKey {
-					return false, fmt.Sprintf("用例已存在（编号：%s），提问与标签完全一致，已自动去重", eid), nil
+					return false, fmt.Sprintf("用例已存在（编号：%s）", eid), nil
 				}
 			}
 		}

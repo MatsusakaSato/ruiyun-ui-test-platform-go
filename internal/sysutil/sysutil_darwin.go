@@ -28,6 +28,21 @@ func revealInFileManager(target string, isFile bool) (bool, string) {
 	return true, target
 }
 
+// openInDefaultApp 用默认程序打开文件（macOS: open <file>）
+func openInDefaultApp(target string) (bool, string) {
+	cmd := exec.Command("open", target)
+	var stderr bytes.Buffer
+	cmd.Stderr = &stderr
+	if err := cmd.Run(); err != nil {
+		msg := strings.TrimSpace(stderr.String())
+		if msg == "" {
+			msg = err.Error()
+		}
+		return false, fmt.Sprintf("open 执行失败: %s", msg)
+	}
+	return true, target
+}
+
 // RunningAppPIDs 获取匹配可执行文件名称的进程 pid 列表
 func RunningAppPIDs(binaryPath string) []int {
 	name := filepath.Base(binaryPath)

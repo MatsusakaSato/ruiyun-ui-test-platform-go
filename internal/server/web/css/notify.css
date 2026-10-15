@@ -77,10 +77,10 @@
 
 /* ---------- 群机器人配置（标题行右侧的齿轮 + 弹窗） ---------- */
 /* 推到标题行最右：h3.sec 是 flex，gear 靠在「发送通知」右侧比跟着副标题走更稳 */
-.nf-gear{margin-left:auto;width:24px;height:24px;padding:0;flex-shrink:0;
+.nf-gear{margin-left:auto;width:30px;height:30px;padding:0;flex-shrink:0;
   display:inline-flex;align-items:center;justify-content:center;
-  border:none;border-radius:7px;background:none;cursor:pointer;
-  font-size:13px;line-height:1;color:var(--tx3);
+  border:none;border-radius:8px;background:none;cursor:pointer;
+  font-size:19px;line-height:1;color:var(--tx3);
   transition:background .15s,color .15s}
 .nf-gear:hover{background:#f1f5f9;color:var(--tx)}
 

@@ -7,19 +7,43 @@ import (
 	"strings"
 )
 
+// expandHome 把开头的 ~ / ~/ 展开成本机家目录（其余原样返回）
+func expandHome(p string) string {
+	if !strings.HasPrefix(p, "~") {
+		return p
+	}
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return p
+	}
+	if p == "~" {
+		return home
+	}
+	if strings.HasPrefix(p, "~/") || strings.HasPrefix(p, "~\\") {
+		return filepath.Join(home, p[2:])
+	}
+	return p
+}
+
+// OpenTarget 用系统默认程序打开文件（预设用例库附件气泡里点文件名触发）
+func OpenTarget(target string) (bool, string) {
+	p := expandHome(strings.TrimSpace(target))
+	if p == "" {
+		return false, "缺少 path 参数"
+	}
+	st, err := os.Stat(p)
+	if err != nil {
+		return false, "路径不存在：" + target
+	}
+	if st.IsDir() {
+		return false, "不是文件：" + target
+	}
+	return openInDefaultApp(p)
+}
+
 // RevealTarget 在文件管理器中选中或定位目标文件/目录
 func RevealTarget(target string) (bool, string) {
-	p := target
-	if strings.HasPrefix(p, "~") {
-		home, err := os.UserHomeDir()
-		if err == nil {
-			if p == "~" {
-				p = home
-			} else if strings.HasPrefix(p, "~/") || strings.HasPrefix(p, "~\\") {
-				p = filepath.Join(home, p[2:])
-			}
-		}
-	}
+	p := expandHome(target)
 
 	st, err := os.Stat(p)
 	if err != nil {

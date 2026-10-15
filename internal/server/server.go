@@ -315,6 +315,9 @@ func (s *Server) doGet(w http.ResponseWriter, r *http.Request) {
 	case p == "/api/uploads":
 		writeJSON(w, 200, map[string]any{"files": listUploads()})
 		return
+	case p == "/resource/template.xlsx":
+		s.handleTemplateDownload(w, r)
+		return
 	case p == "/api/eval/status":
 		writeJSON(w, 200, s.eval.Status())
 		return
@@ -368,6 +371,8 @@ func (s *Server) doPost(w http.ResponseWriter, r *http.Request) {
 		s.handleUpload(w, r)
 	case "/api/upload/delete":
 		s.handleUploadDelete(w, r)
+	case "/api/open":
+		s.handleOpenFile(w, r)
 	case "/api/reveal":
 		s.handleReveal(w, r)
 	case "/api/notify/config":

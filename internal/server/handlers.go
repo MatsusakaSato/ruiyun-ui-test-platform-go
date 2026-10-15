@@ -3,7 +3,10 @@ package server
 import (
 	"encoding/base64"
 	"fmt"
+	"io"
+	"mime"
 	"net/http"
+	"net/url"
 	"os"
 	"path/filepath"
 	"regexp"
@@ -99,6 +102,17 @@ func closeApp() (bool, string) {
 const MaxUploadBytes = 64 * 1024 * 1024
 
 var unsafeFilename = regexp.MustCompile(`[\x00-\x1f/\\:*?"<>|]`)
+
+func (s *Server) handleTemplateDownload(w http.ResponseWriter, r *http.Request) {
+	file := filepath.Join(config.RootDir, "resource", "template.xlsx")
+	if st, err := os.Stat(file); err != nil || st.IsDir() {
+		http.NotFound(w, r)
+		return
+	}
+	w.Header().Set("Content-Type", "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
+	w.Header().Set("Content-Disposition", `attachment; filename="template.xlsx"`)
+	http.ServeFile(w, r, file)
+}
 
 // safeFilename 附件名净化：只取基名并去掉危险字符（防目录穿越）
 func safeFilename(name string) string {
@@ -200,6 +214,142 @@ func saveUpload(name string, data []byte) (string, error) {
 		abs = p
 	}
 	return abs, nil
+}
+
+// ------------------------------------------------------------------ 导入时附件规范化
+
+// ingestExcelAttachment 把 Excel 附件列里的一格字符串规范成「附件库里的文件」。
+//
+// 三类来源的处理方式：
+//   - http(s) 链接：服务端下载到附件库，返回库内绝对路径；下载失败（网络/4xx5xx/超限）则
+//     原样返回原始链接，不阻断整行导入。
+//   - 本地绝对路径且真实存在：把文件复制进附件库，返回库内绝对路径；读不到（缺权限/
+//     不存在/是目录/超限）则原样返回原始字符串。
+//   - 其它（相对路径、空串、无法识别）：原样返回，不阻断导入。
+//
+// 规范化的目标是：让导入进来的附件和普通「上传」走同一条路 —— 之后「打开」「运行时投递」
+// 都按库内文件处理，避免 URL / 外部路径在 /api/open 里被拒（403）或投递时读不到。
+func ingestExcelAttachment(src string) string {
+	s := strings.TrimSpace(src)
+	if s == "" {
+		return ""
+	}
+	lower := strings.ToLower(s)
+	if strings.HasPrefix(lower, "http://") || strings.HasPrefix(lower, "https://") {
+		if fp, err := downloadToUploads(s); err == nil {
+			return fp
+		}
+		return s
+	}
+	// 本地路径：只处理绝对路径（相对路径无法定位，原样保留）
+	if !filepath.IsAbs(s) {
+		return s
+	}
+	if st, err := os.Stat(s); err != nil || st.IsDir() {
+		return s
+	}
+	if fp, err := copyToUploads(s); err == nil {
+		return fp
+	}
+	return s
+}
+
+// copyToUploads 把本机一个已存在的文件原样复制进附件库，返回库内绝对路径。
+func copyToUploads(src string) (string, error) {
+	data, err := os.ReadFile(src)
+	if err != nil {
+		return "", err
+	}
+	if len(data) > MaxUploadBytes {
+		return "", fmt.Errorf("文件超过 %dMB 上限", MaxUploadBytes/1048576)
+	}
+	return saveUpload(filepath.Base(src), data)
+}
+
+// downloadToUploads 把 http(s) 链接下载进附件库，返回库内绝对路径。
+// 超时 60s，正文上限与上传一致（MaxUploadBytes），文件名优先取 Content-Disposition，
+// 否则取 URL 基名，再不济用 "download"。
+func downloadToUploads(link string) (string, error) {
+	client := &http.Client{Timeout: 60 * time.Second}
+	resp, err := client.Get(link)
+	if err != nil {
+		return "", err
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		return "", fmt.Errorf("HTTP %d", resp.StatusCode)
+	}
+	limited := io.LimitReader(resp.Body, MaxUploadBytes+1)
+	data, err := io.ReadAll(limited)
+	if err != nil {
+		return "", err
+	}
+	if len(data) > MaxUploadBytes {
+		return "", fmt.Errorf("文件超过 %dMB 上限", MaxUploadBytes/1048576)
+	}
+	return saveUpload(filenameFromResponse(resp, link), data)
+}
+
+// filenameFromResponse 从响应头或 URL 推断落盘文件名，缺失时回退 "download"。
+func filenameFromResponse(resp *http.Response, link string) string {
+	if cd := resp.Header.Get("Content-Disposition"); cd != "" {
+		if _, params, err := mime.ParseMediaType(cd); err == nil {
+			if fn, ok := params["filename"]; ok && strings.TrimSpace(fn) != "" {
+				return fn
+			}
+			// RFC 5987 形式：filename*=UTF-8''xxx
+			if fn, ok := params["filename*"]; ok && strings.TrimSpace(fn) != "" {
+				return strings.TrimSpace(fn)
+			}
+		}
+	}
+	if u, err := url.Parse(link); err == nil {
+		if base := filepath.Base(u.Path); base != "" && base != "." && base != "/" {
+			return base
+		}
+	}
+	return "download"
+}
+
+// ingestItemAttachments 就地把一行用例的 attachments 全部规范化成附件库路径。
+// 支持 []string / []any 两种入参（Excel 解析产出 []string），结果统一写回 []string；
+// 全部无法入库时删除该字段（避免留下空附件导致 attachment 标记误判）。
+// 返回值：ingested = 成功落库的条数；keptRaw = 因无法解析而保留原样的条数
+// （空白单元格直接丢弃，不计入两者）。
+func ingestItemAttachments(item map[string]any) (ingested, keptRaw int) {
+	raw, ok := item["attachments"]
+	if !ok || raw == nil {
+		return 0, 0
+	}
+	var srcs []string
+	switch list := raw.(type) {
+	case []string:
+		srcs = list
+	case []any:
+		for _, v := range list {
+			srcs = append(srcs, fmt.Sprintf("%v", v))
+		}
+	default:
+		return 0, 0
+	}
+	kept := make([]string, 0, len(srcs))
+	for _, s := range srcs {
+		orig := s
+		if got := ingestExcelAttachment(orig); got != "" {
+			if got == orig {
+				keptRaw++
+			} else {
+				ingested++
+			}
+			kept = append(kept, got)
+		}
+	}
+	if len(kept) == 0 {
+		delete(item, "attachments")
+		return ingested, keptRaw
+	}
+	item["attachments"] = kept
+	return ingested, keptRaw
 }
 
 // ------------------------------------------------------------------ GET 处理器
@@ -784,10 +934,24 @@ func (s *Server) handlePresetImport(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// 导入（非预览）时才把附件列里的本地绝对路径 / http(s) 链接规范化进附件库；
+	// parse_only 预览阶段原样返回原始串，便于用户核对表格里写了什么。
+	var ingestedTotal, keptRawTotal int
+	for _, it := range items {
+		n, k := ingestItemAttachments(it)
+		ingestedTotal += n
+		keptRawTotal += k
+	}
 	ok, msg, added := testcasedb.AddPresetCases(items, truthyAny(body["replace"]), "")
-	writeJSON(w, codeFor(ok, 400), map[string]any{
+	out := map[string]any{
 		"ok": ok, "message": msg, "added": added,
-		"file": name, "total": len(items), "skipped": skipped})
+		"file": name, "total": len(items), "skipped": skipped}
+	// 附件规范化汇总：多少条原始条目被拉进附件库、多少条因无法解析而保留原样。
+	if ingestedTotal > 0 || keptRawTotal > 0 {
+		out["attachments_ingested"] = ingestedTotal
+		out["attachments_kept_raw"] = keptRawTotal
+	}
+	writeJSON(w, codeFor(ok, 400), out)
 }
 
 func (s *Server) handleAppSettingsPost(w http.ResponseWriter, r *http.Request) {
@@ -987,6 +1151,17 @@ func decodeBase64Tolerant(s string) ([]byte, error) {
 	return base64.StdEncoding.DecodeString(data + strings.Repeat("=", need))
 }
 
+// inUploadsDir 判断绝对路径是否落在附件库目录内。
+// Windows 路径大小写不敏感：统一小写后按目录级前缀判断（避免 /uploads2 误命中 /uploads）。
+func inUploadsDir(abs string) bool {
+	baseDir, err := filepath.Abs(config.UploadsDir())
+	if err != nil {
+		baseDir = config.UploadsDir()
+	}
+	return strings.HasPrefix(strings.ToLower(abs),
+		strings.ToLower(baseDir)+strings.ToLower(string(os.PathSeparator)))
+}
+
 func (s *Server) handleUploadDelete(w http.ResponseWriter, r *http.Request) {
 	body := readJSONBody(r)
 	target, err := filepath.Abs(strOr(body["path"], ""))
@@ -994,14 +1169,7 @@ func (s *Server) handleUploadDelete(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, 400, map[string]any{"ok": false, "message": "只允许删除附件库内的文件"})
 		return
 	}
-	baseDir, err := filepath.Abs(config.UploadsDir())
-	if err != nil {
-		baseDir = config.UploadsDir()
-	}
-	// Windows 路径大小写不敏感：统一小写后按目录级前缀判断
-	tLower := strings.ToLower(target)
-	bLower := strings.ToLower(baseDir)
-	if !strings.HasPrefix(tLower, bLower+strings.ToLower(string(os.PathSeparator))) {
+	if !inUploadsDir(target) {
 		writeJSON(w, 400, map[string]any{"ok": false, "message": "只允许删除附件库内的文件"})
 		return
 	}
@@ -1026,6 +1194,36 @@ func (s *Server) handleUploadDelete(w http.ResponseWriter, r *http.Request) {
 		out["cleaned_cases"] = cleaned
 	}
 	writeJSON(w, 200, out)
+}
+
+// handleOpenFile 用系统默认程序打开附件（预设用例库「附件」气泡里点文件名触发）。
+// 这是唯一会拉起本机程序的接口，路径必须收敛在附件库目录内。
+func (s *Server) handleOpenFile(w http.ResponseWriter, r *http.Request) {
+	body := readJSONBody(r)
+	raw := strings.TrimSpace(strOr(body["path"], ""))
+	if raw == "" {
+		writeJSON(w, 400, map[string]any{"ok": false, "message": "缺少 path 参数"})
+		return
+	}
+	target, err := filepath.Abs(raw)
+	if err != nil {
+		writeJSON(w, 400, map[string]any{"ok": false, "message": "路径不合法"})
+		return
+	}
+	if !inUploadsDir(target) {
+		writeJSON(w, 403, map[string]any{"ok": false, "message": "只允许打开附件库内的文件"})
+		return
+	}
+	if st, err := os.Stat(target); err != nil || st.IsDir() {
+		writeJSON(w, 404, map[string]any{"ok": false, "message": "文件不存在或已被删除"})
+		return
+	}
+	ok, msg := sysutil.OpenTarget(target)
+	out := map[string]any{"ok": ok, "message": msg, "path": ""}
+	if ok {
+		out["path"] = msg
+	}
+	writeJSON(w, codeFor(ok, 500), out)
 }
 
 func (s *Server) handleReveal(w http.ResponseWriter, r *http.Request) {
@@ -1135,6 +1333,8 @@ func intFromAny(v any, def int) int {
 
 func intPtrFromAny(v any) *int {
 	switch t := v.(type) {
+	case *int:
+		return t
 	case int:
 		n := t
 		return &n

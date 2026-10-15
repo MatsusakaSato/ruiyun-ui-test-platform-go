@@ -1,6 +1,6 @@
 /* ================= 测试用例页（预设库 + 队列编辑 + 附件管理） ================= */
 
-import { $, esc, fmtSize, fileToBase64, IS_WIN, MOD_KEY } from './utils.js';
+import { $, esc, fmtSize, fileToBase64, IS_WIN, MOD_KEY, doOpenFile, copyText } from './utils.js';
 import { state } from './state.js';
 import { renderRunCases, doRun } from './page-home.js';
 
@@ -311,38 +311,90 @@ export const libSelTags = c => {
   if (L.scene) out += `<span class="tag t-scene">${esc(L.scene)}</span>`;
   for (const t of (L.targets || [])) out += `<span class="tag">${esc(t)}</span>`;
   if (L.attachment === true) {
-    // 附件名塞在 data-atts 里，hover 时由 showAttTip 读出来浮个气泡
+    // 附件绝对路径塞在 data-atts 里（一行一个），hover 时由 showAttTip 渲染气泡：
+    // 文件名本身是链接（点开＝用系统默认程序打开该文件），右侧图标点击复制路径。
     // （Excel 导入的老数据可能只标记了「要附件」却没记路径，那时 data-atts 为空）
-    const names = attsFromPaths(c.attachments).map(a => a.name);
-    out += `<span class="tag tag-att" data-atts="${esc(names.join('\n'))}">附件</span>`;
+    const paths = (c.attachments || []).map(p => String(p));
+    out += `<span class="tag tag-att" data-atts="${esc(paths.join('\n'))}">附件</span>`;
   }
   return out;
 };
 
-/* 附件标签的悬停气泡。
+/* 附件标签的悬停气泡：毛玻璃质感，一个附件一行 ——
+   文件名本身是链接（点击 → POST /api/open 由服务端调系统默认程序打开），
+   右侧小图标点击复制该附件的绝对路径。
    预设库表格是 .lib-table（overflow:auto）的滚动容器，纯 CSS 的 ::after 气泡会被容器裁掉，
-   所以气泡挂在 body 上用 fixed 定位，跟着标签的 rect 走。 */
-function hideAttTip() {
+   所以气泡挂在 body 上用 fixed 定位，跟着标签的 rect 走。
+   气泡要能点，就不能再 pointer-events:none，于是鼠标移开后**延迟**收起，
+   留出从标签挪到气泡上的时间（气泡自身的 mouseenter 会撤销这次收起）。 */
+let attTipTimer = 0;
+
+function removeAttTip() {
+  clearTimeout(attTipTimer);
   document.getElementById('attTip')?.remove();
 }
 
+function hideAttTip() {
+  removeAttTip();
+}
+
+function scheduleHideAttTip() {
+  clearTimeout(attTipTimer);
+  attTipTimer = setTimeout(removeAttTip, 240);
+}
+
 function showAttTip(anchor) {
-  hideAttTip();
-  const names = anchor.dataset.atts || '';
+  removeAttTip();
+  const paths = (anchor.dataset.atts || '').split('\n').filter(Boolean);
   const el = document.createElement('div');
   el.id = 'attTip';
-  el.className = 'att-tip' + (names ? '' : ' muted');
-  el.textContent = names || '未记录文件名';
+  el.className = 'att-tip' + (paths.length ? '' : ' muted');
+  if (paths.length) {
+    el.innerHTML = paths.map(p => {
+      const name = p.split(/[\\/]/).pop() || p;
+      return '<div class="att-row">'
+        + `<a class="att-name" href="#" data-path="${esc(p)}" title="打开：${esc(p)}">${esc(name)}</a>`
+        + `<b class="att-copy" data-path="${esc(p)}" title="复制路径">📋</b></div>`;
+    }).join('');
+  } else {
+    el.textContent = '未记录文件名';
+  }
+  el.addEventListener('mouseenter', () => clearTimeout(attTipTimer));
+  el.addEventListener('mouseleave', scheduleHideAttTip);
+  el.addEventListener('click', onAttTipClick);
   document.body.appendChild(el);
 
   const r = anchor.getBoundingClientRect();
   const w = el.offsetWidth;
   const h = el.offsetHeight;
-  // 默认贴标签下方；下方放不下就翻到上方，两侧再夹一下别溢出视口
-  const below = r.bottom + 7;
-  const top = below + h <= window.innerHeight - 6 ? below : r.top - 7 - h;
+  // 默认贴标签下方（留 4px 缝，鼠标能顺畅挪进气泡）；下方放不下就翻到上方，两侧再夹一下别溢出视口
+  const below = r.bottom + 4;
+  const top = below + h <= window.innerHeight - 6 ? below : r.top - 4 - h;
   el.style.top = Math.round(Math.max(6, Math.min(top, window.innerHeight - h - 6))) + 'px';
   el.style.left = Math.round(Math.max(6, Math.min(r.left, window.innerWidth - w - 8))) + 'px';
+}
+
+// 气泡里的点击：文件名 → 打开文件；图标 → 复制路径（图标短暂变成 ✓）
+function onAttTipClick(e) {
+  const copyBtn = e.target.closest ? e.target.closest('.att-copy') : null;
+  if (copyBtn) {
+    e.preventDefault();
+    const p = copyBtn.dataset.path;
+    if (!p) return;
+    copyText(p, () => {
+      copyBtn.textContent = '✓';
+      copyBtn.classList.add('done');
+      setTimeout(() => {
+        copyBtn.textContent = '📋';
+        copyBtn.classList.remove('done');
+      }, 1200);
+    });
+    return;
+  }
+  const link = e.target.closest ? e.target.closest('.att-name') : null;
+  if (!link) return;
+  e.preventDefault();
+  if (link.dataset.path) doOpenFile(link.dataset.path);
 }
 
 /* ---------- 筛选控件：多选下拉 + 附件复选框 ----------
@@ -881,10 +933,12 @@ export function initCases() {
       const t = e.target.closest('.tag-att');
       if (t) showAttTip(t);
     });
+    // 移开标签不立刻销毁：鼠标得挪到气泡上才点得到文件名/复制图标，
+    // 气泡自己的 mouseenter 会撤销这次延迟收起
     libTable.addEventListener('mouseout', e => {
-      if (e.target.closest('.tag-att')) hideAttTip();
+      if (e.target.closest('.tag-att')) scheduleHideAttTip();
     });
-    // 表格自己滚动、或页面滚动时标签会移走，气泡不能留在原地
+    // 表格自己滚动、或页面滚动时标签会移走，气泡不能留在原地（这两种情况立即收）
     libTable.addEventListener('scroll', hideAttTip, true);
     window.addEventListener('scroll', hideAttTip, true);
   }
