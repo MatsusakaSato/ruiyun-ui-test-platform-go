@@ -315,12 +315,10 @@ export function objTab(m, d) {
     + `<tr><td>会话收尾 <span class="q tip-right" data-tip="评判标准：&#10;校验会话是否已完成输出（isStreaming=false）并具有明确的完成标记（completedAt）。&#10;若缺少完成标记或停留在流式状态，判定为未正常收尾（易导致前端持续 Loading 假死）。">?</span></td><td style="text-align:right"><span class="badge ${stt.session_closed ? 'b-pass' : 'b-fail'}">${esc(stt.closed_desc || '—')}</span></td></tr>`
     + '</table></div>';
 
-  h += '<h3 class="sec" style="margin-top:16px">Token 用量（估算） <span class="q tip-right" data-tip="估算规则：&#10;中文约 1.6 字符/token，英文及代码约 4 字符/token。&#10;包含提问、工具调用及模型思考与回复。">?</span></h3><div class="tbl-card"><table>'
+  h += '<h3 class="sec" style="margin-top:16px">Token 用量 <span class="q tip-right" data-tip="估算规则：&#10;中文约 1.6 字符/token，英文及代码约 4 字符/token。&#10;包含提问、工具调用及模型思考与回复。">?</span></h3><div class="tbl-card"><table>'
     + `<tr><td>输入 Token</td><td style="text-align:right"><b>${tk.input_tokens_est ?? 0}</b></td></tr>`
     + `<tr><td>输出 Token</td><td style="text-align:right"><b>${tk.output_tokens_est ?? 0}</b></td></tr>`
-    + `<tr><td><b>合计估算</b></td><td style="text-align:right"><b style="color:var(--accent)">${tk.total_tokens_est ?? 0}</b></td></tr>`
-    + '</table></div>'
-    + '<div class="fhint" style="margin-top:6px;font-size:11px">按中文字符≈1.6/token、英文及代码≈4/token 估算</div>';
+    + '</table></div>';
 
   const tools = c.tools || [];
   h += '<h3 class="sec" style="margin-top:16px">用到的工具</h3><div class="tbl-card"><table><tr><th>工具</th><th>调用</th><th>失败</th><th>截断</th></tr>';
