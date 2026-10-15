@@ -1477,41 +1477,18 @@ func evaluateCase(runID string, caseItem map[string]interface{}, bundle *RoundBu
 		}
 	}
 
+	// 期望产出类型一律从问题原文推断：预设库已不再存取「测试目标」，
+	// labels 里不会再有 targets，推断结果就是唯一来源。
 	var reqKinds []string
 	reqSource := "none"
 	var reqHits []string
-	targetKindsMap := map[string][]string{
-		"word":  {"docx"},
-		"ppt":   {"pptx"},
-		"html":  {"html"},
-		"excel": {"excel"},
-		"pdf":   {"pdf"},
+	inferredMap, inferHits := intent.InferTargetKinds(prompt)
+	for k := range inferredMap {
+		reqKinds = append(reqKinds, k)
 	}
-	if tg, ok := labels["targets"].([]interface{}); ok {
-		for _, t := range tg {
-			s := strings.ToLower(strings.TrimSpace(fmt.Sprintf("%v", t)))
-			if kinds, exists := targetKindsMap[s]; exists {
-				reqKinds = append(reqKinds, kinds...)
-			}
-		}
-	} else if tg, ok := labels["targets"].([]string); ok {
-		for _, s := range tg {
-			if kinds, exists := targetKindsMap[strings.ToLower(s)]; exists {
-				reqKinds = append(reqKinds, kinds...)
-			}
-		}
-	}
+	reqHits = inferHits
 	if len(reqKinds) > 0 {
-		reqSource = "labels"
-	} else {
-		inferredMap, hits := intent.InferTargetKinds(prompt)
-		for k := range inferredMap {
-			reqKinds = append(reqKinds, k)
-		}
-		reqHits = hits
-		if len(reqKinds) > 0 {
-			reqSource = "inferred"
-		}
+		reqSource = "inferred"
 	}
 	sort.Strings(reqKinds)
 

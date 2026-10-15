@@ -6,15 +6,11 @@ import (
 	"fmt"
 	"io"
 	"regexp"
-	"strconv"
 	"strings"
-	"unicode"
 
 	"github.com/xuri/excelize/v2"
 	"golang.org/x/text/encoding/simplifiedchinese"
 	"golang.org/x/text/transform"
-
-	"ruiyun-ui-test-platform-go/internal/intent"
 )
 
 var (
@@ -22,144 +18,9 @@ var (
 
 	promptHeaders     = []string{"提问", "问题", "prompt", "query", "指令", "提示词", "输入", "题目", "测试内容"}
 	sceneHeaders      = []string{"场景", "业务场景", "教学场景", "scene", "分类", "模块", "类别"}
-	targetHeaders     = []string{"测试目标", "产物格式", "目标", "target", "交付物"}
-	nameHeaders       = []string{"序号", "编号", "用例名称", "用例名", "名称", "标题", "id", "name", "seq", "no"}
+	difficultyHeaders = []string{"难度", "difficulty", "难易"}
 	attachmentHeaders = []string{"附件", "参考文件", "文件", "附件名", "attachment", "attachments", "file"}
-	skillHeaders      = []string{"skill", "技能", "期望工具", "工具", "expect_tools", "tools"}
-
-	knownTargets = []string{"word", "ppt", "html", "pdf", "excel", "network"}
-
-	// kindOrder 固定第 3 步（语义推断）的遍历顺序。
-	// 若此处遍历 set，顺序会随哈希种子随机化 —— 同一份输入
-	// 多次运行会得到不同顺序的 targets。这里显式固定顺序以保证可复现。
-	kindOrder = []string{"docx", "pptx", "excel", "pdf", "html", "network"}
 )
-
-func matchWordBoundary(text, target string) bool {
-	tLower := strings.ToLower(text)
-	targetLower := strings.ToLower(target)
-	idx := 0
-	for {
-		pos := strings.Index(tLower[idx:], targetLower)
-		if pos == -1 {
-			return false
-		}
-		actualPos := idx + pos
-		leftOk := (actualPos == 0) || !unicode.IsLetter(rune(tLower[actualPos-1]))
-		rightIdx := actualPos + len(targetLower)
-		rightOk := (rightIdx == len(tLower)) || !unicode.IsLetter(rune(tLower[rightIdx]))
-		if leftOk && rightOk {
-			return true
-		}
-		idx = actualPos + 1
-	}
-}
-
-// hitKey 报告 text 是否命中 keys 中的任意一个关键词。
-func hitKey(text string, keys []string) bool {
-	for _, k := range keys {
-		if strings.Contains(text, k) {
-			return true
-		}
-	}
-	return false
-}
-
-// InferTargets 从显式目标列、附件后缀或提问语义推断测试目标
-func InferTargets(prompt, attachmentName, rawTarget string) []string {
-	// 初始化为空切片而非 nil：nil 会被 encoding/json 序列化成 null，
-	// 而契约要求返回 []，前端依赖二者语义一致。
-	targets := []string{}
-
-	// 1. 显式白名单匹配
-	if rawTarget != "" {
-		for _, t := range knownTargets {
-			if matchWordBoundary(rawTarget, t) {
-				targets = append(targets, t)
-			}
-		}
-		if len(targets) > 0 {
-			return targets
-		}
-	}
-
-	// 2. 从附件文件名后缀推断
-	attLower := strings.ToLower(attachmentName)
-	if strings.HasSuffix(attLower, ".docx") || strings.HasSuffix(attLower, ".doc") || strings.HasSuffix(attLower, ".dotx") {
-		targets = append(targets, "word")
-	} else if strings.HasSuffix(attLower, ".pptx") || strings.HasSuffix(attLower, ".ppt") || strings.HasSuffix(attLower, ".potx") {
-		targets = append(targets, "ppt")
-	} else if strings.HasSuffix(attLower, ".xlsx") || strings.HasSuffix(attLower, ".xls") || strings.HasSuffix(attLower, ".csv") {
-		targets = append(targets, "excel")
-	} else if strings.HasSuffix(attLower, ".pdf") {
-		targets = append(targets, "pdf")
-	} else if strings.HasSuffix(attLower, ".html") || strings.HasSuffix(attLower, ".htm") {
-		targets = append(targets, "html")
-	}
-
-	// 3. 从提问文本语义推断
-	kinds, _ := intent.InferTargetKinds(prompt)
-	kindMap := map[string]string{
-		"docx": "word", "pptx": "ppt", "excel": "excel",
-		"pdf": "pdf", "html": "html", "network": "network",
-	}
-	for _, k := range kindOrder {
-		if !kinds[k] {
-			continue
-		}
-		mapped := kindMap[k]
-		if mapped != "" {
-			already := false
-			for _, t := range targets {
-				if t == mapped {
-					already = true
-					break
-				}
-			}
-			if !already {
-				targets = append(targets, mapped)
-			}
-		}
-	}
-
-	// 4. 中文关键词特征补全
-	pLower := strings.ToLower(prompt)
-	if len(targets) == 0 {
-		wordKeys := []string{"教案", "教学设计", "文档", "word", "撰写", "通报", "总结", "方案", "通知", "倡议书", "计划", "发言稿", "讲话稿"}
-		pptKeys := []string{"ppt", "课件", "幻灯片", "演示文稿"}
-		excelKeys := []string{"excel", "表格", "成绩表", "统计表", "排班表", "清单"}
-
-		hitWord := false
-		for _, w := range wordKeys {
-			if strings.Contains(pLower, w) {
-				targets = append(targets, "word")
-				hitWord = true
-				break
-			}
-		}
-		// 这里是 if/elif 互斥链：命中前一个分支就不再判后面的。
-		// 必须保持互斥，否则同时含「课件」和「表格」的提问会同时补出
-		// ppt 与 excel（多推一个目标，下游断言会跟着变）。
-		if !hitWord {
-			if hitKey(pLower, pptKeys) {
-				targets = append(targets, "ppt")
-			} else if hitKey(pLower, excelKeys) {
-				targets = append(targets, "excel")
-			} else if strings.Contains(pLower, "pdf") {
-				targets = append(targets, "pdf")
-			} else if strings.Contains(pLower, "html") || strings.Contains(pLower, "网页") {
-				targets = append(targets, "html")
-			}
-		}
-	}
-
-	// 5. 兜底为 word
-	if len(targets) == 0 {
-		targets = append(targets, "word")
-	}
-
-	return targets
-}
 
 func isHeaderLike(value string) bool {
 	v := strings.TrimSpace(value)
@@ -194,10 +55,8 @@ func DetectColumns(rows [][]string) map[string]any {
 			"head_idx":       nil,
 			"prompt_col":     0,
 			"scene_col":      nil,
-			"target_col":     nil,
-			"name_col":       nil,
+			"difficulty_col": nil,
 			"attachment_col": nil,
-			"skill_col":      nil,
 			"total_rows":     0,
 			"preview":        [][]string{},
 		}
@@ -296,6 +155,8 @@ func DetectColumns(rows [][]string) map[string]any {
 		return nil
 	}
 
+	// 列识别按固定顺序逐个收窄排除集合，保证同一列不会被认出两次：
+	// prompt -> scene -> attachment -> difficulty。
 	promptCol := headerCol(promptHeaders, nil, []string{"类型", "type"})
 
 	excludeScene := make(map[int]bool)
@@ -304,32 +165,17 @@ func DetectColumns(rows [][]string) map[string]any {
 	}
 	sceneCol := headerCol(sceneHeaders, excludeScene, nil)
 
-	excludeName := make(map[int]bool)
-	if promptCol != nil {
-		excludeName[*promptCol] = true
-	}
+	excludeAttach := copySet(excludeScene)
 	if sceneCol != nil {
-		excludeName[*sceneCol] = true
-	}
-	nameCol := headerCol(nameHeaders, excludeName, nil)
-
-	excludeAttach := copySet(excludeName)
-	if nameCol != nil {
-		excludeAttach[*nameCol] = true
+		excludeAttach[*sceneCol] = true
 	}
 	attachmentCol := headerCol(attachmentHeaders, excludeAttach, nil)
 
-	excludeSkill := copySet(excludeAttach)
+	excludeDifficulty := copySet(excludeAttach)
 	if attachmentCol != nil {
-		excludeSkill[*attachmentCol] = true
+		excludeDifficulty[*attachmentCol] = true
 	}
-	skillCol := headerCol(skillHeaders, excludeSkill, nil)
-
-	excludeTarget := copySet(excludeSkill)
-	if skillCol != nil {
-		excludeTarget[*skillCol] = true
-	}
-	targetCol := headerCol(targetHeaders, excludeTarget, []string{"输入类型"})
+	difficultyCol := headerCol(difficultyHeaders, excludeDifficulty, nil)
 
 	actualPromptCol := 0
 	if promptCol != nil {
@@ -364,17 +210,27 @@ func DetectColumns(rows [][]string) map[string]any {
 		}
 	}
 
+	hasPromptHeader := promptCol != nil
+	isValidTemplate := headIdx != nil && hasPromptHeader
+	var templateErr string
+	if headIdx == nil {
+		templateErr = "未识别到有效的表头行，请使用系统提供的标准模板导入"
+	} else if !hasPromptHeader {
+		templateErr = "未找到必选列【Query内容】（或【提问】），请使用系统提供的标准模板导入"
+	}
+
 	return map[string]any{
-		"header":         header,
-		"head_idx":       headIdx,
-		"prompt_col":     actualPromptCol,
-		"scene_col":      sceneCol,
-		"target_col":     targetCol,
-		"name_col":       nameCol,
-		"attachment_col": attachmentCol,
-		"skill_col":      skillCol,
-		"total_rows":     len(body),
-		"preview":        body,
+		"header":           header,
+		"head_idx":         headIdx,
+		"prompt_col":       actualPromptCol,
+		"prompt_col_found": hasPromptHeader,
+		"valid_template":   isValidTemplate,
+		"template_error":   templateErr,
+		"scene_col":        sceneCol,
+		"difficulty_col":   difficultyCol,
+		"attachment_col":   attachmentCol,
+		"total_rows":       len(body),
+		"preview":          body,
 	}
 }
 
@@ -386,9 +242,17 @@ func copySet(s map[int]bool) map[int]bool {
 	return res
 }
 
+// CaseCols 描述「一行用例的各字段取自哪一列」；nil 表示没有该列。
+// 用结构体而不是一串 *int，避免同类型参数按位置传错。
+type CaseCols struct {
+	Prompt     int
+	Scene      *int
+	Attachment *int
+	Difficulty *int
+}
+
 // RowsToItems 按列下标从数据行里取值
-func RowsToItems(rows [][]string, headIdx *int, promptCol int,
-	sceneCol, targetCol, nameCol, attachmentCol, skillCol *int) map[string]any {
+func RowsToItems(rows [][]string, headIdx *int, cols CaseCols) map[string]any {
 
 	startIdx := 0
 	if headIdx != nil {
@@ -411,7 +275,7 @@ func RowsToItems(rows [][]string, headIdx *int, promptCol int,
 	}
 
 	for _, r := range body {
-		pCol := promptCol
+		pCol := cols.Prompt
 		prompt := getVal(r, &pCol)
 		if prompt == "" {
 			hasAny := false
@@ -427,13 +291,9 @@ func RowsToItems(rows [][]string, headIdx *int, promptCol int,
 			continue
 		}
 
-		scene := getVal(r, sceneCol)
-		rawTargets := getVal(r, targetCol)
-		attVal := getVal(r, attachmentCol)
-		nameVal := getVal(r, nameCol)
-		skillVal := getVal(r, skillCol)
-
-		targets := InferTargets(prompt, attVal, rawTargets)
+		scene := getVal(r, cols.Scene)
+		attVal := getVal(r, cols.Attachment)
+		difficulty := getVal(r, cols.Difficulty)
 
 		attachments := []string{}
 		if attVal != "" {
@@ -449,64 +309,25 @@ func RowsToItems(rows [][]string, headIdx *int, promptCol int,
 			}
 		}
 
-		cid := ""
-		cname := ""
-		isAllDigits := true
-		for _, ch := range nameVal {
-			if !unicode.IsDigit(ch) {
-				isAllDigits = false
-				break
-			}
-		}
-		if nameVal != "" && isAllDigits {
-			seq, err := strconv.Atoi(nameVal)
-			if err == nil {
-				cid = fmt.Sprintf("CASE-%03d", seq)
-				if scene != "" {
-					cname = fmt.Sprintf("%s-%03d", scene, seq)
-				} else {
-					cname = fmt.Sprintf("用例-%03d", seq)
-				}
-			} else {
-				cname = nameVal
-			}
-		} else if nameVal != "" {
-			cname = nameVal
-		}
-
-		expectTools := []string{}
-		if skillVal != "" {
-			for _, s := range strings.Split(skillVal, ",") {
-				s = strings.TrimSpace(s)
-				if s != "" {
-					expectTools = append(expectTools, s)
-				}
-			}
-		}
-
 		labels := map[string]any{
 			"scene":      scene,
-			"targets":    targets,
 			"attachment": hasAttachment,
+		}
+		if difficulty != "" {
+			labels["difficulty"] = difficulty
 		}
 
 		knownCols := map[int]bool{
-			promptCol: true,
+			cols.Prompt: true,
 		}
-		if sceneCol != nil {
-			knownCols[*sceneCol] = true
+		if cols.Scene != nil {
+			knownCols[*cols.Scene] = true
 		}
-		if targetCol != nil {
-			knownCols[*targetCol] = true
+		if cols.Attachment != nil {
+			knownCols[*cols.Attachment] = true
 		}
-		if nameCol != nil {
-			knownCols[*nameCol] = true
-		}
-		if attachmentCol != nil {
-			knownCols[*attachmentCol] = true
-		}
-		if skillCol != nil {
-			knownCols[*skillCol] = true
+		if cols.Difficulty != nil {
+			knownCols[*cols.Difficulty] = true
 		}
 
 		if headIdx != nil && *headIdx >= 0 && *headIdx < len(rows) {
@@ -517,36 +338,21 @@ func RowsToItems(rows [][]string, headIdx *int, promptCol int,
 					colJ := j
 					val := getVal(r, &colJ)
 					if hName != "" && val != "" {
-						if strings.Contains(hName, "学科") {
-							labels["subject"] = val
-						} else if strings.Contains(hName, "难度") {
-							labels["difficulty"] = val
-						} else if strings.Contains(hName, "输入类型") {
-							labels["input_type"] = val
-						} else if strings.Contains(hName, "强项") {
-							labels["is_strength"] = val
-						} else {
-							labels[hName] = val
-						}
+						labels[hName] = val
 					}
 				}
 			}
 		}
 
 		cleanPrompt := cellNL.ReplaceAllString(prompt, "\n")
+		// 编号（CASE-NNN）与名称由服务端在入库时生成，这里不再从表格推导。
 		item := map[string]any{
-			"prompt":       cleanPrompt,
-			"scene":        scene,
-			"targets":      targets,
-			"raw_target":   rawTargets,
-			"name":         cname,
-			"attachments":  attachments,
-			"attachment":   hasAttachment,
-			"expect_tools": expectTools,
-			"labels":       labels,
-		}
-		if cid != "" {
-			item["id"] = cid
+			"prompt":      cleanPrompt,
+			"scene":       scene,
+			"difficulty":  difficulty,
+			"attachments": attachments,
+			"attachment":  hasAttachment,
+			"labels":      labels,
 		}
 		items = append(items, item)
 	}

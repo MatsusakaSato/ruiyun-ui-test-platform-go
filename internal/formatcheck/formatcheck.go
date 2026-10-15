@@ -24,54 +24,15 @@ func normText(s string) string {
 	return strings.ToLower(rePunct.ReplaceAllString(s, ""))
 }
 
-func kindsFromTargets(targets []string) map[string]bool {
-	res := make(map[string]bool)
-	targetKindsMap := map[string][]string{
-		"word":  {"docx"},
-		"ppt":   {"pptx"},
-		"html":  {"html"},
-		"excel": {"excel"},
-		"pdf":   {"pdf"},
-	}
-	for _, t := range targets {
-		if kinds, ok := targetKindsMap[t]; ok {
-			for _, k := range kinds {
-				res[k] = true
-			}
-		}
-	}
-	return res
-}
-
+// BuildContract 组装格式契约：期望产物类型 + 是否需要附件。
+//
+// kindsOverride 是期望产物类型的**唯一**来源（由评估器传入，取自问题原文的推断结果）。
+// 历史上还支持从 labels["targets"]（预设库的「测试目标」）取类型，该功能已下线，
+// 对应分支与 kindsFromTargets 一并删除 —— labels 里不会再出现 targets。
 func BuildContract(labels map[string]any, kindsOverride []string) map[string]any {
-	// targets 取自 labels["targets"]，逐项 strip 后转小写并丢弃空串。
-	// 注意 strip 用 canon.Strip（要去掉 U+001C–U+001F，TrimSpace 不会），
-	// 且**两个分支都要 strip** —— 早期实现漏了 []string 那条。
-	targets := []string{}
-	appendTarget := func(raw string) {
-		v := canon.Strip(raw)
-		if v != "" {
-			targets = append(targets, strings.ToLower(v))
-		}
-	}
-	switch tg := labels["targets"].(type) {
-	case []any:
-		for _, t := range tg {
-			appendTarget(fmt.Sprintf("%v", t))
-		}
-	case []string:
-		for _, t := range tg {
-			appendTarget(t)
-		}
-	}
-
 	kindsSet := make(map[string]bool)
-	if kindsOverride != nil {
-		for _, k := range kindsOverride {
-			kindsSet[k] = true
-		}
-	} else {
-		kindsSet = kindsFromTargets(targets)
+	for _, k := range kindsOverride {
+		kindsSet[k] = true
 	}
 
 	attachment := false
@@ -80,7 +41,6 @@ func BuildContract(labels map[string]any, kindsOverride []string) map[string]any
 	}
 
 	return map[string]any{
-		"targets":    targets,
 		"kinds":      kindsSet,
 		"attachment": attachment,
 	}

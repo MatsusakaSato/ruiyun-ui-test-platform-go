@@ -5,11 +5,12 @@ import { state } from './state.js';
 import { initConsole } from './console.js';
 import { initNav, switchPage, renderHistoryPane, loadEnv, refreshAppStatus, loadAutoClick } from './nav.js';
 import { initHome, renderRunCases, doRun, setRunning, renderStatus, goToLatestHistory } from './page-home.js';
-import { initCases, loadUploads, pickAttach, uploadFiles, openLib, closeLib, rmAttach, rmCaAttach, savePreset, renderCases, delCase, setCaseTab, syncCaseState, loadPresetLib } from './page-cases.js';
+import { initCases, loadUploads, pickAttach, uploadFiles, openLib, closeLib, rmAttach, rmCaAttach, renderCases, delCase, setCaseTab, syncCaseState, loadPresetLib } from './page-cases.js';
 import { initExcelImport } from './excel-import.js';
 import { initHistory, loadRounds, openRound, delRound, setTab, pickCase, startEval, stopEval, refreshEvalStatus, pollEval, openRoundById, copyRoundId } from './page-history.js';
 import { initModals, loadLLM, openLlm, revealCfgPath } from './modals.js';
 import { initNotify } from './page-notify.js';
+import { initSelectSkins } from './msel-select.js';
 
 // 将 HTML 模板内联交互所依赖的函数挂载到 window，模板里的 onclick 才能取到
 Object.assign(window, {
@@ -25,7 +26,6 @@ Object.assign(window, {
   pickAttach,
   openLib,
   closeLib,
-  savePreset,
   delCase,
   uploadFiles,
   openRound,
@@ -56,6 +56,7 @@ document.addEventListener('keydown', e => {
   initHistory();
   initModals();
   initNotify();
+  initSelectSkins();
 
   try {
     const c = await (await fetch('/api/config')).json();

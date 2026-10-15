@@ -50,16 +50,21 @@ export const state = {
   // 新增用例对话框内待保存的附件（{ name, path, size }），提交时取 path 数组入库
   CA_ATTS: [],
   CA_ATT_MAX: 5,
+  // 对话框里待保存的自定义标签（字符串数组，数量与内容都不限）；
+  // CA_EDIT_ID 非空表示对话框正处于「编辑已有用例」状态，提交时走 action:'update'
+  CA_TAGS: [],
+  CA_EDIT_ID: '',
 
   // 预设用例库
-  // 筛选条件：scenes / targets 为空数组表示不限；attachment 取 ''（不限）/ 'yes' / 'no'，
-  // 与后端 GET /api/preset-cases 的 scene、targets（逗号拼接）、attachment 参数一一对应。
+  // 筛选条件：scenes / difficulties / tags 为空数组表示不限；attachment 取 ''（不限）/ 'yes' / 'no'，
+  // 与后端 GET /api/preset-cases 的 scene、difficulties、tags（均为逗号拼接）、attachment 参数一一对应。
   LIB_LIMIT: 50,
-  LIB: { keyword: '', scenes: [], targets: [], attachment: '', offset: 0 },
+  LIB: { keyword: '', scenes: [], difficulties: [], tags: [], attachment: '', offset: 0 },
   LIB_ROWS: [],
   LIB_TOTAL: 0,
   LIB_SCENES: [],
-  LIB_TARGETS: [],
+  LIB_DIFFICULTIES: [],
+  LIB_TAGS: [],
   PSEL: new Set(),
   libKwTimer: null,
 

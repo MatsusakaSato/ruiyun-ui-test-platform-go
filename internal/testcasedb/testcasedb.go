@@ -60,10 +60,17 @@ func InitDB(customPath string) (string, error) {
 		name TEXT NOT NULL DEFAULT '',
 		prompt TEXT NOT NULL,
 		scene TEXT NOT NULL DEFAULT '',
+		difficulty TEXT NOT NULL DEFAULT '',
+		-- 历史遗留列：已无任何代码读写（原来的「测试目标」功能已下线）。
+		-- 保留是为了不做破坏性的数据迁移 —— 老库里的既有数据原样留着，
+		-- 新写入的行走该列的 DEFAULT '[]'。
 		targets TEXT NOT NULL DEFAULT '[]',
 		attachment INTEGER NOT NULL DEFAULT 0,
 		expect_tools TEXT NOT NULL DEFAULT '[]',
 		attachments TEXT NOT NULL DEFAULT '[]',
+		-- 自定义标签：JSON 字符串数组，数量与内容都不限（逗号除外，见下）。
+		-- 逗号是标签输入的确认键、也是筛选参数的传输分隔符，所以标签内容里不会有逗号。
+		tags TEXT NOT NULL DEFAULT '[]',
 		seq INTEGER NOT NULL DEFAULT 0,
 		created_at TEXT NOT NULL DEFAULT (datetime('now', 'localtime')),
 		updated_at TEXT NOT NULL DEFAULT (datetime('now', 'localtime'))
@@ -75,54 +82,55 @@ func InitDB(customPath string) (string, error) {
 	if _, err := db.Exec(schema); err != nil {
 		return "", err
 	}
+	// 老库里的 testcases 已存在，CREATE TABLE IF NOT EXISTS 不会补列，
+	// 因此这里逐列做一次幂等迁移（新库刚建出来时该列已存在，直接跳过）。
+	if err := ensureColumn(db, "testcases", "difficulty", "TEXT NOT NULL DEFAULT ''"); err != nil {
+		return "", err
+	}
+	if err := ensureColumn(db, "testcases", "tags", "TEXT NOT NULL DEFAULT '[]'"); err != nil {
+		return "", err
+	}
 	return path, nil
 }
 
-func normLabels(raw any) map[string]any {
-	out := make(map[string]any)
-	m, ok := raw.(map[string]any)
-	if !ok {
-		return out
+// ensureColumn 若表里没有该列就 ADD COLUMN 补上（SQLite 的 ALTER TABLE ADD COLUMN）。
+// 只补列、不重建表，既有行的数据原样保留，新列取 decl 里的默认值。
+func ensureColumn(db *sql.DB, table, column, decl string) error {
+	rows, err := db.Query(fmt.Sprintf("PRAGMA table_info(%s)", table))
+	if err != nil {
+		return err
 	}
-	scene := strings.TrimSpace(fmt.Sprintf("%v", m["scene"]))
-	if scene != "" && scene != "<nil>" {
-		out["scene"] = scene
-	}
-
-	var tgList []string
-	if tg, ok := m["targets"].([]any); ok {
-		for _, t := range tg {
-			s := strings.TrimSpace(fmt.Sprintf("%v", t))
-			if s != "" {
-				tgList = append(tgList, s)
-			}
+	found := false
+	for rows.Next() {
+		var (
+			cid       int
+			name      string
+			ctype     string
+			notNull   int
+			dfltValue sql.NullString
+			pk        int
+		)
+		if err := rows.Scan(&cid, &name, &ctype, &notNull, &dfltValue, &pk); err != nil {
+			rows.Close()
+			return err
 		}
-	} else if tg, ok := m["targets"].([]string); ok {
-		for _, s := range tg {
-			s = strings.TrimSpace(s)
-			if s != "" {
-				tgList = append(tgList, s)
-			}
+		if name == column {
+			found = true
 		}
 	}
-	if len(tgList) > 0 {
-		out["targets"] = tgList
+	if err := rows.Err(); err != nil {
+		rows.Close()
+		return err
 	}
-	if att, ok := m["attachment"].(bool); ok && att {
-		out["attachment"] = true
+	rows.Close()
+	if found {
+		return nil
 	}
-	return out
+	_, err = db.Exec(fmt.Sprintf("ALTER TABLE %s ADD COLUMN %s %s", table, column, decl))
+	return err
 }
 
-func rowToCase(id, name, prompt, scene, targetsStr string, attachment int, expectToolsStr, attachmentsStr string) map[string]any {
-	var targets []string
-	if targetsStr != "" {
-		_ = json.Unmarshal([]byte(targetsStr), &targets)
-	}
-	if targets == nil {
-		targets = []string{}
-	}
-
+func rowToCase(id, name, prompt, scene, difficulty, tagsStr string, attachment int, expectToolsStr, attachmentsStr string) map[string]any {
 	var expectTools []string
 	if expectToolsStr != "" {
 		_ = json.Unmarshal([]byte(expectToolsStr), &expectTools)
@@ -139,12 +147,22 @@ func rowToCase(id, name, prompt, scene, targetsStr string, attachment int, expec
 		attachments = []string{}
 	}
 
+	var tags []string
+	if tagsStr != "" {
+		_ = json.Unmarshal([]byte(tagsStr), &tags)
+	}
+
 	labels := make(map[string]any)
 	if scene != "" {
 		labels["scene"] = scene
 	}
-	if len(targets) > 0 {
-		labels["targets"] = targets
+	if difficulty != "" {
+		labels["difficulty"] = difficulty
+	}
+	// 自定义标签以字符串数组挂在 labels.tags 下（沿用难度「只作为标签回传」的口径）；
+	// 一条都没有时不出现该键，前端据此判断有没有标签。
+	if len(tags) > 0 {
+		labels["tags"] = tags
 	}
 	if attachment != 0 {
 		labels["attachment"] = true
@@ -152,8 +170,8 @@ func rowToCase(id, name, prompt, scene, targetsStr string, attachment int, expec
 
 	// 字段集合必须严格固定为：
 	// id / name / prompt / expect_tools / labels / attachments（+ 有附件时 attachment）。
-	// 不得多输出顶层 scene / targets —— 前端只读 labels.scene / labels.targets，
-	// 属契约偏离（HTTP 实测确认），已删除。
+	// 不得多输出顶层 scene —— 前端只读 labels.scene，属契约偏离（HTTP 实测确认），已删除。
+	// 难度同理，只作为 labels 里的一个标签回传，不新增顶层字段；自定义标签同理（labels.tags）。
 	res := map[string]any{
 		"id":           id,
 		"name":         name,
@@ -197,7 +215,7 @@ func GetPresetCases(customPath string) ([]map[string]any, error) {
 	}
 	defer db.Close()
 
-	rows, err := db.Query("SELECT id, name, prompt, scene, targets, attachment, expect_tools, attachments FROM testcases ORDER BY seq ASC, id ASC")
+	rows, err := db.Query("SELECT id, name, prompt, scene, difficulty, tags, attachment, expect_tools, attachments FROM testcases ORDER BY seq ASC, id ASC")
 	if err != nil {
 		return nil, err
 	}
@@ -205,18 +223,20 @@ func GetPresetCases(customPath string) ([]map[string]any, error) {
 
 	var cases []map[string]any
 	for rows.Next() {
-		var id, name, prompt, scene, targetsStr, expectToolsStr, attachmentsStr string
+		var id, name, prompt, scene, difficulty, tagsStr, expectToolsStr, attachmentsStr string
 		var attachment int
-		if err := rows.Scan(&id, &name, &prompt, &scene, &targetsStr, &attachment, &expectToolsStr, &attachmentsStr); err == nil {
-			cases = append(cases, rowToCase(id, name, prompt, scene, targetsStr, attachment, expectToolsStr, attachmentsStr))
+		if err := rows.Scan(&id, &name, &prompt, &scene, &difficulty, &tagsStr, &attachment, &expectToolsStr, &attachmentsStr); err == nil {
+			cases = append(cases, rowToCase(id, name, prompt, scene, difficulty, tagsStr, attachment, expectToolsStr, attachmentsStr))
 		}
 	}
 	return cases, nil
 }
 
 // QueryPresetCases 预设用例库分页与条件筛选查询
-// scenes / targets 为多选筛选（空切片表示不限），attachment 取 "" / "yes" / "no"
-func QueryPresetCases(keyword string, scenes, targets []string, attachment string, ids []string, limit, offset int, order, customPath string) (map[string]any, error) {
+// scenes / difficulties / tags 为多选筛选（空切片表示不限），attachment 取 "" / "yes" / "no"。
+// 多选语义两套：scenes / difficulties 命中任意一个即算匹配（「或」）；
+// tags 要求所选标签全部命中（「且」）—— 标签是用来「同时满足几个条件」地收窄的。
+func QueryPresetCases(keyword string, scenes, difficulties, tags []string, attachment string, ids []string, limit, offset int, order, customPath string) (map[string]any, error) {
 	_, err := InitDB(customPath)
 	if err != nil {
 		return nil, err
@@ -239,16 +259,20 @@ func QueryPresetCases(keyword string, scenes, targets []string, attachment strin
 		scRows.Close()
 	}
 
-	allTargets := []string{} // 同上：空集合必须是 []，不能是 null
-	tgRows, err := db.Query("SELECT DISTINCT value FROM testcases, json_each(testcases.targets) WHERE value != '' ORDER BY value")
+	allDifficulties := []string{} // 同上：空集合必须是 []，不能是 null
+	dfRows, err := db.Query("SELECT DISTINCT difficulty FROM testcases WHERE difficulty != '' ORDER BY difficulty")
 	if err == nil {
-		for tgRows.Next() {
-			var tg string
-			_ = tgRows.Scan(&tg)
-			allTargets = append(allTargets, tg)
+		for dfRows.Next() {
+			var df string
+			_ = dfRows.Scan(&df)
+			allDifficulties = append(allDifficulties, df)
 		}
-		tgRows.Close()
+		dfRows.Close()
 	}
+
+	// 自定义标签是标签列里的 JSON 数组，SQL 侧没有 DISTINCT 可用的单值；
+	// 选项列表与（有筛选时的）命中 id 都从这一次全表扫里算出来。
+	allTags, taggedIDs := scanTags(db)
 
 	// 2. 动态过滤条件
 	var whereClauses []string
@@ -305,22 +329,54 @@ func QueryPresetCases(keyword string, scenes, targets []string, attachment strin
 		whereClauses = append(whereClauses, "attachment = 0")
 	}
 
-	// 多选目标是「或」语义：命中任意一个即算匹配。
-	// 用 `value IN (...)` 单条 EXISTS —— 若改成按目标逐个 EXISTS
-	// 再用 AND 串起来，就变成「且」语义，结果集会大幅缩小
-	// （真实库实测：或=863 条，且=7 条）。
-	var tgList []string
-	for _, tg := range targets {
-		if t := strings.TrimSpace(tg); t != "" {
-			tgList = append(tgList, t)
+	// 多选难度同样是「或」语义，与 scene 一致按列精确匹配。
+	// 难度值是自由文本（界面上给 易/中/难，导入可能带别的值），不做大小写/模糊处理。
+	// 难度为空串的行（老数据）既不出现在选项里，也不会被任何一档筛中 ——
+	// IN 里的候选值都是非空串，空难度自然匹配不上。
+	var dfList []string
+	for _, df := range difficulties {
+		if d := strings.TrimSpace(df); d != "" {
+			dfList = append(dfList, d)
 		}
 	}
-	if len(tgList) > 0 {
-		ph := strings.TrimRight(strings.Repeat("?,", len(tgList)), ",")
-		whereClauses = append(whereClauses,
-			fmt.Sprintf("EXISTS (SELECT 1 FROM json_each(testcases.targets) WHERE value IN (%s))", ph))
-		for _, t := range tgList {
-			params = append(params, t)
+	if len(dfList) > 0 {
+		ph := strings.TrimRight(strings.Repeat("?,", len(dfList)), ",")
+		whereClauses = append(whereClauses, fmt.Sprintf("difficulty IN (%s)", ph))
+		for _, d := range dfList {
+			params = append(params, d)
+		}
+	}
+
+	// 自定义标签是「且」语义（与场景 / 难度的「或」不同）：所选标签必须**全部命中**才算匹配。
+	// 标签存在 JSON 数组列里，没法直接用 IN —— 这里换成「在 Go 侧算出命中的 id 集合」：
+	//   * 不用 LIKE '%"tag"%'：标签里带引号/反斜杠时 LIKE 会误判，也不能正确转义；
+	//   * 不依赖 SQLite 的 JSON1（json_each）：少一个运行时能力假设。
+	// 命中集为空时补 1=0 —— 拼 id IN () 是非法 SQL，且「没有任何用例同时带着这几个标签」本来就该返回空集。
+	var tagList []string
+	seenTag := make(map[string]bool)
+	for _, tg := range tags {
+		t := strings.TrimSpace(tg)
+		if t != "" && !seenTag[t] {
+			seenTag[t] = true
+			tagList = append(tagList, t)
+		}
+	}
+	if len(tagList) > 0 {
+		var hitIDs []string
+		for id, list := range taggedIDs {
+			if hasAllTags(list, tagList) {
+				hitIDs = append(hitIDs, id)
+			}
+		}
+		if len(hitIDs) == 0 {
+			whereClauses = append(whereClauses, "1=0")
+		} else {
+			sort.Strings(hitIDs) // 参数顺序稳定，便于排查
+			ph := strings.TrimRight(strings.Repeat("?,", len(hitIDs)), ",")
+			whereClauses = append(whereClauses, fmt.Sprintf("id IN (%s)", ph))
+			for _, id := range hitIDs {
+				params = append(params, id)
+			}
 		}
 	}
 
@@ -354,7 +410,7 @@ func QueryPresetCases(keyword string, scenes, targets []string, attachment strin
 		offset = 0
 	}
 
-	listSQL := fmt.Sprintf("SELECT id, name, prompt, scene, targets, attachment, expect_tools, attachments FROM testcases WHERE %s ORDER BY seq %s, id %s LIMIT ? OFFSET ?",
+	listSQL := fmt.Sprintf("SELECT id, name, prompt, scene, difficulty, tags, attachment, expect_tools, attachments FROM testcases WHERE %s ORDER BY seq %s, id %s LIMIT ? OFFSET ?",
 		whereSQL, sortOrder, sortOrder)
 	listParams := append(params, limit, offset)
 
@@ -366,61 +422,134 @@ func QueryPresetCases(keyword string, scenes, targets []string, attachment strin
 
 	cases := []map[string]any{} // 空结果必须是 []，不能是 null
 	for rows.Next() {
-		var id, name, prompt, scene, targetsStr, expectToolsStr, attachmentsStr string
+		var id, name, prompt, scene, difficulty, tagsStr, expectToolsStr, attachmentsStr string
 		var attachment int
-		if err := rows.Scan(&id, &name, &prompt, &scene, &targetsStr, &attachment, &expectToolsStr, &attachmentsStr); err == nil {
-			cases = append(cases, rowToCase(id, name, prompt, scene, targetsStr, attachment, expectToolsStr, attachmentsStr))
+		if err := rows.Scan(&id, &name, &prompt, &scene, &difficulty, &tagsStr, &attachment, &expectToolsStr, &attachmentsStr); err == nil {
+			cases = append(cases, rowToCase(id, name, prompt, scene, difficulty, tagsStr, attachment, expectToolsStr, attachmentsStr))
 		}
 	}
 
 	return map[string]any{
-		"cases":   cases,
-		"total":   total,
-		"offset":  offset,
-		"limit":   limit,
-		"scenes":  allScenes,
-		"targets": allTargets,
+		"cases":        cases,
+		"total":        total,
+		"offset":       offset,
+		"limit":        limit,
+		"scenes":       allScenes,
+		"difficulties": allDifficulties,
+		"tags":         allTags,
 	}, nil
 }
 
-// CaseDedupeKey 计算用例去重唯一键：prompt + scene + sorted(targets) + attachment
-func CaseDedupeKey(prompt, scene string, targets []string, hasAttachment bool) string {
-	normPrompt := strings.TrimSpace(prompt)
-	normScene := strings.TrimSpace(scene)
+// scanTags 一次扫全表：返回
+//
+//	allTags    标签选项列表（去重、升序；空集合是 [] 而不是 null）
+//	taggedIDs  case id -> 该用例的标签（只含确有标签的行）
+//
+// 标签列是 JSON 字符串数组，解析失败（老数据 / 手工改坏）的行按「没有标签」处理，不报错。
+func scanTags(db *sql.DB) (allTags []string, taggedIDs map[string][]string) {
+	allTags = []string{}
+	taggedIDs = map[string][]string{}
 
-	seen := make(map[string]bool)
-	var cleanTargets []string
-	for _, t := range targets {
-		ct := strings.TrimSpace(t)
-		if ct != "" && !seen[ct] {
-			seen[ct] = true
-			cleanTargets = append(cleanTargets, ct)
+	rows, err := db.Query("SELECT id, tags FROM testcases")
+	if err != nil {
+		return allTags, taggedIDs
+	}
+	defer rows.Close()
+
+	seen := map[string]bool{}
+	for rows.Next() {
+		var id, raw string
+		if err := rows.Scan(&id, &raw); err != nil {
+			continue
+		}
+		var list []string
+		if raw == "" || raw == "[]" || json.Unmarshal([]byte(raw), &list) != nil {
+			continue
+		}
+		if len(list) == 0 {
+			continue
+		}
+		taggedIDs[id] = list
+		for _, t := range list {
+			if t == "" || seen[t] {
+				continue
+			}
+			seen[t] = true
+			allTags = append(allTags, t)
 		}
 	}
-	sort.Strings(cleanTargets)
-	tgStr := strings.Join(cleanTargets, ",")
-
-	attStr := "0"
-	if hasAttachment {
-		attStr = "1"
-	}
-	return fmt.Sprintf("%s||%s||%s||%s", normPrompt, normScene, tgStr, attStr)
+	sort.Strings(allTags)
+	return allTags, taggedIDs
 }
 
-func extractCaseFields(item map[string]any) (prompt, scene, name, caseID string, targets []string, hasAttachment int, expectTools, attachments []string) {
+// hasAllTags 判断一条用例的标签里是否**同时**包含 want 里的每一个（「且」语义的来源）。
+// 用例标签数一般只有几个，直接双循环即可；want 已在调用侧去过重。
+func hasAllTags(caseTags, want []string) bool {
+	has := make(map[string]bool, len(caseTags))
+	for _, t := range caseTags {
+		has[t] = true
+	}
+	for _, w := range want {
+		if !has[w] {
+			return false
+		}
+	}
+	return true
+}
+
+// CaseDedupeKeyWithAtts 支持将具体附件文件名纳入去重键计算，避免不同附件的同名 Prompt 被误判为重复。
+//
+// 键格式（字段顺序固定，按 `||` 拼接）：
+//
+//	CleanWhitespace(prompt) || CleanWhitespace(scene) || CleanWhitespace(difficulty) || 附件段
+//
+// 附件段：无可识别附件时为 "0"；只有「需要附件」标记而无文件名时为 "1"；
+// 有文件名时为 "att:" + 基名去重排序后逗号连接。
+//
+// prompt / scene / difficulty 一律按「删除全部空白」归一化（models.CleanWhitespace，
+// 与评估器 normPrompt、预设索引键同一套空白语义）。若这里只用 TrimSpace，
+// 「写 一首诗」与「写一首诗」会各自入库，但运行时索引键相同 —— 索引互相覆盖，
+// 去重也就名存实亡。全角空格/NBSP/换行是最常见的来源（中英混排与 Word 复制）。
+// 难度是标签的一部分，因此与 scene 同等对待、一起参与拼键。
+//
+// 已下线的「测试目标」不再进键：历史上 targets 字段不同的两条用例，
+// 只要 prompt / scene / difficulty / 附件相同就算重复。
+func CaseDedupeKeyWithAtts(prompt, scene, difficulty string, hasAttachment bool, attachments []string) string {
+	normPrompt := models.CleanWhitespace(prompt)
+	normScene := models.CleanWhitespace(scene)
+	normDifficulty := models.CleanWhitespace(difficulty)
+
+	var cleanAtts []string
+	seenAtt := make(map[string]bool)
+	for _, a := range attachments {
+		ca := strings.TrimSpace(a)
+		if ca != "" {
+			base := filepath.Base(ca)
+			if !seenAtt[base] {
+				seenAtt[base] = true
+				cleanAtts = append(cleanAtts, base)
+			}
+		}
+	}
+	sort.Strings(cleanAtts)
+	attPart := "0"
+	if len(cleanAtts) > 0 {
+		attPart = "att:" + strings.Join(cleanAtts, ",")
+	} else if hasAttachment {
+		attPart = "1"
+	}
+	return fmt.Sprintf("%s||%s||%s||%s", normPrompt, normScene, normDifficulty, attPart)
+}
+
+// CaseDedupeKey 计算用例去重唯一键：prompt + scene + difficulty + attachment
+func CaseDedupeKey(prompt, scene, difficulty string, hasAttachment bool) string {
+	return CaseDedupeKeyWithAtts(prompt, scene, difficulty, hasAttachment, nil)
+}
+
+func extractCaseFields(item map[string]any) (prompt, scene, difficulty string, tags []string, hasAttachment int, expectTools, attachments []string) {
 	prompt = strings.TrimSpace(fmt.Sprintf("%v", item["prompt"]))
 	if prompt == "<nil>" {
 		prompt = ""
-	}
-
-	name = strings.TrimSpace(fmt.Sprintf("%v", item["name"]))
-	if name == "<nil>" {
-		name = ""
-	}
-
-	caseID = strings.TrimSpace(fmt.Sprintf("%v", item["id"]))
-	if caseID == "<nil>" {
-		caseID = ""
 	}
 
 	// 优先从 labels 提取
@@ -432,24 +561,24 @@ func extractCaseFields(item map[string]any) (prompt, scene, name, caseID string,
 				scene = ""
 			}
 		}
-		if tg, ok := rawLabels["targets"].([]any); ok {
-			for _, t := range tg {
-				st := strings.TrimSpace(fmt.Sprintf("%v", t))
-				if st != "" && st != "<nil>" {
-					targets = append(targets, st)
-				}
-			}
-		} else if tg, ok := rawLabels["targets"].([]string); ok {
-			for _, st := range tg {
-				st = strings.TrimSpace(st)
-				if st != "" {
-					targets = append(targets, st)
-				}
+		if s, ok := rawLabels["difficulty"]; ok && s != nil {
+			difficulty = strings.TrimSpace(fmt.Sprintf("%v", s))
+			if difficulty == "<nil>" {
+				difficulty = ""
 			}
 		}
 		if att, ok := rawLabels["attachment"].(bool); ok && att {
 			hasAttachment = 1
 		}
+	}
+
+	// 自定义标签：labels.tags 优先，顶层 tags 兜底（与 scene / difficulty 同一套取值口径）。
+	// 只认数组 —— Excel 里恰好有个叫 tags 的列时会是字符串，那种值忽略掉，别写坏标签列。
+	if rawLabels != nil {
+		tags = cleanTags(rawLabels["tags"])
+	}
+	if len(tags) == 0 {
+		tags = cleanTags(item["tags"])
 	}
 
 	// 顶层覆盖/兜底
@@ -461,20 +590,11 @@ func extractCaseFields(item map[string]any) (prompt, scene, name, caseID string,
 			}
 		}
 	}
-	if len(targets) == 0 {
-		if tg, ok := item["targets"].([]any); ok {
-			for _, t := range tg {
-				st := strings.TrimSpace(fmt.Sprintf("%v", t))
-				if st != "" && st != "<nil>" {
-					targets = append(targets, st)
-				}
-			}
-		} else if tg, ok := item["targets"].([]string); ok {
-			for _, st := range tg {
-				st = strings.TrimSpace(st)
-				if st != "" {
-					targets = append(targets, st)
-				}
+	if difficulty == "" {
+		if s, ok := item["difficulty"]; ok && s != nil {
+			difficulty = strings.TrimSpace(fmt.Sprintf("%v", s))
+			if difficulty == "<nil>" {
+				difficulty = ""
 			}
 		}
 	}
@@ -508,8 +628,43 @@ func extractCaseFields(item map[string]any) (prompt, scene, name, caseID string,
 	} else if exp, ok := item["expect_tools"].([]string); ok {
 		expectTools = exp
 	}
+	// 该列是 TEXT NOT NULL DEFAULT '[]'：nil 会被 json.Marshal 成 "null" 写进列里，
+	// 而契约要求是数组。空时统一给空切片。
+	if expectTools == nil {
+		expectTools = []string{}
+	}
 
 	return
+}
+
+// cleanTags 归一化自定义标签：只接受字符串数组（[]any / []string），
+// 逐个 TrimSpace、丢掉空串、按首次出现去重（顺序即用户输入顺序）；其余类型一律当作没有标签。
+// 标签数量与内容都不设上限 —— 只有空串和重复项会被丢掉。
+// 返回的切片永远非 nil：调用方要直接 json.Marshal 落库，nil 会编成 "null" 而不是 "[]"。
+func cleanTags(raw any) []string {
+	var src []string
+	switch v := raw.(type) {
+	case []string:
+		src = v
+	case []any:
+		for _, it := range v {
+			src = append(src, fmt.Sprintf("%v", it))
+		}
+	default:
+		return []string{}
+	}
+
+	out := make([]string, 0, len(src))
+	seen := make(map[string]bool, len(src))
+	for _, t := range src {
+		s := strings.TrimSpace(t)
+		if s == "" || s == "<nil>" || seen[s] {
+			continue
+		}
+		seen[s] = true
+		out = append(out, s)
+	}
+	return out
 }
 
 // AddPresetCase 单条新增预设用例（支持提问与标签完全一致自动去重）
@@ -528,7 +683,7 @@ func AddPresetCase(item map[string]any, customPath string) (bool, string, map[st
 	}
 	defer db.Close()
 
-	prompt, scene, name, caseID, targets, hasAttachment, expectTools, attachments := extractCaseFields(item)
+	prompt, scene, difficulty, tags, hasAttachment, expectTools, attachments := extractCaseFields(item)
 	if prompt == "" {
 		return false, "提问为必填", nil
 	}
@@ -539,20 +694,22 @@ func AddPresetCase(item map[string]any, customPath string) (bool, string, map[st
 	}
 	defer tx.Rollback()
 
-	// 查重：提问和标签（scene, targets, attachment）完全一致的用例视为重复
-	currDedupeKey := CaseDedupeKey(prompt, scene, targets, hasAttachment == 1)
-	existingRows, err := tx.Query("SELECT id, prompt, scene, targets, attachment FROM testcases WHERE trim(prompt) = ?", prompt)
+	// 查重：提问和标签（scene, difficulty, attachment/attachments）完全一致的用例视为重复。
+	// 去重键按「删除全部空白」归一化，SQLite 的 trim()/replace() 覆盖不了 29 个空白码点，
+	// 因此这里取全表候选、在 Go 侧算键比对；单条新增是用户动作，全表扫描的量级无关紧要。
+	currDedupeKey := CaseDedupeKeyWithAtts(prompt, scene, difficulty, hasAttachment == 1, attachments)
+	existingRows, err := tx.Query("SELECT id, prompt, scene, difficulty, attachment, attachments FROM testcases")
 	if err == nil {
 		defer existingRows.Close()
 		for existingRows.Next() {
-			var eid, eprompt, escene, etargetsStr string
+			var eid, eprompt, escene, edifficulty, eattachmentsStr string
 			var eattachment int
-			if err := existingRows.Scan(&eid, &eprompt, &escene, &etargetsStr, &eattachment); err == nil {
-				var etargets []string
-				if etargetsStr != "" {
-					_ = json.Unmarshal([]byte(etargetsStr), &etargets)
+			if err := existingRows.Scan(&eid, &eprompt, &escene, &edifficulty, &eattachment, &eattachmentsStr); err == nil {
+				var eattachments []string
+				if eattachmentsStr != "" {
+					_ = json.Unmarshal([]byte(eattachmentsStr), &eattachments)
 				}
-				if CaseDedupeKey(eprompt, escene, etargets, eattachment == 1) == currDedupeKey {
+				if CaseDedupeKeyWithAtts(eprompt, escene, edifficulty, eattachment == 1, eattachments) == currDedupeKey {
 					return false, fmt.Sprintf("用例已存在（编号：%s）", eid), nil
 				}
 			}
@@ -577,37 +734,35 @@ func AddPresetCase(item map[string]any, customPath string) (bool, string, map[st
 	}
 	nextSeq := maxSeq + 1
 
-	if caseID == "" {
-		caseID = fmt.Sprintf("CASE-%03d", nextSeq)
+	// 编号与名称一律由服务端生成：编号 = CASE-NNN（序号），名称 = 场景-NNN（无场景时 自定义-NNN）。
+	caseID := fmt.Sprintf("CASE-%03d", nextSeq)
+	name := ""
+	if scene != "" {
+		name = fmt.Sprintf("%s-%03d", scene, nextSeq)
+	} else {
+		name = fmt.Sprintf("自定义-%03d", nextSeq)
 	}
 
-	if name == "" {
-		if scene != "" {
-			name = fmt.Sprintf("%s-%03d", scene, nextSeq)
-		} else {
-			name = fmt.Sprintf("自定义-%03d", nextSeq)
-		}
-	}
-
-	tgJSON, _ := json.Marshal(targets)
+	tagsJSON, _ := json.Marshal(tags)
 	attJSON, _ := json.Marshal(attachments)
 	expJSON, _ := json.Marshal(expectTools)
 
 	insertSQL := `
-	INSERT INTO testcases (id, name, prompt, scene, targets, attachment, expect_tools, attachments, seq, created_at, updated_at)
-	VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, datetime('now', 'localtime'), datetime('now', 'localtime'))
+	INSERT INTO testcases (id, name, prompt, scene, difficulty, tags, attachment, expect_tools, attachments, seq, created_at, updated_at)
+	VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, datetime('now', 'localtime'), datetime('now', 'localtime'))
 	ON CONFLICT(id) DO UPDATE SET
 		name=excluded.name,
 		prompt=excluded.prompt,
 		scene=excluded.scene,
-		targets=excluded.targets,
+		difficulty=excluded.difficulty,
+		tags=excluded.tags,
 		attachment=excluded.attachment,
 		expect_tools=excluded.expect_tools,
 		attachments=excluded.attachments,
 		seq=excluded.seq,
 		updated_at=datetime('now', 'localtime')
 	`
-	if _, err := tx.Exec(insertSQL, caseID, name, prompt, scene, string(tgJSON), hasAttachment, string(expJSON), string(attJSON), nextSeq); err != nil {
+	if _, err := tx.Exec(insertSQL, caseID, name, prompt, scene, difficulty, string(tagsJSON), hasAttachment, string(expJSON), string(attJSON), nextSeq); err != nil {
 		return false, fmt.Sprintf("写入数据库失败: %v", err), nil
 	}
 
@@ -615,55 +770,151 @@ func AddPresetCase(item map[string]any, customPath string) (bool, string, map[st
 		return false, fmt.Sprintf("提交事务失败: %v", err), nil
 	}
 
-	resCase := rowToCase(caseID, name, prompt, scene, string(tgJSON), hasAttachment, string(expJSON), string(attJSON))
+	resCase := rowToCase(caseID, name, prompt, scene, difficulty, string(tagsJSON), hasAttachment, string(expJSON), string(attJSON))
 	return true, fmt.Sprintf("已成功添加用例 %s", caseID), resCase
 }
 
-// AddPresetCases 批量新增或覆盖预设用例（支持自动去重已存在或批次内重复的用例）
-func AddPresetCases(items []map[string]any, replace bool, customPath string) (bool, string, int) {
-	if len(items) == 0 {
-		return false, "没有可导入的用例（提问列全为空？）", 0
+// UpdatePresetCase 改写已有预设用例：编号（id）、序号（seq）、创建时间都不动，只改内容与 updated_at。
+//
+// item 必须带 id，字段口径与 AddPresetCase 完全一致（prompt / labels / attachments）。
+// 判重跳过自己那一行 —— 只改自定义标签（或任何字段原地改回原值）不会和自己撞车，
+// 而改完与**另一条**用例完全一致时仍要拒绝，否则库里会出现两条一模一样的用例。
+func UpdatePresetCase(item map[string]any, customPath string) (bool, string, map[string]any) {
+	id := strings.TrimSpace(fmt.Sprintf("%v", item["id"]))
+	if id == "<nil>" {
+		id = ""
+	}
+	if id == "" {
+		return false, "缺少用例编号（id）", nil
 	}
 
-	_, err := InitDB(customPath)
-	if err != nil {
-		return false, fmt.Sprintf("初始化数据库失败: %v", err), 0
+	if _, err := InitDB(customPath); err != nil {
+		return false, fmt.Sprintf("初始化数据库失败: %v", err), nil
 	}
 
 	dbMu.Lock()
 	defer dbMu.Unlock()
 	db, err := GetConnection(customPath)
 	if err != nil {
-		return false, fmt.Sprintf("连接数据库失败: %v", err), 0
+		return false, fmt.Sprintf("连接数据库失败: %v", err), nil
+	}
+	defer db.Close()
+
+	prompt, scene, difficulty, tags, hasAttachment, expectTools, attachments := extractCaseFields(item)
+	if prompt == "" {
+		return false, "提问为必填", nil
+	}
+
+	tx, err := db.Begin()
+	if err != nil {
+		return false, fmt.Sprintf("开启事务失败: %v", err), nil
+	}
+	defer tx.Rollback()
+
+	// 1. 目标行必须在；顺带把 seq 取出来（编号与序号都不变，名称按新场景用原 seq 重算）
+	var seq int
+	if err := tx.QueryRow("SELECT seq FROM testcases WHERE id = ?", id).Scan(&seq); err != nil {
+		if err == sql.ErrNoRows {
+			return false, fmt.Sprintf("用例不存在（编号：%s），可能已被删除", id), nil
+		}
+		return false, fmt.Sprintf("读取用例失败: %v", err), nil
+	}
+
+	// 2. 判重：提问 + 场景 + 难度 + 附件 与别人完全一致就拒绝（自定义标签不参与，见 CaseDedupeKeyWithAtts）
+	currDedupeKey := CaseDedupeKeyWithAtts(prompt, scene, difficulty, hasAttachment == 1, attachments)
+	dupRows, err := tx.Query("SELECT id, prompt, scene, difficulty, attachment, attachments FROM testcases WHERE id != ?", id)
+	if err == nil {
+		defer dupRows.Close()
+		for dupRows.Next() {
+			var oid, oprompt, oscene, odifficulty, oattachmentsStr string
+			var oattachment int
+			if err := dupRows.Scan(&oid, &oprompt, &oscene, &odifficulty, &oattachment, &oattachmentsStr); err == nil {
+				var oattachments []string
+				if oattachmentsStr != "" {
+					_ = json.Unmarshal([]byte(oattachmentsStr), &oattachments)
+				}
+				if CaseDedupeKeyWithAtts(oprompt, oscene, odifficulty, oattachment == 1, oattachments) == currDedupeKey {
+					return false, fmt.Sprintf("用例已存在（编号：%s）", oid), nil
+				}
+			}
+		}
+	}
+
+	// 3. 名称一律由服务端按场景生成，与新增同口径（无场景时「自定义-NNN」）
+	name := ""
+	if scene != "" {
+		name = fmt.Sprintf("%s-%03d", scene, seq)
+	} else {
+		name = fmt.Sprintf("自定义-%03d", seq)
+	}
+
+	tagsJSON, _ := json.Marshal(tags)
+	attJSON, _ := json.Marshal(attachments)
+	expJSON, _ := json.Marshal(expectTools)
+
+	if _, err := tx.Exec(`
+	UPDATE testcases
+	SET name = ?, prompt = ?, scene = ?, difficulty = ?, tags = ?, attachment = ?,
+	    expect_tools = ?, attachments = ?, updated_at = datetime('now', 'localtime')
+	WHERE id = ?`,
+		name, prompt, scene, difficulty, string(tagsJSON), hasAttachment,
+		string(expJSON), string(attJSON), id); err != nil {
+		return false, fmt.Sprintf("更新数据库失败: %v", err), nil
+	}
+
+	if err := tx.Commit(); err != nil {
+		return false, fmt.Sprintf("提交事务失败: %v", err), nil
+	}
+
+	resCase := rowToCase(id, name, prompt, scene, difficulty, string(tagsJSON), hasAttachment, string(expJSON), string(attJSON))
+	return true, fmt.Sprintf("已更新用例 %s", id), resCase
+}
+
+// AddPresetCasesEx 批量新增或覆盖预设用例，额外返回去重跳过条数
+func AddPresetCasesEx(items []map[string]any, replace bool, customPath string) (bool, string, int, int) {
+	if len(items) == 0 {
+		return false, "没有可导入的用例（提问列全为空？）", 0, 0
+	}
+
+	_, err := InitDB(customPath)
+	if err != nil {
+		return false, fmt.Sprintf("初始化数据库失败: %v", err), 0, 0
+	}
+
+	dbMu.Lock()
+	defer dbMu.Unlock()
+	db, err := GetConnection(customPath)
+	if err != nil {
+		return false, fmt.Sprintf("连接数据库失败: %v", err), 0, 0
 	}
 	defer db.Close()
 
 	tx, err := db.Begin()
 	if err != nil {
-		return false, fmt.Sprintf("开启事务失败: %v", err), 0
+		return false, fmt.Sprintf("开启事务失败: %v", err), 0, 0
 	}
 	defer tx.Rollback()
 
 	if replace {
 		if _, err := tx.Exec("DELETE FROM testcases"); err != nil {
-			return false, fmt.Sprintf("清空既有用例失败: %v", err), 0
+			return false, fmt.Sprintf("清空既有用例失败: %v", err), 0, 0
 		}
 	}
 
 	// 加载已有用例用于去重
 	existingMap := make(map[string]string)
 	if !replace {
-		rows, err := tx.Query("SELECT id, prompt, scene, targets, attachment FROM testcases")
+		rows, err := tx.Query("SELECT id, prompt, scene, difficulty, attachment, attachments FROM testcases")
 		if err == nil {
 			for rows.Next() {
-				var eid, eprompt, escene, etgStr string
+				var eid, eprompt, escene, edifficulty, eattsStr string
 				var eatt int
-				if err := rows.Scan(&eid, &eprompt, &escene, &etgStr, &eatt); err == nil {
-					var etg []string
-					if etgStr != "" {
-						_ = json.Unmarshal([]byte(etgStr), &etg)
+				if err := rows.Scan(&eid, &eprompt, &escene, &edifficulty, &eatt, &eattsStr); err == nil {
+					var eatts []string
+					if eattsStr != "" {
+						_ = json.Unmarshal([]byte(eattsStr), &eatts)
 					}
-					existingMap[CaseDedupeKey(eprompt, escene, etg, eatt == 1)] = eid
+					existingMap[CaseDedupeKeyWithAtts(eprompt, escene, edifficulty, eatt == 1, eatts)] = eid
 				}
 			}
 			rows.Close()
@@ -686,13 +937,14 @@ func AddPresetCases(items []map[string]any, replace bool, customPath string) (bo
 	}
 
 	stmt, err := tx.Prepare(`
-	INSERT INTO testcases (id, name, prompt, scene, targets, attachment, expect_tools, attachments, seq, created_at, updated_at)
-	VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, datetime('now', 'localtime'), datetime('now', 'localtime'))
+	INSERT INTO testcases (id, name, prompt, scene, difficulty, tags, attachment, expect_tools, attachments, seq, created_at, updated_at)
+	VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, datetime('now', 'localtime'), datetime('now', 'localtime'))
 	ON CONFLICT(id) DO UPDATE SET
 		name=excluded.name,
 		prompt=excluded.prompt,
 		scene=excluded.scene,
-		targets=excluded.targets,
+		difficulty=excluded.difficulty,
+		tags=excluded.tags,
 		attachment=excluded.attachment,
 		expect_tools=excluded.expect_tools,
 		attachments=excluded.attachments,
@@ -700,7 +952,7 @@ func AddPresetCases(items []map[string]any, replace bool, customPath string) (bo
 		updated_at=datetime('now', 'localtime')
 	`)
 	if err != nil {
-		return false, fmt.Sprintf("准备插入语句失败: %v", err), 0
+		return false, fmt.Sprintf("准备插入语句失败: %v", err), 0, 0
 	}
 	defer stmt.Close()
 
@@ -709,12 +961,12 @@ func AddPresetCases(items []map[string]any, replace bool, customPath string) (bo
 	skippedDup := 0
 
 	for _, it := range items {
-		prompt, scene, name, caseID, targets, hasAttachment, expectTools, attachments := extractCaseFields(it)
+		prompt, scene, difficulty, tags, hasAttachment, expectTools, attachments := extractCaseFields(it)
 		if prompt == "" {
 			continue
 		}
 
-		dedupeKey := CaseDedupeKey(prompt, scene, targets, hasAttachment == 1)
+		dedupeKey := CaseDedupeKeyWithAtts(prompt, scene, difficulty, hasAttachment == 1, attachments)
 		if (len(existingMap) > 0 && existingMap[dedupeKey] != "") || seenInBatch[dedupeKey] {
 			skippedDup++
 			continue
@@ -722,30 +974,27 @@ func AddPresetCases(items []map[string]any, replace bool, customPath string) (bo
 		seenInBatch[dedupeKey] = true
 
 		maxSeq++
-		if caseID == "" || !replace {
-			caseID = fmt.Sprintf("CASE-%03d", maxSeq)
+		// 编号与名称一律由服务端生成（导入路径无场景时用「导入-NNN」）。
+		caseID := fmt.Sprintf("CASE-%03d", maxSeq)
+		name := ""
+		if scene != "" {
+			name = fmt.Sprintf("%s-%03d", scene, maxSeq)
+		} else {
+			name = fmt.Sprintf("导入-%03d", maxSeq)
 		}
 
-		if name == "" {
-			if scene != "" {
-				name = fmt.Sprintf("%s-%03d", scene, maxSeq)
-			} else {
-				name = fmt.Sprintf("导入-%03d", maxSeq)
-			}
-		}
-
-		tgJSON, _ := json.Marshal(targets)
+		tagsJSON, _ := json.Marshal(tags)
 		attJSON, _ := json.Marshal(attachments)
 		expJSON, _ := json.Marshal(expectTools)
 
-		if _, err := stmt.Exec(caseID, name, prompt, scene, string(tgJSON), hasAttachment, string(expJSON), string(attJSON), maxSeq); err != nil {
-			return false, fmt.Sprintf("批量写入失败: %v", err), 0
+		if _, err := stmt.Exec(caseID, name, prompt, scene, difficulty, string(tagsJSON), hasAttachment, string(expJSON), string(attJSON), maxSeq); err != nil {
+			return false, fmt.Sprintf("批量写入失败: %v", err), 0, 0
 		}
 		added++
 	}
 
 	if err := tx.Commit(); err != nil {
-		return false, fmt.Sprintf("提交事务失败: %v", err), 0
+		return false, fmt.Sprintf("提交事务失败: %v", err), 0, 0
 	}
 
 	var total int
@@ -761,7 +1010,13 @@ func AddPresetCases(items []map[string]any, replace bool, customPath string) (bo
 	} else {
 		msg = fmt.Sprintf("已%s导入 %d 条（预设共 %d 条）", modeText, added, total)
 	}
-	return true, msg, added
+	return true, msg, added, skippedDup
+}
+
+// AddPresetCases 批量新增或覆盖预设用例（保持原有签名，兼容老调用方）
+func AddPresetCases(items []map[string]any, replace bool, customPath string) (bool, string, int) {
+	ok, msg, added, _ := AddPresetCasesEx(items, replace, customPath)
+	return ok, msg, added
 }
 
 // DeletePresetCases 批量删除预设用例
@@ -920,7 +1175,7 @@ func GetPresetLabelsIndex(customPath string) (map[string]map[string]any, error) 
 	}
 	defer db.Close()
 
-	rows, err := db.Query("SELECT prompt, scene, targets, attachment FROM testcases")
+	rows, err := db.Query("SELECT prompt, scene, attachment FROM testcases")
 	if err != nil {
 		return nil, err
 	}
@@ -928,9 +1183,9 @@ func GetPresetLabelsIndex(customPath string) (map[string]map[string]any, error) 
 
 	out := make(map[string]map[string]any)
 	for rows.Next() {
-		var prompt, scene, targetsStr string
+		var prompt, scene string
 		var attachment int
-		if err := rows.Scan(&prompt, &scene, &targetsStr, &attachment); err == nil {
+		if err := rows.Scan(&prompt, &scene, &attachment); err == nil {
 			key := models.CleanWhitespace(prompt)
 			if key == "" {
 				continue
@@ -938,13 +1193,6 @@ func GetPresetLabelsIndex(customPath string) (map[string]map[string]any, error) 
 			labels := make(map[string]any)
 			if scene != "" {
 				labels["scene"] = scene
-			}
-			var tg []string
-			if targetsStr != "" {
-				_ = json.Unmarshal([]byte(targetsStr), &tg)
-			}
-			if len(tg) > 0 {
-				labels["targets"] = tg
 			}
 			if attachment != 0 {
 				labels["attachment"] = true

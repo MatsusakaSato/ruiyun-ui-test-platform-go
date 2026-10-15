@@ -16,8 +16,10 @@
 /* 必填标识 */
 .req{color:var(--p0);font-weight:700;margin-left:2px}
 
-/* 收件人下拉 */
-#notifyGroup{width:100%;max-width:280px;padding:9px 11px;font-size:13px}
+/* 收件人下拉：外观由 msel-select.js 生成，这里只管尺寸 */
+.nf-block .msel-single{width:100%;max-width:280px}
+.nf-block .msel-single .msel-box{min-height:34px;padding:0 11px;font-size:13px}
+.nf-block .msel-single .msel-val{font-size:13px}
 
 /* 内容区：标题行右侧放「存入预设」 */
 .nf-editor-hd{display:flex;align-items:center;gap:10px;margin-bottom:7px;flex-wrap:wrap}
@@ -35,7 +37,7 @@
 /* 底部操作条：贴卡片底部，细分隔线 */
 .nf-foot{display:flex;align-items:center;gap:10px;flex-wrap:wrap;
   margin-top:auto;padding-top:15px;border-top:1px solid var(--line2)}
-#notifyTpl{max-width:220px;padding:7px 10px;font-size:12.5px}
+.nf-foot .msel-single{max-width:240px}
 .nf-foot-hint{flex:1 1 auto;min-width:0}
 .nf-foot .btn-primary{min-width:104px}
 
@@ -107,9 +109,9 @@
   .nf-card{padding:15px 14px;border-radius:12px;min-height:0;gap:13px}
   .nf-grow{min-height:180px}
   #pageNotify textarea{min-height:150px}
-  #notifyGroup{max-width:none}
+  .nf-block .msel-single{max-width:none}
   .nf-foot{gap:9px}
-  #notifyTpl{flex:1 1 auto;max-width:none}
+  .nf-foot .msel-single{flex:1 1 auto;max-width:none}
   .nf-foot-hint{order:3;width:100%;flex:1 1 100%}
   .nf-foot .btn-primary{order:4;width:100%;padding-left:16px}
   .nf-foot .btn-primary.is-busy{padding-left:16px}

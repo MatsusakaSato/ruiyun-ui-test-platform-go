@@ -41,12 +41,12 @@
 <header><div class="wrap hd">
   <span class="termination-reason" id="terminationReason" hidden></span>
   <div class="spacer"></div>
-  <span class="opt" id="wrapEnv">环境
+  <div class="hd-tools">
     <select id="optEnv"></select>
-  </span>
-  <button class="btn-ghost" id="btnCloseApp" title="关闭应用实例">关闭实例</button>
-  <span class="opt settings-wrap">
-    <button class="btn-ghost" id="btnSettings">设置 ▾</button>
+    <span class="hd-sep" aria-hidden="true"></span>
+    <button class="btn-ghost hd-btn" id="btnCloseApp" title="关闭应用实例">关闭实例</button>
+    <span class="opt settings-wrap">
+    <button class="btn-ghost hd-btn" id="btnSettings" aria-haspopup="menu">设置<svg class="hd-caret" aria-hidden="true" viewBox="0 0 16 16" width="12" height="12" fill="none"><path d="M4.5 6.5 8 10l3.5-3.5" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/></svg></button>
     <div class="settings-menu" id="settingsMenu">
       <button class="sm-item" data-act="app">应用与工作区</button>
       <button class="sm-item" data-act="model" id="smModel"><span class="llm-dot" id="llmDot"></span>模型设置</button>
@@ -140,14 +140,23 @@
           </div>
           <div class="msel-pop" id="mselScenePop" role="listbox" aria-multiselectable="true" hidden></div>
         </div>
-        <div class="msel" id="mselTarget">
-          <div class="msel-box" id="mselTargetBox" role="button" tabindex="0"
+        <div class="msel" id="mselDiff">
+          <div class="msel-box" id="mselDiffBox" role="button" tabindex="0"
                aria-haspopup="listbox" aria-expanded="false">
-            <span class="msel-lb">测试目标</span>
-            <span class="msel-tags" id="mselTargetTags"></span>
+            <span class="msel-lb">难度</span>
+            <span class="msel-tags" id="mselDiffTags"></span>
             <span class="msel-caret">▾</span>
           </div>
-          <div class="msel-pop" id="mselTargetPop" role="listbox" aria-multiselectable="true" hidden></div>
+          <div class="msel-pop" id="mselDiffPop" role="listbox" aria-multiselectable="true" hidden></div>
+        </div>
+        <div class="msel" id="mselTags">
+          <div class="msel-box" id="mselTagsBox" role="button" tabindex="0"
+               aria-haspopup="listbox" aria-expanded="false">
+            <span class="msel-lb">标签</span>
+            <span class="msel-tags" id="mselTagsTags"></span>
+            <span class="msel-caret">▾</span>
+          </div>
+          <div class="msel-pop" id="mselTagsPop" role="listbox" aria-multiselectable="true" hidden></div>
         </div>
         <label class="msel-check"><input type="checkbox" id="libAtt"/><span id="libAttText"></span></label>
       </div>
@@ -283,7 +292,6 @@
     <div class="nf-foot">
       <select id="notifyTpl" title="选择预设模板，内容会填入上方输入框"></select>
       <button class="btn-ghost" id="btnTplManage" title="重命名 / 删除预设模板">管理</button>
-      <span class="fhint nf-foot-hint">群机器人在齿轮里配置；消息发出后无法撤回</span>
       <span class="spacer"></span>
       <button class="btn-primary" id="btnNotifySend" disabled>发送</button>
     </div>
@@ -296,7 +304,7 @@
 
 </div><!-- .main -->
 </div><!-- .app -->
-<!-- ============ Excel 导入确认弹窗（预览 + 改列映射） ============ -->
+<!-- ============ Excel 导入确认弹窗（模板校验后的预览） ============ -->
 <div class="modal-mask" id="impxMask">
   <div class="modal impx-modal" role="dialog" aria-label="从 Excel 导入用例">
     <div class="modal-hd">
@@ -305,12 +313,11 @@
       <button class="mclose" id="impxClose" title="关闭（不导入）">✕</button>
     </div>
     <div class="impx-body">
-      <div class="impx-cols" id="impxCols"></div>
+      <div class="impx-bar" id="impxBar"></div>
       <div class="impx-note" id="impxNote"></div>
       <div class="impx-preview"><table id="impxTable"></table></div>
     </div>
-    <div class="modal-ft">
-      <span class="mcount" id="impxCount"></span>
+    <div class="modal-ft impx-ft">
       <button class="btn-ghost" id="impxCancel">取消</button>
       <button class="btn-primary" id="impxOk">加入用例库</button>
     </div>
@@ -336,13 +343,10 @@
           <input id="llmKey" type="password" placeholder="sk-…" autocomplete="new-password" spellcheck="false"/>
           <button class="btn-ghost" id="llmKeyToggle" type="button" title="显示 / 隐藏">显示</button>
         </div>
-        <span class="fhint">打开本弹窗时自动回显服务端已保存的 Key（默认密码态隐藏，点「显示」查看）；未改动 Key 可直接保存，留空保存则沿用服务端 Key。</span>
       </div>
       <div class="fld">
         <label for="llmModel">模型名 <span style="color:var(--p0)">*</span></label>
-        <input id="llmModel" type="text" placeholder="gpt-4o-mini / qwen-plus / ep-xxxxxxxx …" autocomplete="off" spellcheck="false"/>
-        <span class="fhint">必填：留空会让判分请求带上占位模型名而失败（TokenHub 等需填模型名或端点 ID）</span>
-      </div>
+        <input id="llmModel" type="text" placeholder="gpt-4o-mini / qwen-plus / ep-xxxxxxxx …" autocomplete="off" spellcheck="false"/>      </div>
       <button class="adv-toggle" id="llmAdvToggle" type="button">▸ 高级：自定义探活路径</button>
       <div class="fld adv" id="llmAdvWrap">
         <label for="llmPath">探活路径（选填）</label>
@@ -484,26 +488,19 @@
     <div class="case-add-body">
       <div class="ca-row">
         <div class="fld">
-          <label for="caName">用例名称</label>
-          <input id="caName" autocomplete="off" spellcheck="false" placeholder="留空自动编号"/>
-        </div>
-        <div class="fld">
           <label for="caScene">场景</label>
           <input id="caScene" list="caScenes" autocomplete="off" placeholder="如：备课"/>
           <datalist id="caScenes"></datalist>
         </div>
-      </div>
-
-      <div class="fld">
-        <label>测试目标</label>
-        <span class="ca-chips" id="caTargets">
-          <label><input type="checkbox" value="word"/>word</label>
-          <label><input type="checkbox" value="ppt"/>ppt</label>
-          <label><input type="checkbox" value="html"/>html</label>
-          <label><input type="checkbox" value="pdf"/>pdf</label>
-          <label><input type="checkbox" value="excel"/>excel</label>
-          <label><input type="checkbox" value="network"/>network</label>
-        </span>
+        <div class="fld">
+          <label for="caDifficulty">难度</label>
+          <select id="caDifficulty">
+            <option value="">不设置</option>
+            <option value="易">易</option>
+            <option value="中">中</option>
+            <option value="难">难</option>
+          </select>
+        </div>
       </div>
 
       <div class="fld">
@@ -514,6 +511,18 @@
           <input type="file" multiple style="display:none" id="caAttFile"/>
         </div>
         <div class="cl-tags" id="caAtts"></div>
+      </div>
+
+      <div class="fld">
+        <label for="caTagInput">标签</label>
+        <div class="ca-tag-box" id="caTagBox">
+          <span class="ca-tag-chips" id="caTagChips"></span>
+          <input id="caTagInput" list="caTagOptions" autocomplete="off" spellcheck="false"
+                 placeholder="输入标签后回车或逗号添加，可加任意多个"/>
+        </div>
+        <datalist id="caTagOptions"></datalist>
+        <span class="fhint">自定义标签：数量与内容都不限（回车 / 逗号确认，标签里不能有逗号）；
+          输入时会联想库里已有的标签，点一下即可复用</span>
       </div>
 
       <div class="fld">

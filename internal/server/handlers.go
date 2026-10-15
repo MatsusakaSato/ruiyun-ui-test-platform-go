@@ -218,40 +218,75 @@ func saveUpload(name string, data []byte) (string, error) {
 
 // ------------------------------------------------------------------ 导入时附件规范化
 
-// ingestExcelAttachment 把 Excel 附件列里的一格字符串规范成「附件库里的文件」。
+// resolveAttachment 尝试把 Excel 附件列里的一格字符串落到附件库，返回库内绝对路径。
 //
-// 三类来源的处理方式：
-//   - http(s) 链接：服务端下载到附件库，返回库内绝对路径；下载失败（网络/4xx5xx/超限）则
-//     原样返回原始链接，不阻断整行导入。
-//   - 本地绝对路径且真实存在：把文件复制进附件库，返回库内绝对路径；读不到（缺权限/
-//     不存在/是目录/超限）则原样返回原始字符串。
-//   - 其它（相对路径、空串、无法识别）：原样返回，不阻断导入。
+// 三类来源：
+//   - http(s) 链接：服务端下载到附件库；下载失败（网络/4xx5xx/超限）返回原因。
+//   - 本地绝对路径且真实存在：复制进附件库；不存在/是目录/超限返回原因。
+//   - 其它（相对路径、无法识别）：返回原因，不做处理。
 //
-// 规范化的目标是：让导入进来的附件和普通「上传」走同一条路 —— 之后「打开」「运行时投递」
-// 都按库内文件处理，避免 URL / 外部路径在 /api/open 里被拒（403）或投递时读不到。
-func ingestExcelAttachment(src string) string {
+// 失败时 path 为空、reason 为给用户看的中文说明。调用方据此**剔除**该附件并提示，
+// 不再像早期那样「原样保留」—— 把 URL / 外部路径写进库，只会在运行时变成
+// 「附件不存在，未投递」，或让 /api/open 因越界而 403。
+func resolveAttachment(src string) (path, reason string) {
+	s := strings.TrimSpace(src)
+	if s == "" {
+		return "", ""
+	}
+	if isHTTPLink(s) {
+		fp, err := downloadToUploads(s)
+		if err != nil {
+			return "", fmt.Sprintf("链接无法下载（%v）", err)
+		}
+		return fp, ""
+	}
+	if !filepath.IsAbs(s) {
+		return "", "既不是 http(s) 链接，也不是本机绝对路径"
+	}
+	st, err := os.Stat(s)
+	if err != nil {
+		return "", "本机找不到该文件"
+	}
+	if st.IsDir() {
+		return "", "指向的是目录，不是文件"
+	}
+	// 已经在附件库内的路径原样保留：手动新增传来的附件本就是库内已落好盘的文件，
+	// 再复制一份只会在每次保存时多留一个副本，且返回的路径与用户选中的对不上。
+	if inUploadsDir(s) {
+		return s, ""
+	}
+	fp, err := copyToUploads(s)
+	if err != nil {
+		return "", fmt.Sprintf("复制进附件库失败（%v）", err)
+	}
+	return fp, ""
+}
+
+func isHTTPLink(s string) bool {
+	l := strings.ToLower(s)
+	return strings.HasPrefix(l, "http://") || strings.HasPrefix(l, "https://")
+}
+
+// attachmentShapeIssue 静态判断附件条目是否「看起来就无法解析」，不发起任何网络请求。
+// 供导入预览提前提示；链接能否真正下载，只有导入时才验证。
+func attachmentShapeIssue(src string) string {
 	s := strings.TrimSpace(src)
 	if s == "" {
 		return ""
 	}
-	lower := strings.ToLower(s)
-	if strings.HasPrefix(lower, "http://") || strings.HasPrefix(lower, "https://") {
-		if fp, err := downloadToUploads(s); err == nil {
-			return fp
+	if isHTTPLink(s) {
+		if _, err := url.Parse(s); err != nil {
+			return "链接格式不正确"
 		}
-		return s
+		return ""
 	}
-	// 本地路径：只处理绝对路径（相对路径无法定位，原样保留）
 	if !filepath.IsAbs(s) {
-		return s
+		return "既不是 http(s) 链接，也不是本机绝对路径"
 	}
 	if st, err := os.Stat(s); err != nil || st.IsDir() {
-		return s
+		return "本机找不到该文件"
 	}
-	if fp, err := copyToUploads(s); err == nil {
-		return fp
-	}
-	return s
+	return ""
 }
 
 // copyToUploads 把本机一个已存在的文件原样复制进附件库，返回库内绝对路径。
@@ -311,15 +346,15 @@ func filenameFromResponse(resp *http.Response, link string) string {
 	return "download"
 }
 
-// ingestItemAttachments 就地把一行用例的 attachments 全部规范化成附件库路径。
-// 支持 []string / []any 两种入参（Excel 解析产出 []string），结果统一写回 []string；
-// 全部无法入库时删除该字段（避免留下空附件导致 attachment 标记误判）。
-// 返回值：ingested = 成功落库的条数；keptRaw = 因无法解析而保留原样的条数
-// （空白单元格直接丢弃，不计入两者）。
-func ingestItemAttachments(item map[string]any) (ingested, keptRaw int) {
+// ingestItemAttachmentsEx 就地把一行用例的 attachments 规范化成附件库内的绝对路径，
+// 并回报无法解析、已被剔除的条目。rowIdx 是表格里 1 起的行号，用于提示定位。
+//
+// 策略是「剔除 + 回报」：无效附件不留在库里制造悬空引用；剔除后若一个都不剩，
+// 连带把 labels.attachment 标记回落为 false（与「挂了附件才需要附件」的约定一致）。
+func ingestItemAttachmentsEx(item map[string]any, rowIdx int) (ingested, dropped int, failed []map[string]any) {
 	raw, ok := item["attachments"]
 	if !ok || raw == nil {
-		return 0, 0
+		return 0, 0, nil
 	}
 	var srcs []string
 	switch list := raw.(type) {
@@ -330,26 +365,51 @@ func ingestItemAttachments(item map[string]any) (ingested, keptRaw int) {
 			srcs = append(srcs, fmt.Sprintf("%v", v))
 		}
 	default:
-		return 0, 0
+		return 0, 0, nil
 	}
 	kept := make([]string, 0, len(srcs))
 	for _, s := range srcs {
-		orig := s
-		if got := ingestExcelAttachment(orig); got != "" {
-			if got == orig {
-				keptRaw++
-			} else {
-				ingested++
-			}
-			kept = append(kept, got)
+		orig := strings.TrimSpace(s)
+		if orig == "" {
+			continue
 		}
+		fp, reason := resolveAttachment(orig)
+		if fp == "" {
+			dropped++
+			failed = append(failed, map[string]any{
+				"row":    rowIdx,
+				"name":   strOr(item["name"], ""),
+				"value":  orig,
+				"reason": reason,
+			})
+			continue
+		}
+		ingested++
+		kept = append(kept, fp)
 	}
 	if len(kept) == 0 {
 		delete(item, "attachments")
-		return ingested, keptRaw
+		clearAttachmentLabel(item)
+		return ingested, dropped, failed
 	}
 	item["attachments"] = kept
-	return ingested, keptRaw
+	return ingested, dropped, failed
+}
+
+// clearAttachmentLabel 把「需要附件」标记回落到 false（附件被全部剔除时调用）。
+// RowsToItems 会在顶层与 labels 两处都写这个标记，两处都要回落，否则入库时
+// extractCaseFields 会从顶层读到 true，留下「标记需要附件、却一个附件都没有」的脏数据。
+func clearAttachmentLabel(item map[string]any) {
+	if _, has := item["attachment"]; has {
+		item["attachment"] = false
+	}
+	labels, _ := item["labels"].(map[string]any)
+	if labels == nil {
+		return
+	}
+	if _, has := labels["attachment"]; has {
+		labels["attachment"] = false
+	}
 }
 
 // ------------------------------------------------------------------ GET 处理器
@@ -474,7 +534,7 @@ func (s *Server) handlePresetCasesGet(w http.ResponseWriter, r *http.Request) {
 	}
 	res, err := testcasedb.QueryPresetCases(
 		one("keyword", ""), splitCSV(one("scene", "")),
-		splitCSV(one("targets", "")), one("attachment", ""),
+		splitCSV(one("difficulties", "")), splitCSV(one("tags", "")), one("attachment", ""),
 		splitCSV(one("ids", "")), limit, offset, one("order", "desc"), "")
 	if err != nil {
 		writeJSON(w, 500, map[string]any{"error": err.Error()})
@@ -748,27 +808,46 @@ func (s *Server) handlePresetCasesPost(w http.ResponseWriter, r *http.Request) {
 		if item == nil {
 			item = body
 		}
-		// 附件路径是「先落盘、再提交」，中间可能已被附件库删除（或从库里挑中的文件被删）。
+		// 附件是「先落盘、再提交」：逐个落到附件库（已在库内的原样保留，不重复复制），
+		// 中间可能已被附件库删除（或从库里挑中的文件被删）；
 		// 这类悬空路径入库只会在运行时变成「附件不存在，未投递」，所以在写入前就剔除，
 		// 并把剔除清单回传前端提示。其余正常附件照常入库，不因个别失效而整单失败。
-		skipped := dropMissingAttachments(item)
-		if len(skipped) > 0 {
-			// 前端的 attachment 标记是按「挂了几个附件」自动算出来的；附件被剔除后要跟着回落，
-			// 否则会留下「标记需要附件、却一个附件都没有」的脏数据。
-			if atts, ok := item["attachments"].([]any); ok && len(atts) == 0 {
-				if labels, ok := item["labels"].(map[string]any); ok {
-					labels["attachment"] = false
-				}
-			}
-		}
+		_, dropped, failed := ingestItemAttachmentsEx(item, 1)
 		ok, msg, c := testcasedb.AddPresetCase(item, "")
 		out := map[string]any{"ok": ok, "message": msg, "case": c}
-		if len(skipped) > 0 {
-			out["skipped_attachments"] = skipped
+		if dropped > 0 {
+			out["attachments_dropped"] = dropped
+			out["invalid_attachments"] = failed
+		}
+		writeJSON(w, codeFor(ok, 400), out)
+	case "update":
+		item, _ := body["item"].(map[string]any)
+		if item == nil {
+			item = body
+		}
+		// 编号可以平铺在顶层，也可以在 item 里；两处都没有就直接拒掉，
+		// 免得后续按「新增」写出一条新用例（那是 add 的语义）。
+		if strings.TrimSpace(strOr(item["id"], "")) == "" {
+			item["id"] = strOr(body["id"], "")
+		}
+		if strings.TrimSpace(strOr(item["id"], "")) == "" {
+			writeJSON(w, 400, map[string]any{"ok": false, "message": "缺少用例编号（id）"})
+			return
+		}
+		// 附件与新增同路：先落盘 / 剔除失效再写入，剔除清单照样回传前端提示
+		_, dropped, failed := ingestItemAttachmentsEx(item, 1)
+		ok, msg, c := testcasedb.UpdatePresetCase(item, "")
+		out := map[string]any{"ok": ok, "message": msg, "case": c}
+		if dropped > 0 {
+			out["attachments_dropped"] = dropped
+			out["invalid_attachments"] = failed
 		}
 		writeJSON(w, codeFor(ok, 400), out)
 	case "add_many":
 		items := toMapList(body["items"])
+		for i, it := range items {
+			ingestItemAttachmentsEx(it, i+1)
+		}
 		ok, msg, added := testcasedb.AddPresetCases(items, false, "")
 		writeJSON(w, codeFor(ok, 400), map[string]any{"ok": ok, "message": msg, "added": added})
 	case "delete":
@@ -777,48 +856,8 @@ func (s *Server) handlePresetCasesPost(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, codeFor(ok, 400), map[string]any{"ok": ok, "message": msg, "removed": removed})
 	default:
 		writeJSON(w, 400, map[string]any{
-			"ok": false, "message": "未知操作（支持 add / add_many / delete）"})
+			"ok": false, "message": "未知操作（支持 add / add_many / update / delete）"})
 	}
-}
-
-// dropMissingAttachments 剔除 item["attachments"] 里在本机不存在的路径，返回被剔除的清单。
-// 附件入库的是绝对路径，投递时由 driver 直接读文件；把已经不存在的路径写进库，
-// 只会在运行时才暴露成「附件不存在，未投递」。目录同样视为无效：附件必须是文件。
-func dropMissingAttachments(item map[string]any) []string {
-	raw, ok := item["attachments"]
-	if !ok || raw == nil {
-		return nil
-	}
-	var kept []any
-	var skipped []string
-	keep := func(p string) {
-		s := strings.TrimSpace(p)
-		if s == "" {
-			return
-		}
-		if st, err := os.Stat(s); err != nil || st.IsDir() {
-			skipped = append(skipped, s)
-			return
-		}
-		kept = append(kept, s)
-	}
-	switch list := raw.(type) {
-	case []any:
-		for _, v := range list {
-			keep(fmt.Sprintf("%v", v))
-		}
-	case []string:
-		for _, v := range list {
-			keep(v)
-		}
-	default:
-		return nil
-	}
-	if len(skipped) == 0 {
-		return nil
-	}
-	item["attachments"] = kept
-	return skipped
 }
 
 func (s *Server) handlePresetImport(w http.ResponseWriter, r *http.Request) {
@@ -872,19 +911,27 @@ func (s *Server) handlePresetImport(w http.ResponseWriter, r *http.Request) {
 	}
 	promptCol := getCol("prompt_col", intPtrFromAny(meta["prompt_col"]))
 	sceneCol := getCol("scene_col", intPtrFromAny(meta["scene_col"]))
-	targetCol := getCol("target_col", intPtrFromAny(meta["target_col"]))
-	nameCol := getCol("name_col", intPtrFromAny(meta["name_col"]))
+	difficultyCol := getCol("difficulty_col", intPtrFromAny(meta["difficulty_col"]))
 	attachCol := getCol("attachment_col", intPtrFromAny(meta["attachment_col"]))
-	skillCol := intPtrFromAny(meta["skill_col"])
 	headIdx := intPtrFromAny(meta["head_idx"])
 
 	promptIdx := 0
 	if promptCol != nil {
 		promptIdx = *promptCol
 	}
-	got := xlsx.RowsToItems(rows, headIdx, promptIdx, sceneCol, targetCol, nameCol, attachCol, skillCol)
+	got := xlsx.RowsToItems(rows, headIdx, xlsx.CaseCols{
+		Prompt:     promptIdx,
+		Scene:      sceneCol,
+		Attachment: attachCol,
+		Difficulty: difficultyCol,
+	})
 	items := toMapList(got["items"])
 	skipped := intFromAny(got["skipped"], 0)
+
+	// 模板判定：必须有可识别的表头行，且表头里能认出提问列（Query内容 / 提问 …）。
+	// 平台已提供标准模板，因此不再保留「手动指定列」的旁路。
+	validTemplate, _ := meta["valid_template"].(bool)
+	templateErr := strOr(meta["template_error"], "")
 
 	if truthyAny(body["parse_only"]) {
 		header := toStringList(meta["header"])
@@ -898,58 +945,88 @@ func (s *Server) handlePresetImport(w http.ResponseWriter, r *http.Request) {
 			}
 		}
 		preview := []map[string]any{}
+		suspicious := []map[string]any{}
 		for i, it := range items {
-			if i >= 200 {
-				break
+			if i < 200 {
+				prompt := strOr(it["prompt"], "")
+				if len([]rune(prompt)) > 200 {
+					prompt = string([]rune(prompt)[:200])
+				}
+				preview = append(preview, map[string]any{
+					"prompt":      prompt,
+					"scene":       strOr(it["scene"], ""),
+					"difficulty":  strOr(it["difficulty"], ""),
+					"attachments": orEmptyList(it["attachments"]),
+				})
 			}
-			prompt := strOr(it["prompt"], "")
-			if len([]rune(prompt)) > 200 {
-				prompt = string([]rune(prompt)[:200])
+			for _, a := range toStringList(it["attachments"]) {
+				if len(suspicious) >= 100 {
+					break
+				}
+				if reason := attachmentShapeIssue(a); reason != "" {
+					suspicious = append(suspicious, map[string]any{
+						"row":    i + 1,
+						"name":   strOr(it["name"], ""),
+						"value":  a,
+						"reason": reason,
+					})
+				}
 			}
-			preview = append(preview, map[string]any{
-				"id":          strOr(it["id"], ""),
-				"name":        strOr(it["name"], ""),
-				"prompt":      prompt,
-				"scene":       strOr(it["scene"], ""),
-				"targets":     orEmptyList(it["targets"]),
-				"attachments": orEmptyList(it["attachments"]),
-			})
 		}
 		writeJSON(w, 200, map[string]any{
-			"ok":             true,
-			"file":           name,
-			"sheet":          strOr(table["sheet"], ""),
-			"header":         header,
-			"width":          width,
-			"prompt_col":     promptCol,
-			"scene_col":      sceneCol,
-			"target_col":     targetCol,
-			"name_col":       nameCol,
-			"attachment_col": attachCol,
-			"total":          len(items),
-			"skipped":        skipped,
-			"items":          preview,
-			"items_total":    len(items),
+			"ok":                     true,
+			"file":                   name,
+			"sheet":                  strOr(table["sheet"], ""),
+			"header":                 header,
+			"width":                  width,
+			"prompt_col":             promptCol,
+			"scene_col":              sceneCol,
+			"difficulty_col":         difficultyCol,
+			"attachment_col":         attachCol,
+			"total":                  len(items),
+			"skipped":                skipped,
+			"items":                  preview,
+			"items_total":            len(items),
+			"valid_template":         validTemplate,
+			"template_error":         templateErr,
+			"suspicious_attachments": suspicious,
 		})
 		return
 	}
 
-	// 导入（非预览）时才把附件列里的本地绝对路径 / http(s) 链接规范化进附件库；
-	// parse_only 预览阶段原样返回原始串，便于用户核对表格里写了什么。
-	var ingestedTotal, keptRawTotal int
-	for _, it := range items {
-		n, k := ingestItemAttachments(it)
-		ingestedTotal += n
-		keptRawTotal += k
+	if !validTemplate {
+		if templateErr == "" {
+			templateErr = "文件不符合系统提供的导入模板"
+		}
+		writeJSON(w, 400, map[string]any{"ok": false, "message": templateErr})
+		return
 	}
-	ok, msg, added := testcasedb.AddPresetCases(items, truthyAny(body["replace"]), "")
+
+	// 导入（非预览）时才把附件列里的本地绝对路径 / http(s) 链接规范化进附件库。
+	// 预览阶段原样返回原始串，便于用户核对表格里写了什么。
+	// 无效附件（下载失败的链接、本机不存在的路径等）一律剔除并逐条回报，不留悬空引用。
+	var ingestedTotal, droppedTotal int
+	invalidAttachments := []map[string]any{}
+	for i, it := range items {
+		n, d, failed := ingestItemAttachmentsEx(it, i+1)
+		ingestedTotal += n
+		droppedTotal += d
+		invalidAttachments = append(invalidAttachments, failed...)
+	}
+	ok, msg, added, duplicates := testcasedb.AddPresetCasesEx(items, truthyAny(body["replace"]), "")
+	if ok && added == 0 && duplicates > 0 {
+		msg = fmt.Sprintf("未新增用例：导入的 %d 条全部与库中已有用例重复", duplicates)
+	}
 	out := map[string]any{
-		"ok": ok, "message": msg, "added": added,
+		"ok": ok, "message": msg, "added": added, "duplicates": duplicates,
 		"file": name, "total": len(items), "skipped": skipped}
-	// 附件规范化汇总：多少条原始条目被拉进附件库、多少条因无法解析而保留原样。
-	if ingestedTotal > 0 || keptRawTotal > 0 {
+	// 附件规范化汇总：多少条原始条目被拉进附件库、多少条因无法解析被剔除。
+	if ingestedTotal > 0 {
 		out["attachments_ingested"] = ingestedTotal
-		out["attachments_kept_raw"] = keptRawTotal
+	}
+	if droppedTotal > 0 {
+		out["attachments_dropped"] = droppedTotal
+		out["invalid_attachments"] = invalidAttachments
 	}
 	writeJSON(w, codeFor(ok, 400), out)
 }

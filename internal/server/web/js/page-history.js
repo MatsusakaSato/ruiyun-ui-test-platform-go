@@ -229,7 +229,6 @@ export function renderRound(data) {
 
   const cases = d.cases || [];
   html += '<div class="kpis">'
-    + kpi('本轮用例', cases.length, `通过 ${sm.passed ?? 0} · 断言失败 ${sm.failed ?? 0} · UI失败 ${sm.ui_failed ?? 0}`, 'v-acc')
     + kpi('问题发现', sm.findings ?? 0, sm.rule_kinds ? `涉及 ${sm.rule_kinds} 类规则` : '', (sm.findings ?? 0) > 0 ? 'v-bad' : 'v-ok')
     + '</div>';
 
@@ -493,8 +492,7 @@ export function bugsTab(m, d) {
   if (!rows.length) {
     return h + `<div class="none-banner">
       <div class="big">✓ 没有发现问题</div>
-      <div class="sm">已按全部断言规则逐条检查本次调用链路（工具调用失败、死循环、重复调用、
-      内容截断、必填参数为空、调用链自洽、会话收尾等），一条都没命中。</div></div>`;
+      </div>`;
   }
 
   for (const f of rows) {
@@ -670,7 +668,7 @@ export function evCaseTable(c, i, sm) {
 
   const factsBox = c.objective_facts
     ? `<div class="ev-facts" onclick="this.classList.toggle('open')">`
-      + `<div class="ev-facts-hd">模型收到的客观事实（打分依据）`
+      + `<div class="ev-facts-hd">打分依据`
       + `<span class="ev-facts-tip">点击展开 / 收起</span></div>`
       + `<pre class="pb-detail">${esc(JSON.stringify(c.objective_facts, null, 1))}</pre></div>` : '';
   return `<div class="card ev-case">
@@ -696,7 +694,7 @@ export function evEmpty() {
   return `<div class="empty" style="padding:36px 0;text-align:center">
     <div style="font-size:15px;font-weight:600;color:var(--tx);margin-bottom:8px">该轮次尚未进行质量评估</div>
     <div style="font-size:12.5px;color:var(--tx2);margin-bottom:18px;line-height:1.6;max-width:540px;margin-left:auto;margin-right:auto">
-      调用大模型对用例的<b>结果质量</b>、<b>安全可靠</b>与 <b>Agent 系统能力</b>进行多维度自动化打分。
+      调用大模型对用例的<b>结果质量</b>、<b>安全可靠</b>与 <b>Agent 系统能力</b>进行打分。
       ${cfg ? '' : '<br><span style="color:var(--tx3);font-size:11.5px">（提示：需在右上角「设置 → 模型设置」中配置好可用模型）</span>'}
     </div>
     <div style="display:flex;gap:10px;justify-content:center;align-items:center">
@@ -755,29 +753,9 @@ export function evResult(ev) {
       + errs.slice(0, 3).map(e => esc((e.case_id || '') + ' ' + (e.error || ''))).join('；') + '</div>';
   }
   h += '<h3 class="sec">逐用例评分'
-    + '<span class="gr-hint">鼠标停在指标名上看评分标准，停在分数上看打分理由；每张表最后一行是该用例各维度的平均分</span></h3>';
+    + '<span class="gr-hint"></span></h3>';
   cases.forEach((c, i) => { h += evCaseTable(c, i, sm); });
-  h += '<h3 class="sec" style="margin-top:16px">成本与效率</h3>' + evCost(ev);
   return h;
-}
-
-export function evCost(ev) {
-  const u = ev.judge_usage || {};
-  let tin = 0, tout = 0;
-  for (const c of ev.cases || []) {
-    for (const s of (c.scores || [])) {
-      if (s.key === 'cost_control') {
-        tin += (s.evidence || {}).input_tokens_est || 0;
-        tout += (s.evidence || {}).output_tokens_est || 0;
-      }
-    }
-  }
-  return '<div class="tbl-card"><table>'
-    + `<tr><td>评审模型 token（输入 / 输出）</td><td style="text-align:right"><b>${u.input_tokens ?? 0} / ${u.output_tokens ?? 0}</b></td></tr>`
-    + `<tr><td>被测智能体 token 估算（输入 / 输出）</td><td style="text-align:right"><b>${tin} / ${tout}</b></td></tr>`
-    + `<tr><td>评估总耗时</td><td style="text-align:right"><b>${ev.elapsed_s ?? '—'}s</b></td></tr>`
-    + '</table></div>'
-    + '<div class="note" style="margin-top:8px">被测智能体的 token 是按字符量折算估出来的（日志里没有官方 usage）；评审模型的 token 来自接口返回的 usage。</div>';
 }
 
 export async function startEval() {

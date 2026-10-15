@@ -35,23 +35,55 @@
 .modal-ft .mcount b{color:var(--accent)}
 
 /* ---------- Excel 导入确认弹窗 ---------- */
-.modal.impx-modal{width:min(1000px,96vw)}
-.impx-body{padding:12px 18px 4px;overflow-y:auto;max-height:min(64vh,620px)}
-.impx-cols{display:flex;gap:12px;flex-wrap:wrap;align-items:center;background:var(--bg-sub, #f8fafc);padding:10px 14px;border-radius:10px;border:1px solid var(--line)}
-.impx-cols .fld{display:flex;flex-direction:column;gap:4px}
-.impx-cols label{font-size:11px;color:var(--tx3);font-weight:600}
-.impx-cols select{border:1px solid var(--line);border-radius:8px;padding:5px 8px;
-  font-size:12.5px;font-family:inherit;color:var(--tx);background:#fff;min-width:140px}
-.impx-note{font-size:12px;color:var(--tx2);margin:10px 0 8px;line-height:1.7}
+.modal.impx-modal{width:min(1040px,96vw)}
+.impx-body{padding:14px 18px 6px;overflow-y:auto;max-height:min(66vh,640px)}
+.impx-ft{justify-content:flex-end}
+
+/* 顶部工具条：左=识别摘要，右=导入模式分段控件 */
+.impx-bar{display:flex;align-items:center;gap:10px;flex-wrap:wrap;
+  padding-bottom:10px;margin-bottom:10px;border-bottom:1px solid var(--line2)}
+.impx-bar .spacer{flex:1}
+.impx-count{font-size:12.5px;font-weight:600;color:var(--tx)}
+.impx-count b{color:var(--accent)}
+.impx-ft .btn-primary.is-danger{background:#dc2626}
+.impx-ft .btn-primary.is-danger:hover{background:#b91c1c}
+.impx-seg{display:inline-flex;padding:2px;border:1px solid var(--line);
+  border-radius:9px;background:#eef2f7}
+.impx-seg-opt{position:relative;display:inline-flex;align-items:center;cursor:pointer}
+.impx-seg-opt input{position:absolute;opacity:0;width:0;height:0;margin:0}
+.impx-seg-opt>span{display:inline-block;padding:4px 13px;border-radius:7px;
+  font-size:12.5px;font-weight:600;color:var(--tx2);transition:background .15s,color .15s,box-shadow .15s}
+.impx-seg-opt:hover>span{color:var(--tx)}
+.impx-seg-opt input:checked+span{background:#fff;color:var(--accent);
+  box-shadow:0 1px 2px rgba(15,23,42,.12)}
+.impx-seg-opt input:focus-visible+span{outline:2px solid var(--accent);outline-offset:1px}
+.impx-seg-opt.danger input:checked+span{color:#b91c1c}
+
+.impx-note{font-size:12px;color:var(--tx2);background:#f8fafc;border:1px solid var(--line2);
+  border-radius:10px;padding:9px 12px;margin-bottom:10px;line-height:1.7}
 .impx-note b{color:var(--tx)}
-.impx-note .warn{color:var(--p1)}
-.impx-preview{border:1px solid var(--line);border-radius:10px;overflow:auto;
-  max-height:340px;margin-bottom:10px}
-.impx-preview table{width:100%;min-width:600px}
-.impx-preview th{position:sticky;top:0;z-index:1}
-.impx-preview td{max-width:420px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;
-  color:var(--tx2)}
+.impx-note .warn{color:#b45309}
+.impx-note .danger{color:#dc2626;font-weight:600}
+
+.impx-preview{border:1px solid var(--line);border-radius:11px;overflow:auto;
+  max-height:min(50vh,460px);margin-bottom:12px}
+.impx-preview table{width:100%;min-width:560px;table-layout:fixed}
+.impx-preview th{position:sticky;top:0;z-index:1;background:#f8fafc;
+  font-size:11.5px;font-weight:700;color:var(--tx2);letter-spacing:.2px}
+.impx-preview th.imp-c-no{width:46px}
+.impx-preview th.imp-c-scene{width:96px}
+.impx-preview th.imp-c-diff{width:60px}
+.impx-preview th.imp-c-att{width:158px}
+.impx-preview td{overflow:hidden;text-overflow:ellipsis;white-space:nowrap;
+  color:var(--tx2);font-size:12px}
+.impx-preview tbody tr:hover td{background:#f8fafc}
 .impx-preview td.imp-prompt{color:var(--tx)}
+.impx-preview .imp-no{font-family:ui-monospace,Menlo,monospace;font-size:11px;color:var(--tx3)}
+.imp-none{color:var(--tx3)}
+.imp-att{display:inline-block;max-width:100%;padding:0 7px;border-radius:6px;
+  font-size:10.5px;line-height:17px;background:#f1f5f9;color:var(--tx2);
+  overflow:hidden;text-overflow:ellipsis;white-space:nowrap;vertical-align:middle}
+.imp-att.bad{background:#fff7ed;color:#b45309;border:1px solid #fed7aa}
 
 /* ---------- 附件库弹窗 ---------- */
 .modal.lib-modal{width:min(720px,92vw)}

@@ -29,12 +29,32 @@
 .page[hidden]{display:none}
 
 /* ---------- 顶栏 ---------- */
-header{background:var(--card);border-bottom:1px solid var(--line);position:sticky;top:0;z-index:20;
-  box-shadow:var(--shadow-card)}
-.hd{display:flex;align-items:center;gap:14px;padding:12px 0;flex-wrap:wrap}
-.hd h1{font-size:17px;font-weight:700}
-.hd .ver{font-size:12px;color:var(--tx3)}
+header{background:rgba(255,255,255,.88);backdrop-filter:blur(10px);-webkit-backdrop-filter:blur(10px);
+  border-bottom:1px solid var(--line);position:sticky;top:0;z-index:20}
+/* 左右内边距必须与 .wrap 一致：本元素同时带 .wrap 与 .hd 两个类，
+   这条简写会覆盖 .wrap 的 padding:0 18px，右不对齐时工具区会比卡片多出 18px。 */
+.hd{display:flex;align-items:center;gap:12px;padding:11px 18px;flex-wrap:wrap}
 .spacer{flex:1}
+
+/* 右侧工具区 */
+.hd-tools{display:flex;align-items:center;gap:8px;flex-wrap:wrap}
+.hd-sep{width:1px;height:20px;background:var(--line);margin:0 3px}
+
+/* 顶栏按钮统一 32px 高、9px 圆角 */
+.hd .btn-ghost,.hd .btn-stop{height:32px;padding:0 12px;display:inline-flex;align-items:center;gap:5px;
+  border:1px solid var(--line);border-radius:9px;background:#fff;color:var(--tx2);
+  font-size:12.5px;font-weight:600}
+.hd .btn-ghost:hover:not(:disabled){background:#f1f5f9;color:var(--tx);border-color:#cbd5e1}
+.hd .btn-ghost:disabled{opacity:.5;cursor:not-allowed;background:#fff}
+.hd .btn-stop{background:#fef2f2;color:#b91c1c;border-color:#fecaca;padding:0 14px}
+.hd .btn-stop:hover{background:#fee2e2}
+.hd-caret{color:var(--tx3);transition:transform .15s}
+.settings-wrap:has(.settings-menu.on) .hd-caret{transform:rotate(180deg)}
+
+/* 顶栏里的环境下拉：与按钮同高同圆角（外观由 msel-select.js 生成） */
+.hd .msel-single{min-width:0}
+.hd .msel-single .msel-box{min-height:32px;padding:0 10px;border-radius:9px;font-size:12.5px}
+.hd .msel-single .msel-lb{font-size:12px;font-weight:600}
 
 /* ---------- 设置二级菜单 ---------- */
 .settings-wrap{position:relative}
@@ -92,11 +112,15 @@ header{background:var(--card);border-bottom:1px solid var(--line);position:stick
 /* 手机竖屏：进一步收紧留白与间距 */
 @media(max-width:640px){
   .wrap{padding:0 12px}
-  .hd{gap:10px;padding:10px 0}
+  .hd{gap:10px;padding:10px 12px}
+  .hd-sep{display:none}
   .card{padding:13px}
   .side{padding:8px 10px}
   .grid{gap:12px;margin-top:12px}
 }
 
-.termination-reason{max-width:280px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;
-  color:#b91c1c;font-size:11.5px}
+.termination-reason{display:none;max-width:320px;overflow:hidden;text-overflow:ellipsis;
+  white-space:nowrap;color:#b91c1c;background:#fef2f2;border:1px solid #fecaca;
+  border-radius:999px;padding:3px 11px;font-size:11.5px;font-weight:600}
+.termination-reason:not([hidden]){display:inline-block}
+.termination-reason::before{content:"⚠ "}

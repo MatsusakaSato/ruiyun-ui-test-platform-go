@@ -1,8 +1,9 @@
 /* ================= 测试用例页（预设库 + 队列编辑 + 附件管理） ================= */
 
-import { $, esc, fmtSize, fileToBase64, IS_WIN, MOD_KEY, doOpenFile, copyText } from './utils.js';
+import { $, esc, fmtSize, fileToBase64, fmtInvalidAttachments, IS_WIN, MOD_KEY, doOpenFile, copyText } from './utils.js';
 import { state } from './state.js';
 import { renderRunCases, doRun } from './page-home.js';
+import { syncSelectSkin } from './msel-select.js';
 
 /* ---------- 附件上传与附件库 ---------- */
 export async function loadUploads() {
@@ -158,11 +159,6 @@ export function syncCaseState() {
   const qc = $('queueCount');
   if (qc) qc.textContent = filled ? `（${filled} 条）` : '';
 
-  state.CASES.forEach((c, i) => {
-    const b = $('saveCase' + i);
-    if (b) b.disabled = !c.prompt.trim();
-  });
-
   const hint = $('caseHint');
   if (hint) {
     if (filled === 0) {
@@ -196,63 +192,16 @@ export function setCaseTab(which) {
   $('ctabQueue')?.classList.toggle('on', !lib);
 }
 
-export async function savePreset(i) {
-  const c = state.CASES[i];
-  if (!c) return;
-  const prompt = (c.prompt || '').trim();
-  if (!prompt) { alert('这条用例还没有填提问，先填了再存。'); return; }
-  const btn = $('saveCase' + i);
-  if (btn) btn.disabled = true;
-  try {
-    const labels = c.labels || {};
-    // 队列里已经挂好的附件要一并入库，否则存成预设后附件就丢了
-    const attachments = (c.attachments || []).map(a => a.path);
-    const body = {
-      action: 'add', prompt,
-      labels: {
-        scene: labels.scene || '',
-        targets: labels.targets || [],
-        attachment: labels.attachment === true || attachments.length > 0
-      },
-      attachments
-    };
-    const r = await fetch('/api/preset-cases', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(body)
-    });
-    const j = await r.json().catch(() => ({ ok: false, message: '响应解析失败' }));
-    if (!j.ok) { alert('存入预设失败：' + (j.message || '未知错误')); return; }
-    const id = (j.case && j.case.id) || '';
-    if (btn) {
-      btn.textContent = id ? `✓ ${id}` : '✓ 已存入';
-      btn.classList.add('saved');
-      setTimeout(() => { btn.textContent = '☆ 存为预设'; btn.classList.remove('saved'); }, 2200);
-    }
-    state.LIB.keyword = '';
-    state.LIB.scenes = [];
-    state.LIB.targets = [];
-    state.LIB.attachment = '';
-    state.LIB.offset = 0;
-    const kwEl = $('libKw');
-    if (kwEl) kwEl.value = '';
-    await loadPresetLib();
-  } catch (e) {
-    alert('请求失败：' + e.message);
-  } finally {
-    const b = $('saveCase' + i);
-    if (b) b.disabled = !state.CASES[i] || !(state.CASES[i].prompt || '').trim();
-  }
-}
-
 export function renderCases() {
   const box = $('caseRows');
   if (!box) return;
   box.innerHTML = state.CASES.map((c, i) => {
     const atts = c.attachments || [];
-    const tags = [
-      c.labels && c.labels.scene ? `<span class="tag t-scene">${esc(c.labels.scene)}</span>` : '',
-      ...((c.labels && c.labels.targets) || []).map(t => `<span class="tag">${esc(t)}</span>`),
+    const L = c.labels || {};
+    // 预设里带的自定义标签跟着用例一起进队列（只读展示：入库存改一律走库里的「编辑」）
+    const chips = [
+      L.scene ? `<span class="tag t-scene">${esc(L.scene)}</span>` : '',
+      ...((L.tags || []).map(t => `<span class="tag t-tag">${esc(t)}</span>`)),
       ...atts.map((a, j) => `<span class="tag t-att" title="${esc(a.path)}">${esc(a.name)}`
         + `<b class="tag-x" onclick="rmAttach(${i},${j})" title="移除该附件">×</b></span>`),
     ].join('');
@@ -266,12 +215,10 @@ export function renderCases() {
         <div class="cl-acts">
           <button class="cl-att" onclick="pickAttach(${i})" title="上传附件：运行时会被投递给被测应用">📎 附件</button>
           <button class="cl-att" onclick="openLib(${i})" title="打开附件库，点击即加入本用例">库${state.UPLOADS.length ? '(' + state.UPLOADS.length + ')' : ''}</button>
-          <button class="cl-att cl-save" id="saveCase${i}" onclick="savePreset(${i})"
-                  title="把这条提问存进预设用例库">☆ 存为预设</button>
           <input type="file" multiple style="display:none" id="attFile${i}"
                  onchange="uploadFiles(this.files,${i});this.value=''"/>
         </div>
-        ${tags ? `<div class="cl-tags">${tags}</div>` : ''}
+        ${chips ? `<div class="cl-tags">${chips}</div>` : ''}
       </div>
       <button class="del" title="删除该用例" onclick="delCase(${i})">×</button>
     </div>`;
@@ -309,7 +256,9 @@ export const libSelTags = c => {
   const L = c.labels || {};
   let out = '';
   if (L.scene) out += `<span class="tag t-scene">${esc(L.scene)}</span>`;
-  for (const t of (L.targets || [])) out += `<span class="tag">${esc(t)}</span>`;
+  if (L.difficulty) out += `<span class="tag t-diff">${esc(L.difficulty)}</span>`;
+  // 自定义标签：数量不限，原样按用户填写的顺序展示
+  for (const t of (L.tags || [])) out += `<span class="tag t-tag">${esc(t)}</span>`;
   if (L.attachment === true) {
     // 附件绝对路径塞在 data-atts 里（一行一个），hover 时由 showAttTip 渲染气泡：
     // 文件名本身是链接（点开＝用系统默认程序打开该文件），右侧图标点击复制路径。
@@ -398,13 +347,16 @@ function onAttTipClick(e) {
 }
 
 /* ---------- 筛选控件：多选下拉 + 附件复选框 ----------
-   两个多选下拉共用一份渲染与交互逻辑。渲染时只替换「已选 tag 条」与「选项列表」两块
-   内部内容，不重建 .msel 外壳 —— 面板的展开状态（pop 的 hidden）不受列表刷新影响，
+   三个多选下拉（场景 / 难度 / 标签）共用一份渲染与交互逻辑。渲染时只替换「已选 tag 条」与
+   「选项列表」两块内部内容，不重建 .msel 外壳 —— 面板的展开状态（pop 的 hidden）不受列表刷新影响，
    所以勾选一项触发查询后，面板仍是打开的，可以继续勾下一项。
-   可选值来自服务端返回的 state.LIB_SCENES / state.LIB_TARGETS（库中已有的去重标签）。 */
+   可选值来自服务端返回的 state.LIB_SCENES / state.LIB_DIFFICULTIES / state.LIB_TAGS（库中已有的去重标签）。
+   **多选语义两套**（后端 QueryPresetCases 决定）：场景 / 难度是命中任意一个即可（「或」），
+   标签要求全部命中（「且」）—— 多个标签是用来「同时满足」地收窄候选的。 */
 const MSEL = {
   scene: { wrap: 'mselScene', box: 'mselSceneBox', tags: 'mselSceneTags', pop: 'mselScenePop', list: 'LIB_SCENES', picked: 'scenes' },
-  target: { wrap: 'mselTarget', box: 'mselTargetBox', tags: 'mselTargetTags', pop: 'mselTargetPop', list: 'LIB_TARGETS', picked: 'targets' }
+  diff: { wrap: 'mselDiff', box: 'mselDiffBox', tags: 'mselDiffTags', pop: 'mselDiffPop', list: 'LIB_DIFFICULTIES', picked: 'difficulties' },
+  tag: { wrap: 'mselTags', box: 'mselTagsBox', tags: 'mselTagsTags', pop: 'mselTagsPop', list: 'LIB_TAGS', picked: 'tags' }
 };
 
 // 附件筛选三态循环：不限（''）→ 需要附件（yes）→ 不需要附件（no）
@@ -423,7 +375,7 @@ function renderMsel(key) {
   const picked = state.LIB[m.picked];
   const tagsEl = $(m.tags);
   if (tagsEl) {
-    // 未选时不占位：字段名（场景 / 测试目标）在 .msel-box 里常驻，本身即提示
+    // 未选时不占位：字段名（场景 / 难度）在 .msel-box 里常驻，本身即提示
     tagsEl.innerHTML = picked.length
       ? picked.map(v => `<span class="msel-tag">${esc(v)}`
           + `<b class="msel-x" data-v="${esc(v)}" title="移除">×</b></span>`).join('')
@@ -491,13 +443,14 @@ export function renderLibTable() {
     tbl.innerHTML = '<table><thead><tr>'
       + '<th class="th-chk" style="width:38px" title="全选 / 取消全选"><input type="checkbox" id="libAllBox" tabindex="-1"/></th>'
       + '<th style="width:104px">编号</th><th>提问</th><th style="width:210px">标签</th>'
-      + '<th style="width:64px"></th></tr></thead><tbody>'
+      + '<th style="width:104px"></th></tr></thead><tbody>'
       + (rows.length ? rows.map(c => `<tr data-id="${esc(c.id || '')}">
           <td class="td-chk"><input type="checkbox" ${state.PSEL.has(c.id) ? 'checked' : ''} tabindex="-1"/></td>
           <td class="mono">${esc(c.id || '')}</td>
           <td class="lp" title="${esc(c.prompt || '')}">${esc(c.prompt || '')}</td>
           <td>${libSelTags(c)}</td>
-          <td><button class="home-link lib-del" data-id="${esc(c.id || '')}">删除</button></td>
+          <td class="td-acts"><button class="home-link lib-edit" data-id="${esc(c.id || '')}">编辑</button>
+            <button class="home-link lib-del" data-id="${esc(c.id || '')}">删除</button></td>
         </tr>`).join('')
         : '<tr><td colspan="5" class="tbl-empty">没有符合条件的用例</td></tr>')
       + '</tbody></table>';
@@ -540,14 +493,15 @@ export function syncLibSel() {
 
 export async function loadPresetLib() {
   // 筛选条件与后端 GET /api/preset-cases 的参数一一对应：
-  //   scene / targets 多个值用英文逗号拼接（单个值时与改造前的格式完全一致），空串表示不限
+  //   scene / difficulties / tags 多个值用英文逗号拼接（单个值时与改造前的格式完全一致），空串表示不限
   //   attachment 取 '' / 'yes' / 'no'
   const q = new URLSearchParams({
     limit: state.LIB_LIMIT,
     offset: state.LIB.offset,
     keyword: state.LIB.keyword,
     scene: state.LIB.scenes.join(','),
-    targets: state.LIB.targets.join(','),
+    difficulties: state.LIB.difficulties.join(','),
+    tags: state.LIB.tags.join(','),
     attachment: state.LIB.attachment
   });
   try {
@@ -555,12 +509,18 @@ export async function loadPresetLib() {
     state.LIB_ROWS = j.cases || [];
     state.LIB_TOTAL = j.total || 0;
     state.LIB_SCENES = j.scenes || [];
-    state.LIB_TARGETS = j.targets || [];
+    state.LIB_DIFFICULTIES = j.difficulties || [];
+    state.LIB_TAGS = j.tags || [];
     state.PSEL = new Set([...state.PSEL].filter(id => state.LIB_ROWS.some(c => c.id === id)));
 
     const caScenesEl = $('caScenes');
     if (caScenesEl) {
       caScenesEl.innerHTML = state.LIB_SCENES.map(s => `<option value="${esc(s)}"/>`).join('');
+    }
+    // 对话框标签输入的联想项：库里已用过的标签（不限制自由输入，只是方便复用）
+    const caTagOpts = $('caTagOptions');
+    if (caTagOpts) {
+      caTagOpts.innerHTML = state.LIB_TAGS.map(t => `<option value="${esc(t)}"/>`).join('');
     }
     renderLibFilters();
     renderLibTable();
@@ -616,6 +576,40 @@ export function rmCaAttach(j) {
   renderCaAtts();
 }
 
+/* ---- 自定义标签：数量与内容都不限（逗号除外：逗号既是输入确认键，也是筛选参数的传输分隔符） ---- */
+
+export function renderCaTags() {
+  const box = $('caTagChips');
+  if (!box) return;
+  box.innerHTML = (state.CA_TAGS || []).map((t, j) =>
+    `<span class="tag t-tag">${esc(t)}`
+    + `<b class="tag-x" data-j="${j}" title="移除该标签">×</b></span>`).join('');
+}
+
+// 加一个标签：去空白、空串丢弃、重复的直接跳过（与后端 cleanTags 同一套口径）
+export function addCaTag(raw) {
+  const t = String(raw || '').trim();
+  if (!t) return;
+  if (!state.CA_TAGS) state.CA_TAGS = [];
+  if (state.CA_TAGS.includes(t)) return;
+  state.CA_TAGS.push(t);
+  renderCaTags();
+}
+
+export function rmCaTag(j) {
+  (state.CA_TAGS || []).splice(j, 1);
+  renderCaTags();
+}
+
+// 把输入框里还没确认的内容变成一个标签：回车、逗号、失焦都会调它。
+// 粘进来一串「a,b,c」时按分隔符拆成多个，免得整串变成一个标签。
+export function commitCaTagInput() {
+  const el = $('caTagInput');
+  if (!el) return;
+  for (const p of String(el.value || '').split(/[,，、]/)) addCaTag(p);
+  el.value = '';
+}
+
 // 逐个上传到本机附件库；失败的文件只提示、不回滚已成功的，超出上限的直接忽略
 export async function uploadCaFiles(files) {
   const arr = [...files];
@@ -651,14 +645,52 @@ export async function uploadCaFiles(files) {
 export function openCaseAdd() {
   const mask = $('caseAddMask');
   if (!mask) return;
-  if ($('caName')) $('caName').value = '';
+  if ($('caseAddTitle')) $('caseAddTitle').textContent = '新增用例';
+  state.CA_EDIT_ID = '';
   if ($('caScene')) $('caScene').value = '';
+  // 每次打开都回到「不设置」：原生 select 赋 value 不触发 change，皮肤要靠 syncSelectSkin 跟上
+  if ($('caDifficulty')) $('caDifficulty').value = '';
+  syncSelectSkin('caDifficulty');
   if ($('caPrompt')) $('caPrompt').value = '';
   state.CA_ATTS = [];
+  state.CA_TAGS = [];
   renderCaAtts();
+  renderCaTags();
   const caFile = $('caAttFile');
   if (caFile) caFile.value = '';
-  $('caTargets')?.querySelectorAll('input').forEach(i => { i.checked = false; });
+  const caTagInput = $('caTagInput');
+  if (caTagInput) caTagInput.value = '';
+  clearCaseAddHint();
+  mask.classList.add('on');
+  $('caPrompt')?.focus();
+}
+
+/* 打开「编辑用例」对话框：用库里的那一行回填全部字段。
+   数据取自当前列表行（点编辑的按钮就在这一行里），取不到就提示并返回。 */
+export function openCaseEdit(id) {
+  const mask = $('caseAddMask');
+  if (!mask) return;
+  const c = (state.LIB_ROWS || []).find(x => x.id === id);
+  if (!c) {
+    const m = $('libMsg');
+    if (m) m.textContent = `找不到用例 ${id}，刷新后再试`;
+    return;
+  }
+  const L = c.labels || {};
+  state.CA_EDIT_ID = id;
+  if ($('caseAddTitle')) $('caseAddTitle').textContent = '编辑用例';
+  if ($('caScene')) $('caScene').value = L.scene || '';
+  if ($('caDifficulty')) $('caDifficulty').value = L.difficulty || '';
+  syncSelectSkin('caDifficulty');
+  if ($('caPrompt')) $('caPrompt').value = c.prompt || '';
+  state.CA_ATTS = attsFromPaths(c.attachments);
+  state.CA_TAGS = (L.tags || []).map(String);
+  renderCaAtts();
+  renderCaTags();
+  const caFile = $('caAttFile');
+  if (caFile) caFile.value = '';
+  const caTagInput = $('caTagInput');
+  if (caTagInput) caTagInput.value = '';
   clearCaseAddHint();
   mask.classList.add('on');
   $('caPrompt')?.focus();
@@ -693,13 +725,16 @@ async function submitCaseAdd() {
   }
   promptEl.closest('.fld')?.classList.remove('err');
 
-  const name = ($('caName')?.value || '').trim();
   const scene = ($('caScene')?.value || '').trim();
-  const targets = [...($('caTargets')?.querySelectorAll('input:checked') || [])].map(i => i.value);
-  // 附件以本机绝对路径数组入库；服务端还会逐个 os.Stat，不存在的剔除后回传 skipped_attachments
+  const difficulty = ($('caDifficulty')?.value || '').trim();
+  // 输入框里还没确认的那段也当作标签（用户直接点保存、没敲回车的常见路径）
+  commitCaTagInput();
+  const tags = (state.CA_TAGS || []).slice();
+  // 附件以本机绝对路径数组入库；服务端还会逐个 os.Stat，无效的剔除后回传 invalid_attachments
   const attachments = (state.CA_ATTS || []).map(a => a.path);
   // 「需要附件」不再手填：挂了附件就是需要，没挂就是不需要
   const attachment = attachments.length > 0;
+  const editID = state.CA_EDIT_ID || '';
 
   const okBtn = $('caseAddOk');
   if (okBtn) okBtn.disabled = true;
@@ -708,11 +743,9 @@ async function submitCaseAdd() {
     const r = await fetch('/api/preset-cases', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        action: 'add', name, prompt,
-        labels: { scene, targets, attachment },
-        attachments
-      })
+      body: JSON.stringify(editID
+        ? { action: 'update', id: editID, prompt, labels: { scene, difficulty, tags, attachment }, attachments }
+        : { action: 'add', prompt, labels: { scene, difficulty, tags, attachment }, attachments })
     });
     const j = await r.json().catch(() => ({ ok: false, message: '响应解析失败' }));
     if (!j.ok) {
@@ -720,23 +753,36 @@ async function submitCaseAdd() {
       caseAddHint(j.message || '保存失败');
       return;
     }
-    const skipped = (j.skipped_attachments || []).length;
+    const invalid = j.invalid_attachments || [];
+    const savedID = (j.case && j.case.id) || editID;
+    const wasEdit = !!editID;
     closeCaseAdd();
 
-    // 重置筛选条件与搜索关键字，确保新增用例直接在第一行立即可见，不被既有过滤条件隐藏
-    state.LIB.keyword = '';
-    state.LIB.scenes = [];
-    state.LIB.targets = [];
-    state.LIB.attachment = '';
-    state.LIB.offset = 0;
-    const kwEl = $('libKw');
-    if (kwEl) kwEl.value = '';
+    if (!wasEdit) {
+      // 新增：重置筛选条件与搜索关键字，确保新用例直接在第一行立即可见，不被既有过滤条件隐藏
+      state.LIB.keyword = '';
+      state.LIB.scenes = [];
+      state.LIB.difficulties = [];
+      state.LIB.tags = [];
+      state.LIB.attachment = '';
+      state.LIB.offset = 0;
+      const kwEl = $('libKw');
+      if (kwEl) kwEl.value = '';
+    }
+    // 编辑不动用户的筛选条件：改完可能就落在当前筛选之外，那就只在提示位说明已保存
 
     await loadPresetLib();
-    flashAddedCase(j.case && j.case.id);
-    if (skipped) {
-      const m = $('libMsg');
-      if (m) m.textContent = `已跳过 ${skipped} 个不存在的附件`;
+    const visible = !!document.querySelector(`tr[data-id="${savedID}"]`);
+    flashAddedCase(savedID);
+    const m = $('libMsg');
+    if (invalid.length) {
+      // 用例本身已保存成功，只是个别附件被服务端剔除；务必说清，别让用户误以为整条失败
+      if (m) m.textContent = `用例已保存，已忽略 ${invalid.length} 个无效附件`;
+      alert(`用例已保存，但有 ${invalid.length} 个附件无效已被忽略：\n\n`
+        + fmtInvalidAttachments(invalid)
+        + '\n\n请修正后重新添加相关附件。');
+    } else if (wasEdit || !visible) {
+      if (m) m.textContent = j.message || (savedID ? `已保存 ${savedID}` : '已保存');
     }
   } catch (e) {
     caseAddHint('请求失败：' + e.message);
@@ -838,7 +884,7 @@ export function initCases() {
     });
   }
 
-  /* ---- 筛选：场景 / 测试目标（多选下拉）----
+  /* ---- 筛选：场景 / 难度（多选下拉）----
      点触发器开合面板；点选项勾选/取消；点已选项上的 × 删除该值；Esc 或点面板外收起。
      面板内的点击一律 stopPropagation：勾选会就地重绘选项/标签，被点的节点随即脱离 DOM，
      放任事件冒泡到 document 会让「点外收起」的判定认不出它来自面板，从而误收起面板。 */
@@ -918,6 +964,9 @@ export function initCases() {
 
       const del = e.target.closest('.lib-del');
       if (del) { delPresetOne(del.dataset.id); return; }
+      // 编辑：必须在下面的「整行点击切换勾选」之前 return，否则点编辑会顺带勾选/取消勾选
+      const edit = e.target.closest('.lib-edit');
+      if (edit) { openCaseEdit(edit.dataset.id); return; }
       const row = e.target.closest('tr[data-id]');
       if (!row) return;
       const id = row.dataset.id;
@@ -963,6 +1012,38 @@ export function initCases() {
   if (caAttLib) caAttLib.onclick = () => openLib('caseadd');
   const caAttFile = $('caAttFile');
   if (caAttFile) caAttFile.onchange = () => { uploadCaFiles(caAttFile.files); caAttFile.value = ''; };
+
+  /* ---- 自定义标签输入：回车 / 逗号确认，空输入时退格删掉最后一个，失焦也当确认 ---- */
+  const caTagChips = $('caTagChips');
+  if (caTagChips) {
+    // 芯片上的 × 用委托绑定（芯片是动态重渲染的，绑在具体节点上会随重建丢掉）
+    caTagChips.addEventListener('click', e => {
+      const x = e.target.closest ? e.target.closest('.tag-x') : null;
+      if (!x) return;
+      e.stopPropagation();
+      rmCaTag(Number(x.dataset.j));
+    });
+  }
+  const caTagInput = $('caTagInput');
+  if (caTagInput) {
+    caTagInput.addEventListener('keydown', e => {
+      if (e.isComposing) return;   // 中文输入法组字中的回车不算确认
+      if (e.key === 'Enter' || e.key === ',' || e.key === '，' || e.key === '、') {
+        e.preventDefault();
+        commitCaTagInput();
+        return;
+      }
+      // 输入框空着按退格 = 删掉最后一个标签（常见的手滑补救）
+      if (e.key === 'Backspace' && !caTagInput.value) {
+        const list = state.CA_TAGS || [];
+        if (list.length) {
+          e.preventDefault();
+          rmCaTag(list.length - 1);
+        }
+      }
+    });
+    caTagInput.addEventListener('blur', commitCaTagInput);
+  }
 
   const caseAddMask = $('caseAddMask');
   if (caseAddMask) {
@@ -1017,23 +1098,19 @@ export function initCases() {
       const picked = state.LIB_ROWS.filter(c => state.PSEL.has(c.id));
       if (!picked.length) { alert('请先勾选要加入本轮的用例'); return; }
       state.CASES = state.CASES.filter(c => c.prompt.trim());
-      const have = new Set(state.CASES.map(c => (c.prompt || '').trim()));
-      let dup = 0;
+      // 勾选几条就加几条，不去重：队列里已有的相同提问也照加
       for (const it of picked) {
         const p = (it.prompt || '').trim();
         if (!p) continue;
-        if (have.has(p)) { dup++; continue; }
         // 预设里存的附件路径要一起带回队列，否则运行时不会投递
         state.CASES.push({ prompt: p, labels: it.labels || {}, attachments: attsFromPaths(it.attachments) });
-        have.add(p);
       }
       renderCases();
       setCaseTab('queue');
       const msg = $('caseHint');
       if (msg) {
         msg.className = 'hint';
-        msg.textContent = `已加入本轮：共 ${state.CASES.filter(c => c.prompt.trim()).length} 条`
-          + (dup ? `（跳过 ${dup} 条重复提问）` : '') + '。点右下角「运行测试」即可开始。';
+        msg.textContent = `已加入本轮：共 ${state.CASES.filter(c => c.prompt.trim()).length} 条。点右下角「运行测试」即可开始。`;
       }
     };
   }

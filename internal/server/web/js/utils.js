@@ -27,6 +27,14 @@ export function fileToBase64(f) {
   });
 }
 
+// 把服务端回报的无效附件整理成可读的多行提示
+export function fmtInvalidAttachments(list) {
+  return (list || []).map(x => {
+    const who = x.name ? `「${x.name}」` : `第 ${x.row} 行`;
+    return `· ${who}：${x.value}\n  原因：${x.reason}`;
+  }).join('\n');
+}
+
 // 注意不要用 /Win/i 这种宽匹配：macOS 上某些内核的 UA 带 "(darwin)"，拆开就是 …ar-win…
 export let IS_WIN = /Windows NT|Win64|Win32/i.test(navigator.userAgent || '');
 export const setPlatformWin = (v) => { IS_WIN = !!v; };
