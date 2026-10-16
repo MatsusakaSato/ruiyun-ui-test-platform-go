@@ -241,6 +241,33 @@ func ParseSession(sessionDir string) (*models.ExecutionTrace, error) {
 	var isStreaming bool
 	stepIndex := 0
 
+	// ---- 按轮切分（多轮）----
+	// 依据「user→assistant 消息对」而非「最近一条 user」：
+	// 真实语料里存在 user 无对应 assistant（模型调用失败 / 连续两条 user），
+	// 只靠最近的 user 推断会把上一轮答复错记到本轮名下。
+	//
+	// curTurn 指向「当前待被 assistant 消费的那条 user 消息」；
+	// assistant 消息到达时把它的步骤并入 curTurn，然后另起一轮。
+	var turns []*models.TurnTrace
+	var curTurn *models.TurnTrace
+	// buildTurn 为一条 user 消息开一轮
+	buildTurn := func(prompt, at string) *models.TurnTrace {
+		t := &models.TurnTrace{
+			Index:         len(turns),
+			Prompt:        prompt,
+			UserAt:        at,
+			ToolCalls:     []*models.ToolCall{},
+			ThinkingSteps: []*models.ThinkingStep{},
+			Findings:      []*models.Finding{},
+			SystemErrors:  []string{},
+			FirstStep:     -1,
+			LastStep:      -1,
+			ElapsedS:      -1,
+		}
+		turns = append(turns, t)
+		return t
+	}
+
 	for _, rawMsg := range rawMessages {
 		msg, ok := rawMsg.(map[string]any)
 		if !ok {
@@ -256,6 +283,21 @@ func ParseSession(sessionDir string) (*models.ExecutionTrace, error) {
 			if firstUserPrompt == "" {
 				firstUserPrompt = currentTurnPrompt
 				userAt = msgTs
+			}
+			// 连续两条 user：上一条永远不会被 assistant 消费，
+			// 但仍要成轮，否则轮号会与实际提问顺序错位。
+			if curTurn != nil {
+				curTurn.Incomplete = true
+				curTurn.IncompleteWhy = "该轮提问未收到任何答复（下一条提问已开始）"
+			}
+			curTurn = buildTurn(currentTurnPrompt, msgTs)
+		} else if role == "system" {
+			// 系统消息（如 [181001] model call failed）挂到当前轮作为失败证据。
+			content := mapString(msg, "content")
+			if strings.TrimSpace(content) != "" {
+				if curTurn != nil {
+					curTurn.SystemErrors = append(curTurn.SystemErrors, content)
+				}
 			}
 		} else if role == "assistant" {
 			// 累加的是整条消息的 reasoningContent，
@@ -300,12 +342,16 @@ func ParseSession(sessionDir string) (*models.ExecutionTrace, error) {
 				stepType := mapString(step, "type")
 
 				if stepType == "thinking" {
-					trace.ThinkingSteps = append(trace.ThinkingSteps, &models.ThinkingStep{
+					ts := &models.ThinkingStep{
 						Index:     stepIndex,
 						Content:   mapString(step, "content"),
 						MsgAt:     msgTs,
 						MsgDoneAt: msgDoneAt,
-					})
+					}
+					trace.ThinkingSteps = append(trace.ThinkingSteps, ts)
+					if curTurn != nil {
+						curTurn.ThinkingSteps = append(curTurn.ThinkingSteps, ts)
+					}
 				} else if stepType == "tool_call" {
 					toolName := mapString(step, "name")
 					arguments := step["arguments"]
@@ -323,7 +369,11 @@ func ParseSession(sessionDir string) (*models.ExecutionTrace, error) {
 						reqID = mapString(msg, "request_id")
 					}
 
-					trace.ToolCalls = append(trace.ToolCalls, &models.ToolCall{
+					turnIdx := -1
+					if curTurn != nil {
+						turnIdx = curTurn.Index
+					}
+					tc := &models.ToolCall{
 						Index:            stepIndex,
 						ToolCallID:       mapString(step, "toolCallId"),
 						Name:             toolName,
@@ -339,7 +389,12 @@ func ParseSession(sessionDir string) (*models.ExecutionTrace, error) {
 						MsgAt:            msgTs,
 						MsgDoneAt:        msgDoneAt,
 						EmptyRequiredArg: DetectEmptyRequiredArgs(toolName, arguments),
-					})
+						TurnIndex:        turnIdx,
+					}
+					trace.ToolCalls = append(trace.ToolCalls, tc)
+					if curTurn != nil {
+						curTurn.ToolCalls = append(curTurn.ToolCalls, tc)
+					}
 				}
 				stepIndex++
 			}
@@ -352,9 +407,42 @@ func ParseSession(sessionDir string) (*models.ExecutionTrace, error) {
 					"first_step": spanFirst,
 					"last_step":  spanLast,
 				})
+				if curTurn != nil {
+					if curTurn.FirstStep < 0 {
+						curTurn.FirstStep = spanFirst
+					}
+					curTurn.LastStep = spanLast
+				}
+			}
+
+			// 本条 assistant 消息消费掉当前轮：写入答复与完成时间后收轮。
+			if curTurn != nil {
+				if ans, exists := msg["content"]; exists && ans != nil {
+					curTurn.Answer = mapString(msg, "content")
+				}
+				curTurn.DoneAt = msgDoneAt
+				if uT, ok := parseTime(curTurn.UserAt); ok {
+					if dT, ok2 := parseTime(msgDoneAt); ok2 {
+						curTurn.ElapsedS = round2(dT.Sub(uT).Seconds())
+					}
+				}
+				curTurn.Incomplete = false
+				curTurn.IncompleteWhy = ""
+				curTurn = nil
 			}
 		}
 	}
+
+	// 收尾：最后一条 user 消息若始终没等到 assistant，仍保留为「未完成轮」。
+	if curTurn != nil {
+		curTurn.Incomplete = true
+		curTurn.IncompleteWhy = "该轮提问未收到任何答复"
+		curTurn = nil
+	}
+	if turns == nil {
+		turns = []*models.TurnTrace{}
+	}
+	trace.Turns = turns
 
 	trace.UserPrompt = firstUserPrompt
 	trace.FinalAnswer = lastAssistantAnswer

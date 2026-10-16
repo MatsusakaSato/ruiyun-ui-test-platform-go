@@ -33,6 +33,8 @@ type ToolCall struct {
 	FailReason       string   `json:"fail_reason"`
 	Truncated        bool     `json:"truncated"`
 	EmptyRequiredArg []string `json:"empty_required_arg"`
+	// TurnIndex 该工具调用所属的轮次序号（0-based），与 TurnTrace.Index 对应。
+	TurnIndex int `json:"turn_index"`
 }
 
 func (tc *ToolCall) ResultLen() int {
@@ -230,6 +232,33 @@ func writeJSONOpt(sb *strings.Builder, v any, sortKeys bool) {
 	}
 }
 
+// TurnTrace 多轮会话中「一轮」的轨迹。
+//
+// 切分依据**不是**「最近一条 user 消息」，而是 **user→assistant 消息对**：
+// 真实语料（303 个会话）里存在 user 无对应 assistant 的情况
+// （模型调用失败 / 连续两条 user），只按最近的 user 推断会把上一轮的答复错记到本轮名下。
+//
+// 未被任何 assistant 消费的 user 消息仍然成轮（Answer/ToolCalls 为空、
+// Incomplete=true），保证轮号与会话里实际的提问顺序一一对应。
+type TurnTrace struct {
+	Index         int              `json:"index"`
+	Prompt        string           `json:"prompt"`
+	UserAt        string           `json:"user_at"`
+	DoneAt        string           `json:"done_at"`
+	Answer        string           `json:"answer"`
+	ToolCalls     []*ToolCall      `json:"tool_calls"`
+	ThinkingSteps []*ThinkingStep  `json:"thinking_steps"`
+	FirstStep     int              `json:"first_step"`
+	LastStep      int              `json:"last_step"`
+	ElapsedS      float64          `json:"elapsed_s"`
+	Incomplete    bool             `json:"incomplete"`
+	IncompleteWhy string           `json:"incomplete_why"`
+	SystemErrors  []string         `json:"system_errors"`
+	Findings      []*Finding       `json:"findings"`
+	WaitedLimit   bool             `json:"waited_limit"`
+	WaitNote      string           `json:"wait_note"`
+}
+
 // ThinkingStep 思考步骤
 type ThinkingStep struct {
 	Index     int    `json:"index"`
@@ -264,6 +293,10 @@ type ExecutionTrace struct {
 	GenerationS           float64          `json:"generation_s"`
 	SessionS              float64          `json:"session_s"`
 	TurnCount             int              `json:"turn_count"`
+	// Turns 按轮切分的轨迹。单轮会话也有一条（Turns[0]）。
+	// 平铺字段（ToolCalls/ThinkingSteps/FinalAnswer…）全部保留，
+	// 会话级断言与既有报告逻辑不因引入 Turns 而改变。
+	Turns []*TurnTrace `json:"turns"`
 }
 
 func (t *ExecutionTrace) ToolNames() []string {
