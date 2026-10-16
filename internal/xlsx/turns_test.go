@@ -154,3 +154,40 @@ func TestExcelTurnTemplate_BeyondMax(t *testing.T) {
 		t.Error("prompt_1 应被当成轮次列")
 	}
 }
+
+// TestExcelTurnTemplate_PromptColumnAfterTurns 回归：
+// 「提问」列排在 prompt_N 之后时，普通提问列绝不能认到轮次列上。
+//
+// 修复前的行为：promptHeaders 里的 "prompt" 被 strings.Contains 匹配到
+// prompt_2 上，于是 prompt_col 指向 prompt_2 那一列、同时该列又被从轮次
+// 识别里排除 —— 结果是第 1 轮变成「第二轮」，真正的首轮提问被当成自定义
+// 标签塞进 labels，静默丢数据。
+func TestExcelTurnTemplate_PromptColumnAfterTurns(t *testing.T) {
+	rows := [][]string{
+		{"prompt_2", "prompt_3", "提问"},
+		{"第二轮", "第三轮", "首轮真实提问"},
+	}
+	meta := DetectColumns(rows)
+	headIdx := 0
+	items := RowsToItems(rows, &headIdx, buildCols(meta))
+	list, _ := items["items"].([]map[string]any)
+	if len(list) != 1 {
+		t.Fatalf("应产出 1 条，实际 %d（%v）", len(list), items)
+	}
+	got, _ := list[0]["prompt"].([]string)
+	want := []string{"首轮真实提问", "第二轮", "第三轮"}
+	if len(got) != 3 {
+		t.Fatalf("应为 3 轮，实际 %#v", got)
+	}
+	for i := range want {
+		if got[i] != want[i] {
+			t.Errorf("第 %d 轮应为 %q，实际 %q（全部：%#v）", i+1, want[i], got[i], got)
+		}
+	}
+	// 真正的提问列不能被当成自定义标签泄漏出去
+	if lbls, ok := list[0]["labels"].(map[string]any); ok {
+		if _, leaked := lbls["提问"]; leaked {
+			t.Errorf("「提问」列不应泄漏成自定义标签：%v", lbls)
+		}
+	}
+}
