@@ -1132,9 +1132,16 @@ func (s *Server) handleEvaluate(w http.ResponseWriter, r *http.Request) {
 			"ok": false, "message": fmt.Sprintf("run_id 含非法字符：%s", runID)})
 		return
 	}
+	// 评分口径：case（默认，整用例）/ turn（逐轮）。
+	// 传别的值一律按整用例处理，避免前端拼错参数导致评分口径漂移。
+	mode := strings.TrimSpace(strOr(body["mode"], ""))
+	if mode != "turn" {
+		mode = "case"
+	}
 	ok, msg := s.eval.Start(runID,
 		intFromAny(body["max_cases"], 0),
-		intFromAny(body["concurrency"], 3))
+		intFromAny(body["concurrency"], 3),
+		mode)
 	rid := ""
 	if ok {
 		rid = msg

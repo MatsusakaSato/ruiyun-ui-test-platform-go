@@ -9,7 +9,7 @@ import { initCases, loadUploads, pickAttach, uploadFiles, openLib, closeLib, rmA
          setCaseTurn, openTurns, closeTurns, saveTurns, setDraftTurn, delDraftTurn, addDraftTurn,
          renderCaTurns, setCaTurn, addCaTurn, delCaTurn } from './page-cases.js';
 import { initExcelImport } from './excel-import.js';
-import { initHistory, loadRounds, openRound, delRound, setTab, pickCase, startEval, stopEval, refreshEvalStatus, pollEval, openRoundById, copyRoundId } from './page-history.js';
+import { initHistory, loadRounds, openRound, delRound, setTab, pickCase, startEval, stopEval, refreshEvalStatus, pollEval, openRoundById, copyRoundId, setEvalScope } from './page-history.js';
 import { initModals, loadLLM, openLlm, revealCfgPath } from './modals.js';
 import { initNotify } from './page-notify.js';
 import { initSelectSkins } from './msel-select.js';
@@ -39,6 +39,7 @@ Object.assign(window, {
   openLlm,
   openRoundById,
   copyRoundId,
+  setEvalScope,
   // 多轮对话
   setCaseTurn,
   openTurns,

@@ -58,6 +58,9 @@ export const state = {
   // 对话框中待保存的多轮提问（字符串数组，第 1 轮与 #caPrompt 双向同步）
   CA_TURNS: [''],
 
+  // 评估页的评分口径：'case'（整用例，默认）/ 'turn'（逐轮）
+  EVAL_SCOPE: 'case',
+
   // 队列行「轮次」弹窗：TURNS_ROW 为队列行序号（-1 表示未打开），TURNS_DRAFT 为待保存轮次
   TURNS_ROW: -1,
   TURNS_DRAFT: [],

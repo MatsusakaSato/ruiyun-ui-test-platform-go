@@ -1454,7 +1454,8 @@ func PreflightCheck(cfg map[string]interface{}) map[string]interface{} {
 
 func evaluateCase(runID string, caseItem map[string]interface{}, bundle *RoundBundle,
 	preset map[string]map[string]interface{}, promptIndex map[string][]map[string]interface{},
-	roundCloseRate *float64, cfg map[string]interface{}, judge JudgeCaseFunc) map[string]interface{} {
+	roundCloseRate *float64, cfg map[string]interface{}, judge JudgeCaseFunc,
+	mode string) map[string]interface{} {
 
 	labels := labelsFor(caseItem, bundle.CasesDef, preset)
 	prompt := fmt.Sprintf("%v", caseItem["prompt"])
@@ -1597,6 +1598,13 @@ func evaluateCase(runID string, caseItem map[string]interface{}, bundle *RoundBu
 	judged := judge(caseItem, trace, arts, labels, need, objective, cfg, facts)
 	jdims := judged.Dims
 	judgeError := judged.Error
+
+	// 逐轮评分：仅多轮用例 + 开了逐轮口径时才跑。
+	// 单轮用例的逐轮分恒等于整用例分，没有信息量，直接跳过（用户确认）。
+	var turnRows []map[string]interface{}
+	if mode == ScoringModeTurn && trace != nil && len(trace.Turns) > 1 {
+		turnRows = judgeTurns(caseItem, trace, arts, labels, need, objective, cfg, facts, judge)
+	}
 	failReason := ""
 	if judgeError != "" {
 		failReason = judgeFailReason(judgeError)
@@ -1836,8 +1844,110 @@ func evaluateCase(runID string, caseItem map[string]interface{}, bundle *RoundBu
 		"artifacts":          artList,
 		"scores":             ordered,
 		"judge_usage":        judged.Usage,
+		"scoring_mode":       mode,
+		"turns":              nonNilTurnRows(turnRows),
 	}
 }
+
+// nonNilTurnRows 让 turns 恒为数组（无逐轮分时是空数组而非 null），
+// 前端与报告端就不必再判 null。
+func nonNilTurnRows(rows []map[string]interface{}) []map[string]interface{} {
+	if rows == nil {
+		return []map[string]interface{}{}
+	}
+	return rows
+}
+
+// ---------- 逐轮评分 ----------
+
+// 逐轮评分的口径：复用 JudgeCase，但把评分对象换成「该轮的提问 + 该轮的答复」。
+// 这样逐轮分与整用例分用的是同一套维度、同一套 rubric、同一个模型配置，
+// 两个口径的分数可以直接横向对比，不会因为换了提示词而不可比。
+//
+// 只对多轮用例有意义：单轮用例只有一轮，逐轮分恒等于整用例分，
+// 因此调用方（EvaluateRound）对单轮用例强制走整用例。
+func judgeTurns(caseItem map[string]interface{}, trace *models.ExecutionTrace,
+	arts *artifacts.ArtifactSet, labels map[string]interface{},
+	dims []rubric.Dimension, objective map[string]interface{}, cfg map[string]interface{},
+	baseFacts map[string]interface{}, judge JudgeCaseFunc) []map[string]interface{} {
+
+	if trace == nil || len(trace.Turns) == 0 {
+		return nil
+	}
+
+	rows := make([]map[string]interface{}, 0, len(trace.Turns))
+	for _, t := range trace.Turns {
+		if t == nil {
+			continue
+		}
+		// 该轮的单轮化视图：提问用本轮提问，答复用本轮答复，
+		// 轨迹只保留本轮的工具与思考步，避免把其他轮的内容混进本轮判定。
+		turnTrace := &models.ExecutionTrace{
+			ToolCalls:     t.ToolCalls,
+			ThinkingSteps: t.ThinkingSteps,
+			FinalAnswer:   t.Answer,
+			Turns:         []*models.TurnTrace{t},
+		}
+		turnItem := map[string]interface{}{}
+		for k, v := range caseItem {
+			turnItem[k] = v
+		}
+		turnItem["prompt"] = t.Prompt
+
+		// 逐轮评分不再注入「最终产出物」正文：产物是整用例级别的，
+		// 分不清属于哪一轮，混进来会污染单轮判定。
+		judged := judge(turnItem, turnTrace, nil, labels, dims, objective, cfg, baseFacts)
+
+		row := map[string]interface{}{
+			"index":        t.Index,
+			"prompt":       t.Prompt,
+			"elapsed_s":    canon.Round(t.ElapsedS, 1),
+			"incomplete":   t.Incomplete,
+			"judge_error":  judged.Error,
+			"judge_usage":  judged.Usage,
+			"judge_raw":    judged.Raw,
+			"scores":       orderedTurnScores(dims, judged.Dims),
+		}
+		if len(t.SystemErrors) > 0 {
+			row["system_errors"] = t.SystemErrors
+		}
+		rows = append(rows, row)
+	}
+	if len(rows) == 0 {
+		return nil
+	}
+	return rows
+}
+
+// orderedTurnScores 把模型返回的维度分数按 dims 声明顺序输出。
+//
+// 顺序必须稳定：map 遍历是随机的，直接返回 map 会让报告里的
+// 逐轮分数每次刷新都换位。返回有序切片，键为维度 key。
+func orderedTurnScores(dims []rubric.Dimension, got map[string]interface{}) []map[string]interface{} {
+	out := make([]map[string]interface{}, 0, len(dims))
+	for _, d := range dims {
+		entry := map[string]interface{}{"key": d.Key, "label": d.Label}
+		if p, ok := got[d.Key].(map[string]interface{}); ok {
+			entry["score"] = p["score"]
+			entry["reason"] = p["reason"]
+		} else {
+			entry["score"] = nil
+			entry["reason"] = ""
+		}
+		out = append(out, entry)
+	}
+	return out
+}
+
+// 评分口径：整用例 vs 逐轮。
+//
+// 整用例（默认）与改造前完全一致：只把「最终答复」当作评分对象。
+// 逐轮：把每一轮的提问与答复分别交给模型打分，结果写进该用例的
+// turns[] 里。仅对多轮用例生效 —— 单轮用例两种口径等价，强制走整用例。
+const (
+	ScoringModeCase = "case"   // 整用例评分（默认）
+	ScoringModeTurn = "turn"   // 逐轮评分
+)
 
 type EvaluateOptions struct {
 	OnProgress func(done, total int, message string)
@@ -1846,6 +1956,9 @@ type EvaluateOptions struct {
 	JudgeFn    JudgeCaseFunc
 	Cfg        map[string]interface{}
 	Preflight  *bool
+	// Mode 评分口径，取 ScoringModeCase / ScoringModeTurn。
+	// 空串按整用例处理（保持既有调用方行为不变）。
+	Mode string
 }
 
 func EvaluateRound(runID string, opts EvaluateOptions) (map[string]interface{}, error) {
@@ -1952,6 +2065,12 @@ func EvaluateRound(runID string, opts EvaluateOptions) (map[string]interface{}, 
 		judge = JudgeCase
 	}
 
+	// 评分口径：空串按整用例处理，保持既有调用方行为不变
+	mode := strings.TrimSpace(opts.Mode)
+	if mode != ScoringModeTurn {
+		mode = ScoringModeCase
+	}
+
 	workers := 3
 	if ec, ok := llmCfg["eval_concurrency"].(int); ok && ec > 0 {
 		workers = ec
@@ -1985,7 +2104,7 @@ func EvaluateRound(runID string, opts EvaluateOptions) (map[string]interface{}, 
 							}
 						}
 					}()
-					row := evaluateCase(runID, c, bundle, preset, promptIndex, roundCloseRate, judgeCfg, judge)
+					row := evaluateCase(runID, c, bundle, preset, promptIndex, roundCloseRate, judgeCfg, judge, mode)
 					results <- evalResult{row: row}
 				}()
 			}
@@ -2058,6 +2177,7 @@ func EvaluateRound(runID string, opts EvaluateOptions) (map[string]interface{}, 
 		"workspace_root": workspaceRoot(judgeCfg),
 		"rubric_version": "1.0",
 		"scoring_mode":   "llm_all",
+		"judge_scope":    mode,
 		"rubric":         rubric.RubricMeta(),
 	}
 

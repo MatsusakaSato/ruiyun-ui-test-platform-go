@@ -59,6 +59,7 @@ globalThis.fetch = async (url, opt) => {
 const { state } = await import(pathToFileURL(WEB + '/js/state.js').href);
 const pc = await import(pathToFileURL(WEB + '/js/page-cases.js').href);
 const ph = await import(pathToFileURL(WEB + '/js/page-home.js').href);
+const hist = await import(pathToFileURL(WEB + '/js/page-history.js').href);
 const u = await import(pathToFileURL(WEB + '/js/utils.js').href);
 
 const $ = id => document.getElementById(id);
@@ -178,7 +179,57 @@ ph.doRun();
 await tick();
 ok('全空轮用例不进运行提交体', runBody === null);
 
+/* ---- 7. 评估口径开关 ---- */
+// 只有多轮用例存在时开关才出现
+state.lastRoundData = { run_id: 'run_1', cases: [{ case_id: 'C1', prompt: ['a'] }] };
+ok('全是单轮用例时不显示口径开关', hist.roundHasMultiTurn() === false);
+state.lastRoundData = { run_id: 'run_1', cases: [
+  { case_id: 'C1', prompt: ['a'] },
+  { case_id: 'C2', prompt: ['a', 'b'] }
+] };
+ok('存在多轮用例时显示口径开关', hist.roundHasMultiTurn() === true);
+
+state.currentTab = 'eval';
+state.EVAL_SCOPE = 'case';
+let evalBody = null;
+globalThis.fetch = async (url, opt) => {
+  const u = String(url);
+  fetches.push({ url: u, method: (opt || {}).method || 'GET', body: (opt || {}).body });
+  if (u.includes('/api/evaluate')) {
+    evalBody = JSON.parse((opt || {}).body || '{}');
+    return { ok: true, status: 200, json: async () => ({ ok: true, run_id: 'run_1', message: 'run_1' }) };
+  }
+  return { ok: true, status: 200, json: async () => LIB };
+};
+state.LLM_SRV = { configured: true };
+state.EVAL_STATE = null;
+
+await hist.startEval();
+ok('评估请求已发出', evalBody !== null);
+ok('默认走整用例口径', evalBody && evalBody.mode === 'case', JSON.stringify(evalBody));
+
+state.EVAL_SCOPE = 'turn';
+evalBody = null;
+await hist.startEval();
+ok('选逐轮后提交 turn 口径', evalBody && evalBody.mode === 'turn', JSON.stringify(evalBody));
+
+// 单轮用例集合下即使选了逐轮也回落成整用例
+state.lastRoundData = { run_id: 'run_1', cases: [{ case_id: 'C1', prompt: ['a'] }] };
+evalBody = null;
+await hist.startEval();
+ok('单轮用例下逐轮口径回落为整用例', evalBody && evalBody.mode === 'case', JSON.stringify(evalBody));
+
+// setEvalScope 归一化非法值
+hist.setEvalScope('turn');
+ok('setEvalScope 接受 turn', state.EVAL_SCOPE === 'turn');
+hist.setEvalScope('乱七八糟');
+ok('setEvalScope 把非法值归一成 case', state.EVAL_SCOPE === 'case');
+
 /* ---- 汇总 ---- */
+// startEval 会起 pollEval 的 setInterval 轮询；冒烟不验证轮询，
+// 不清掉它 Node 会一直不退出（不是产品问题）。
+if (state.EVAL_TIMER) { clearInterval(state.EVAL_TIMER); state.EVAL_TIMER = null; }
+
 let pass = 0;
 for (const [good, name, extra] of results) {
   if (good) { pass++; console.log('  ✓ ' + name); }

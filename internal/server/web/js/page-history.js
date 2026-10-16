@@ -698,7 +698,38 @@ export function evCaseTable(c, i, sm) {
       <div class="ev-case-meta">${meta.join('')}</div>
       ${je ? `<div class="ev-case-err">打分失败的原因：${esc(je)}`
         + (c.judge_raw ? `<div class="pb-detail">${esc(c.judge_raw)}</div>` : '') + '</div>' : ''}
-    </div>${t}${factsBox}</div>`;
+    </div>${t}${evTurnScores(c, sm)}${factsBox}</div>`;
+}
+
+
+// 逐轮评分结果：开了逐轮口径的多轮用例才有的 turns[]。
+// 每轮一张小表，行是维度、列是该轮得分 —— 与整用例表同一套维度，
+// 两个口径的分数可以直接横向对比。
+function evTurnScores(c, sm) {
+  const turns = Array.isArray(c.turns) ? c.turns : [];
+  if (!turns.length) return '';
+  const cols = evCols(sm);
+  let h = '<div class="ev-turns"><div class="ev-turns-hd">逐轮评分</div>';
+  for (const t of turns) {
+    const dims = (t.scores || []).slice().sort(dimRank(sm));
+    const cells = dims.map(d => {
+      const col = cols.find(x => x.groups.includes(d.group));
+      const v = d.score == null ? '<span style="color:var(--tx3)">—</span>' : `<b>${esc(d.score)}</b>`;
+      return `<tr><td class="evt-dim" title="${esc(d.reason || '')}">${esc(d.label || d.key)}`
+        + `<span class="evt-grp">${esc(col ? col.label : d.group || '')}</span></td>`
+        + `<td class="evt-score">${v}</td></tr>`;
+    }).join('');
+    const bad = t.incomplete || t.judge_error;
+    h += `<div class="ev-turn${bad ? ' bad' : ''}">`
+      + `<div class="ev-turn-hd"><b>第 ${(t.index ?? 0) + 1} 轮</b>`
+      + (t.incomplete ? '<span class="pill bad">未答复</span>' : '')
+      + (t.judge_error ? `<span class="pill bad" title="${esc(t.judge_error)}">打分失败</span>` : '')
+      + `<span class="mono" style="color:var(--tx3)">${esc(t.elapsed_s ?? '—')}s</span></div>`
+      + `<div class="ev-turn-p" title="${esc(t.prompt || '')}">${esc(clip(t.prompt || '', 80))}</div>`
+      + (cells ? `<table class="ev-turn-tbl"><tbody>${cells}</tbody></table>` : '')
+      + '</div>';
+  }
+  return h + '</div>';
 }
 
 export function evalTab() {
@@ -717,11 +748,43 @@ export function evEmpty() {
       调用大模型对用例的<b>结果质量</b>、<b>安全可靠</b>与 <b>Agent 系统能力</b>进行打分。
       ${cfg ? '' : '<br><span style="color:var(--tx3);font-size:11.5px">（提示：需在右上角「设置 → 模型设置」中配置好可用模型）</span>'}
     </div>
+    ${evalScopePicker()}
     <div style="display:flex;gap:10px;justify-content:center;align-items:center">
       <button class="btn-primary" style="padding:8px 22px" onclick="startEval()">开始评估</button>
       ${cfg ? '' : '<button class="btn-ghost" onclick="openLlm()">配置模型</button>'}
     </div>
   </div>`;
+}
+
+// 评分口径选择条：整用例 / 逐轮。
+// 只有轮次里存在多轮用例时才显示 —— 单轮用例两种口径等价，
+// 摆出来只会让人以为有区别（用户确认：开关对单轮用例不生效）。
+export function roundHasMultiTurn() {
+  const j = state.lastRoundData || {};
+  return (j.cases || []).some(c => turnCount(c.prompt) > 1);
+}
+
+function evalScopePicker() {
+  if (!roundHasMultiTurn()) return '';
+  const cur = state.EVAL_SCOPE === 'turn' ? 'turn' : 'case';
+  const opt = (val, title, desc) => `
+    <label class="scope-opt${cur === val ? ' on' : ''}">
+      <input type="radio" name="evalScope" value="${val}" ${cur === val ? 'checked' : ''}
+             onchange="setEvalScope('${val}')"/>
+      <span><b>${title}</b><span class="scope-desc">${desc}</span></span>
+    </label>`;
+  return `<div style="margin-bottom:16px">
+    <div style="font-size:12px;color:var(--tx3);margin-bottom:7px">评分口径</div>
+    <div class="scope-bar">
+      ${opt('case', '整用例评分', '把整段对话的最终答复作为评分对象（默认）')}
+      ${opt('turn', '逐轮评分', '每一轮分别打分，可看出问题出在第几轮')}
+    </div>
+  </div>`;
+}
+
+export function setEvalScope(v) {
+  state.EVAL_SCOPE = v === 'turn' ? 'turn' : 'case';
+  if (state.currentTab === 'eval' && $('tabBody')) $('tabBody').innerHTML = evalTab();
 }
 
 export function evRunning() {
@@ -766,6 +829,7 @@ export function evResult(ev) {
     + `<span class="ver">耗时 ${ev.elapsed_s ?? '—'}s</span>`
     + `<span class="ver">judge token ${(ev.judge_usage || {}).total_tokens ?? 0}</span>`
     + '<span class="spacer"></span><button class="btn-ghost" onclick="startEval()">重新评估</button></div>';
+  h += evalScopePicker();
   h += evAlert(sm);
   const errs = (ev.errors || []).filter(e => e.kind !== 'judge');
   if (errs.length) {
@@ -789,7 +853,11 @@ export async function startEval() {
     const r = await fetch('/api/evaluate', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ run_id: j.run_id })
+      body: JSON.stringify({
+        run_id: j.run_id,
+        // 单轮用例只有一轮，逐轮分恒等于整用例分，这里直接回落成整用例
+        mode: (state.EVAL_SCOPE === 'turn' && roundHasMultiTurn()) ? 'turn' : 'case'
+      })
     });
     const x = await r.json();
     if (!x.ok) {

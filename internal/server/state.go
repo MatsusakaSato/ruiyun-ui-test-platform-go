@@ -404,7 +404,7 @@ func (e *EvalState) preflight() map[string]any {
 }
 
 // Start 启动质量评估
-func (e *EvalState) Start(runID string, maxCases, concurrency int) (bool, string) {
+func (e *EvalState) Start(runID string, maxCases, concurrency int, mode string) (bool, string) {
 	e.mu.Lock()
 	if e.running {
 		e.mu.Unlock()
@@ -446,14 +446,14 @@ func (e *EvalState) Start(runID string, maxCases, concurrency int) (bool, string
 	e.running = true
 	e.mu.Unlock()
 
-	go e.run(runID, maxCases, concurrency)
+	go e.run(runID, maxCases, concurrency, mode)
 	e.mu.Lock()
 	e.line(fmt.Sprintf("[评估] 已启动 · run_id=%s", runID))
 	e.mu.Unlock()
 	return true, runID
 }
 
-func (e *EvalState) run(runID string, maxCases, concurrency int) {
+func (e *EvalState) run(runID string, maxCases, concurrency int, mode string) {
 	defer func() {
 		e.mu.Lock()
 		e.finished = true
@@ -481,6 +481,7 @@ func (e *EvalState) run(runID string, maxCases, concurrency int) {
 			e.line(message)
 			e.mu.Unlock()
 		},
+		Mode:   mode,
 		Cancel: func() bool {
 			e.mu.Lock()
 			defer e.mu.Unlock()

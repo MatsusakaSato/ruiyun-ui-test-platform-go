@@ -228,3 +228,28 @@
   padding:5px 8px;border-radius:7px;background:var(--bg2,#f8fafc)}
 .prompt-turn-no{flex:0 0 auto;color:var(--tx3);font-size:11.5px;white-space:nowrap;padding-top:1px}
 .prompt-turn-tx{flex:1;color:var(--tx2);white-space:pre-wrap;word-break:break-word}
+
+/* ---------- 评估页：评分口径与逐轮得分（2026-10-16 加） ---------- */
+.scope-bar{display:flex;gap:10px;justify-content:center;flex-wrap:wrap}
+.scope-opt{display:flex;gap:8px;align-items:flex-start;cursor:pointer;
+  padding:9px 13px;border:1px solid var(--bd);border-radius:10px;background:var(--bg);
+  max-width:280px;text-align:left;transition:border-color .12s,background .12s}
+.scope-opt:hover{border-color:var(--accent)}
+.scope-opt.on{border-color:var(--accent);background:color-mix(in srgb,var(--accent) 7%,transparent)}
+.scope-opt input{margin-top:2px;accent-color:var(--accent);flex:0 0 auto}
+.scope-opt b{font-size:12.5px;display:block}
+.scope-desc{display:block;font-size:11.5px;color:var(--tx3);line-height:1.5;margin-top:2px}
+
+.ev-turns{margin-top:12px}
+.ev-turns-hd{font-size:12px;color:var(--tx3);margin-bottom:7px}
+.ev-turn{border:1px solid var(--line2);border-radius:9px;padding:9px 12px;margin-bottom:7px;
+  background:#fcfcfd}
+.ev-turn.bad{border-color:color-mix(in srgb,var(--p0) 40%,var(--line2));background:#fff7f7}
+.ev-turn-hd{display:flex;gap:8px;align-items:center;flex-wrap:wrap}
+.ev-turn-hd b{font-size:12.5px}
+.ev-turn-p{font-size:12px;color:var(--tx2);margin-top:5px;word-break:break-word}
+.ev-turn-tbl{width:100%;border-collapse:collapse;margin-top:7px}
+.ev-turn-tbl td{padding:3px 0;font-size:12px;border-top:1px solid var(--line2)}
+.evt-dim{color:var(--tx2)}
+.evt-grp{color:var(--tx3);font-size:11px;margin-left:6px}
+.evt-score{text-align:right;width:56px;color:var(--accent)}
