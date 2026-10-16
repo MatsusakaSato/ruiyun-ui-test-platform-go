@@ -59,6 +59,99 @@ func eventsForSession(events []map[string]any, sessDir string, tSend float64) []
 	return owned
 }
 
+// normalizeCaseTurns 取用例的轮次数组。
+//
+// 契约：caseData["prompt"] 是字符串数组（单轮也是长度 1 的数组）。
+// 兼容字符串形态（内部调用方 / 老数据），按单轮处理。
+// 顺带按 testcasedb.MaxTurns 截断，并去掉空轮。
+func normalizeCaseTurns(caseData map[string]any) []string {
+	var turns []string
+	switch v := caseData["prompt"].(type) {
+	case []string:
+		turns = v
+	case []any:
+		for _, t := range v {
+			if t == nil {
+				continue
+			}
+			turns = append(turns, fmt.Sprintf("%v", t))
+		}
+	case string:
+		turns = []string{v}
+	}
+	out := make([]string, 0, len(turns))
+	for _, t := range turns {
+		t = strings.TrimSpace(t)
+		if t == "" {
+			continue
+		}
+		out = append(out, t)
+		if len(out) >= testcasedb.MaxTurns {
+			break
+		}
+	}
+	return out
+}
+
+// attachTurnFindings 逐轮跑断言，把结果挂到 CaseResult.TurnFindings。
+//
+// 口径（用户确认）：逐轮**不开放配置**，规则沿用同一套全局 rules；
+// 轮级结果**不参与通过性判定**，只用于定位是哪一轮出的问题。
+//
+// 实现方式：把每轮裁成一份「单轮 trace」交给 assertor —— 逐轮规则
+// （死循环、重复调用、空实参、失败特征词等）看的都是「本轮的调用序列」，
+// 直接复用同一套断言器比另写一套更不易与全量规则产生口径漂移。
+func attachTurnFindings(res *models.CaseResult, tr *models.ExecutionTrace, rulesMap map[string]any, maxIter int) {
+	if tr == nil || len(tr.Turns) == 0 {
+		return
+	}
+	res.TurnFindings = make(map[int][]*models.Finding, len(tr.Turns))
+	res.TurnElapsedS = make(map[int]float64, len(tr.Turns))
+	for _, tn := range tr.Turns {
+		// 单轮 trace：只保留本轮的调用与思考步，其余字段按会话裁剪
+		sub := &models.ExecutionTrace{
+			SessionID:             tr.SessionID,
+			Title:                 tr.Title,
+			Status:                tr.Status,
+			Mode:                  tr.Mode,
+			UserPrompt:            tn.Prompt,
+			FinalAnswer:           tn.Answer,
+			ToolCalls:             tn.ToolCalls,
+			ThinkingSteps:         tn.ThinkingSteps,
+			MessageSpans:          []map[string]any{},
+			AssociatedToolCallIDs: tr.AssociatedToolCallIDs,
+			TurnCount:             1,
+		}
+		findings := assertor.RunAssertions(sub, rulesMap, maxIter)
+		// 未完成的轮（没等到答复）补一条可定位的记录；这是「轮级展示」信息，
+		// 不进会话级 Findings，因此不影响通过性。
+		if tn.Incomplete {
+			why := tn.IncompleteWhy
+			if why == "" {
+				why = "该轮未收到答复"
+			}
+			findings = append(findings, &models.Finding{
+				Rule:      "TURN_INCOMPLETE",
+				SessionID: tr.SessionID,
+				Detail:    why,
+			})
+		}
+		// 轮内 system 报错（如 model call failed）记为该轮的一条 finding
+		for _, se := range tn.SystemErrors {
+			findings = append(findings, &models.Finding{
+				Rule:      "TURN_MODEL_ERROR",
+				SessionID: tr.SessionID,
+				Detail:    se,
+			})
+		}
+		if findings == nil {
+			findings = []*models.Finding{}
+		}
+		res.TurnFindings[tn.Index] = findings
+		res.TurnElapsedS[tn.Index] = tn.ElapsedS
+	}
+}
+
 type inflightItem struct {
 	res   *models.CaseResult
 	sess  string
@@ -73,11 +166,22 @@ func RunUICases(cfg map[string]any, cases []map[string]any, uidriver *driver.Rui
 	}
 	var results []*models.CaseResult
 
+	// case_timeout_s 自多轮改造起语义是「**每轮**等待上限」。
 	caseTimeout := 1200.0
 	if ct, ok := cfg["case_timeout_s"].(float64); ok && ct > 0 {
 		caseTimeout = ct
 	} else if ct, ok := cfg["case_timeout_s"].(int); ok && ct > 0 {
 		caseTimeout = float64(ct)
+	}
+
+	// case_total_timeout_s 整用例（全部轮次）的总时长上限，默认 3600s。
+	// 轮数不限时单用例理论时长会很大，一个用例占一个并发位，需要总闸。
+	// 语义同样是「等待上限」：等满就按已有日志出结果，不写 ui_error、不影响通过性。
+	caseTotalTimeout := 3600.0
+	if ct, ok := cfg["case_total_timeout_s"].(float64); ok && ct > 0 {
+		caseTotalTimeout = ct
+	} else if ct, ok := cfg["case_total_timeout_s"].(int); ok && ct > 0 {
+		caseTotalTimeout = float64(ct)
 	}
 
 	newSessTimeout := 90.0
@@ -90,6 +194,15 @@ func RunUICases(cfg map[string]any, cases []map[string]any, uidriver *driver.Rui
 	maxInflight := 5
 	if mi, ok := cfg["max_inflight"].(int); ok && mi > 0 {
 		maxInflight = mi
+	}
+
+	// quietS 会话「静默多久算本轮生成结束」的秒数。
+	// 多轮用例在发送第 2..N 轮后靠它判定本轮完成（同一会话，无法再靠新会话目录判断）。
+	quietS := 3.0
+	if q, ok := cfg["settle_quiet_s"].(float64); ok && q > 0 {
+		quietS = q
+	} else if q, ok := cfg["settle_quiet_s"].(int); ok && q > 0 {
+		quietS = float64(q)
 	}
 
 	type pendingCase struct {
@@ -123,7 +236,11 @@ func RunUICases(cfg map[string]any, cases []map[string]any, uidriver *driver.Rui
 			res.UIOk = false
 		} else {
 			res.Trace = tr
+			// 会话级断言：判定通过性（CaseResult.Passed 只看这一层）
 			res.Findings = assertor.RunAssertions(tr, rulesMap, maxIter)
+			// 轮级断言：仅用于「定位是哪一轮出的问题」，不影响通过性。
+			// 逐轮不开放配置，规则沿用同一套全局 rules。
+			attachTurnFindings(res, tr, rulesMap, maxIter)
 		}
 		results = append(results, res)
 
@@ -162,7 +279,14 @@ func RunUICases(cfg map[string]any, cases []map[string]any, uidriver *driver.Rui
 			if name == "" || name == "<nil>" {
 				name = cid
 			}
-			prompt := strings.TrimSpace(fmt.Sprintf("%v", caseData["prompt"]))
+			// 轮次数组：单轮也是长度 1 的数组。
+			// 兼容字符串形态（内部调用方 / 老数据），按单轮处理。
+			turns := normalizeCaseTurns(caseData)
+			if len(turns) == 0 {
+				logger(fmt.Sprintf("        跳过：用例 %s 没有有效提问", cid))
+				continue
+			}
+			prompt := turns[0]
 
 			titleDisp := cid
 			if name != cid {
@@ -173,7 +297,18 @@ func RunUICases(cfg map[string]any, cases []map[string]any, uidriver *driver.Rui
 				promptDisp = string([]rune(promptDisp)[:60]) + "..."
 			}
 			logger(fmt.Sprintf("\n发送 %d/%d · %s", i, nTotal, titleDisp))
-			logger(fmt.Sprintf("        提问：%s", promptDisp))
+			if len(turns) > 1 {
+				logger(fmt.Sprintf("        多轮用例：共 %d 轮", len(turns)))
+				for ti, t := range turns {
+					d := t
+					if len([]rune(d)) > 60 {
+						d = string([]rune(d)[:60]) + "..."
+					}
+					logger(fmt.Sprintf("          第 %d 轮：%s", ti+1, d))
+				}
+			} else {
+				logger(fmt.Sprintf("        提问：%s", promptDisp))
+			}
 
 			var expTools []string
 			if ets, ok := caseData["expect_tools"].([]any); ok {
@@ -186,9 +321,12 @@ func RunUICases(cfg map[string]any, cases []map[string]any, uidriver *driver.Rui
 				CaseID:        cid,
 				Name:          name,
 				Prompt:        prompt,
+				Prompts:       turns,
+				TurnCount:     len(turns),
 				ExpectedTools: expTools,
 				Attachments:   make([]string, 0),
 				Findings:      make([]*models.Finding, 0),
+				AbortedAtTurn: -1,
 			}
 			t0 := float64(time.Now().UnixNano()) / 1e9
 
@@ -236,45 +374,100 @@ func RunUICases(cfg map[string]any, cases []map[string]any, uidriver *driver.Rui
 			}
 
 			before := uidriver.SnapshotSessions()
-			if err := uidriver.TypeText(prompt); err != nil {
-				if !uidriver.CheckAppAlive() {
-					return results
+
+			// ---- 多轮发送：用例内**串行**（用例之间仍并行）----
+			// 第 1 轮走原有「新建会话」路径拿会话目录；
+			// 第 2..N 轮在同一会话内追加发送，改用 WaitSettled 判定本轮生成完成。
+			var sess string
+			sendFailed := false
+			for ti, turnText := range turns {
+				// 总时长闸：已用时间超过整用例上限就不再发下一轮
+				if ti > 0 {
+					used := float64(time.Now().UnixNano())/1e9 - t0
+					if used >= caseTotalTimeout {
+						res.AbortedAtTurn = ti
+						res.WaitedLimit = true
+						res.WaitNote = fmt.Sprintf("已达用例总时长上限（%.0f 分钟），剩余 %d 轮未发送",
+							caseTotalTimeout/60.0, len(turns)-ti)
+						logger(fmt.Sprintf("        已达用例总时长上限（%.0f 分钟），中止本用例剩余 %d 轮",
+							caseTotalTimeout/60.0, len(turns)-ti))
+						break
+					}
 				}
-				res.UIOk = false
-				res.UIError = fmt.Sprintf("界面操作出错: %v", err)
-				logger(fmt.Sprintf("        失败：%s", res.UIError))
-				res.ElapsedS = float64(time.Now().UnixNano())/1e9 - t0
-				results = append(results, res)
-				continue
-			}
-			time.Sleep(500 * time.Millisecond)
+				if err := uidriver.TypeText(turnText); err != nil {
+					if !uidriver.CheckAppAlive() {
+						return results
+					}
+					res.UIOk = false
+					res.UIError = fmt.Sprintf("第 %d 轮界面操作出错: %v", ti+1, err)
+					logger(fmt.Sprintf("        失败：%s", res.UIError))
+					sendFailed = true
+					break
+				}
+				time.Sleep(500 * time.Millisecond)
 
-			how, _ := uidriver.Send()
-			sess, err := uidriver.WaitNewSession(before, newSessTimeout)
-			if uidriver.AppExited {
-				return results
-			}
-			if err != nil || sess == "" {
-				st := uidriver.ComposerState()
-				res.UIError = fmt.Sprintf("发送后没有产生新会话日志（发送方式 %s；输入框里 %v 字，发送按钮 %v）",
-					how, st["text_len"], st["send_button"])
-				res.ElapsedS = float64(time.Now().UnixNano())/1e9 - t0
-				results = append(results, res)
-				logger(fmt.Sprintf("        失败：没有产生新会话（发送方式 %s，输入框 %v 字，发送按钮 %v）",
-					how, st["text_len"], st["send_button"]))
-				continue
+				how, _ := uidriver.Send()
+
+				if ti == 0 {
+					var err error
+					sess, err = uidriver.WaitNewSession(before, newSessTimeout)
+					if uidriver.AppExited {
+						return results
+					}
+					if err != nil || sess == "" {
+						st := uidriver.ComposerState()
+						res.UIError = fmt.Sprintf("发送后没有产生新会话日志（发送方式 %s；输入框里 %v 字，发送按钮 %v）",
+							how, st["text_len"], st["send_button"])
+						res.ElapsedS = float64(time.Now().UnixNano())/1e9 - t0
+						results = append(results, res)
+						logger(fmt.Sprintf("        失败：没有产生新会话（发送方式 %s，输入框 %v 字，发送按钮 %v）",
+							how, st["text_len"], st["send_button"]))
+						sendFailed = true
+						break
+					}
+					res.SessionID = filepath.Base(sess)
+					uidriver.SetCurrentSess(sess)
+					logger(fmt.Sprintf("        已发送 · 会话 %s 已创建（进行中 %d/%d）",
+						filepath.Base(sess), len(inflight)+1, maxInflight))
+					if len(turns) == 1 {
+						break // 单轮：其余交给下面的等待/收取阶段
+					}
+					continue
+				}
+
+				// 同会话追加一轮：等本轮生成完成再发下一轮。
+				// 轮间等待上限取「每轮上限」与「总时长剩余额度」中较小的那个。
+				turnWait := caseTimeout
+				if remaining := caseTotalTimeout - (float64(time.Now().UnixNano())/1e9 - t0); remaining < turnWait {
+					turnWait = remaining
+				}
+				if turnWait < 1 {
+					turnWait = 1
+				}
+				if !uidriver.WaitSettled(sess, turnWait, quietS) {
+					if !uidriver.CheckAppAlive() {
+						return results
+					}
+					res.AbortedAtTurn = ti
+					logger(fmt.Sprintf("        第 %d 轮等待超时或未完成，中止本用例剩余轮次", ti+1))
+					break
+				}
+				logger(fmt.Sprintf("        第 %d 轮已完成", ti+1))
 			}
 
-			res.SessionID = filepath.Base(sess)
-			uidriver.SetCurrentSess(sess)
+			if sendFailed {
+				// 已产生会话的（第 1 轮成功、后续轮失败）仍按在途收尾，避免丢结果
+				if sess == "" {
+					continue
+				}
+			}
+
 			inflight = append(inflight, &inflightItem{
 				res:   res,
 				sess:  sess,
 				done:  false,
 				tSend: t0,
 			})
-			logger(fmt.Sprintf("        已发送 · 会话 %s 已创建（进行中 %d/%d）",
-				filepath.Base(sess), len(inflight), maxInflight))
 		}
 
 		// 2) 等待至少一条在途会话稳定

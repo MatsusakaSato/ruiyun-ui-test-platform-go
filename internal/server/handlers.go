@@ -919,11 +919,26 @@ func (s *Server) handlePresetImport(w http.ResponseWriter, r *http.Request) {
 	if promptCol != nil {
 		promptIdx = *promptCol
 	}
+	// 多轮列：轮号(1-based) -> 列下标
+	turnCols := map[int]int{}
+	if tm, ok := meta["turn_cols"].(map[int]int); ok {
+		turnCols = tm
+	} else if tm, ok := meta["turn_cols"].(map[string]any); ok {
+		for k, v := range tm {
+			n, err1 := strconv.Atoi(strings.TrimSpace(k))
+			ci, err2 := strconv.Atoi(strings.TrimSpace(fmt.Sprintf("%v", v)))
+			if err1 == nil && err2 == nil {
+				turnCols[n] = ci
+			}
+		}
+	}
+
 	got := xlsx.RowsToItems(rows, headIdx, xlsx.CaseCols{
 		Prompt:     promptIdx,
 		Scene:      sceneCol,
 		Attachment: attachCol,
 		Difficulty: difficultyCol,
+		TurnCols:   turnCols,
 	})
 	items := toMapList(got["items"])
 	skipped := intFromAny(got["skipped"], 0)
@@ -948,12 +963,24 @@ func (s *Server) handlePresetImport(w http.ResponseWriter, r *http.Request) {
 		suspicious := []map[string]any{}
 		for i, it := range items {
 			if i < 200 {
-				prompt := strOr(it["prompt"], "")
-				if len([]rune(prompt)) > 200 {
-					prompt = string([]rune(prompt)[:200])
+				// prompt 自多轮改造起是数组；预览按轮返回，供前端显示「多轮 · N」
+				turns := toStringList(it["prompt"])
+				previewTurns := make([]string, 0, len(turns))
+				for _, t := range turns {
+					if len([]rune(t)) > 200 {
+						t = string([]rune(t)[:200])
+					}
+					previewTurns = append(previewTurns, t)
+				}
+				promptText := ""
+				if len(previewTurns) > 0 {
+					promptText = previewTurns[0]
 				}
 				preview = append(preview, map[string]any{
-					"prompt":      prompt,
+					"prompt":      previewTurns,
+					"turns":       previewTurns,
+					"turn_count":  len(previewTurns),
+					"prompt_text": promptText, // 兼容旧前端/日志的单行展示
 					"scene":       strOr(it["scene"], ""),
 					"difficulty":  strOr(it["difficulty"], ""),
 					"attachments": orEmptyList(it["attachments"]),
@@ -1332,16 +1359,34 @@ func normalizeCases(raw any) []map[string]any {
 	for i, item := range list {
 		var m map[string]any
 		if s, ok := item.(string); ok {
-			m = map[string]any{"prompt": s}
+			// 裸字符串 = 单轮用例（内部调用方仍可能这么传）
+			m = map[string]any{"prompt": []any{s}}
 		} else {
 			m, _ = item.(map[string]any)
 			if m == nil {
 				continue
 			}
 		}
-		prompt := strings.TrimSpace(strOr(m["prompt"], ""))
-		if prompt == "" {
+		// prompt 是数组（多轮）；单轮也是长度 1 的数组。
+		// 兼容前端可能传来的字符串形态：按单轮处理。
+		var turns []string
+		switch v := m["prompt"].(type) {
+		case string:
+			if s := strings.TrimSpace(v); s != "" {
+				turns = append(turns, s)
+			}
+		default:
+			for _, t := range toStringList(m["prompt"]) {
+				if s := strings.TrimSpace(t); s != "" {
+					turns = append(turns, s)
+				}
+			}
+		}
+		if len(turns) == 0 {
 			continue
+		}
+		if len(turns) > testcasedb.MaxTurns {
+			turns = turns[:testcasedb.MaxTurns]
 		}
 		id := strOr(m["id"], "")
 		if id == "" {
@@ -1371,7 +1416,9 @@ func normalizeCases(raw any) []map[string]any {
 		out = append(out, map[string]any{
 			"id":           id,
 			"name":         name,
-			"prompt":       prompt,
+			"prompt":       turns,
+			"turns":        turns,
+			"turn_count":   len(turns),
 			"expect_tools": expect,
 			"labels":       labels,
 			"attachments":  attachments,

@@ -351,22 +351,35 @@ type Finding struct {
 
 // CaseResult 一个测试用例的执行与断言结果。
 type CaseResult struct {
-	CaseID        string          `json:"case_id"`
-	Name          string          `json:"name"`
-	Prompt        string          `json:"prompt"`
+	CaseID string `json:"case_id"`
+	Name   string `json:"name"`
+	// Prompt 第 1 轮提问（列表/标题展示用；多轮时完整轮次见 Prompts）
+	Prompt string `json:"prompt"`
+	// Prompts 全部轮次提问（单轮也是长度 1 的数组）
+	Prompts []string `json:"prompts"`
+	// TurnCount 轮数，便于前端区分单轮/多轮
+	TurnCount     int             `json:"turn_count"`
 	ExpectedTools []string        `json:"expected_tools"`
 	SessionID     string          `json:"session_id"`
 	Trace         *ExecutionTrace `json:"trace,omitempty"`
 	Findings      []*Finding      `json:"findings"`
-	UIOk          bool            `json:"ui_ok"`
-	UIError       string          `json:"ui_error"`
-	Attachments   []string        `json:"attachments"`
-	AttachNote    string          `json:"attach_note"`
-	WaitedLimit   bool            `json:"waited_limit"`
-	WaitNote      string          `json:"wait_note"`
-	AutoConfirms  int             `json:"auto_confirms"`
-	ConfirmEvents []any           `json:"confirm_events,omitempty"`
-	ElapsedS      float64         `json:"elapsed_s"`
+	// TurnFindings 逐轮断言结果（键为轮次序号）。
+	// 判定口径：只看会话级 Findings（CaseResult.Passed）；
+	// 轮级仅用于「定位是哪一轮出的问题」，不影响通过性。
+	TurnFindings  map[int][]*Finding `json:"turn_findings,omitempty"`
+	UIOk          bool               `json:"ui_ok"`
+	UIError       string             `json:"ui_error"`
+	Attachments   []string           `json:"attachments"`
+	AttachNote    string             `json:"attach_note"`
+	WaitedLimit   bool               `json:"waited_limit"`
+	WaitNote      string             `json:"wait_note"`
+	AutoConfirms  int                `json:"auto_confirms"`
+	ConfirmEvents []any              `json:"confirm_events,omitempty"`
+	ElapsedS      float64            `json:"elapsed_s"`
+	// TurnElapsedS 每轮耗时（键为轮次序号），与会话级 ElapsedS 区分
+	TurnElapsedS map[int]float64 `json:"turn_elapsed_s,omitempty"`
+	// AbortedAtTurn 因某轮失败而中止时，记录中止的轮次序号（-1 表示未中止）
+	AbortedAtTurn int `json:"aborted_at_turn"`
 }
 
 func (cr *CaseResult) Passed() bool {
@@ -409,10 +422,20 @@ func (cr *CaseResult) ToDict() map[string]any {
 		attachments = []string{}
 	}
 
+	prompts := cr.Prompts
+	if len(prompts) == 0 && cr.Prompt != "" {
+		prompts = []string{cr.Prompt}
+	}
+	if prompts == nil {
+		prompts = []string{}
+	}
+
 	return map[string]any{
 		"case_id":        cr.CaseID,
 		"name":           cr.Name,
 		"prompt":         cr.Prompt,
+		"prompts":        prompts,
+		"turn_count":     len(prompts),
 		"expected_tools": expectedTools,
 		"session_id":     cr.SessionID,
 		"findings":       findings,

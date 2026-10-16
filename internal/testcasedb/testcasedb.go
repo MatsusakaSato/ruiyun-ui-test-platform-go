@@ -130,7 +130,64 @@ func ensureColumn(db *sql.DB, table, column, decl string) error {
 	return err
 }
 
+// MaxTurns 单个用例允许的最大轮数（多轮对话）。
+// 与前端轮次编辑区、Excel 导入的 prompt_1..prompt_8 多列保持一致。
+const MaxTurns = 8
+
+// parseTurns 把 prompt 列的值解析成轮次数组。
+//
+// prompt 列统一存 JSON 字符串数组，如 ["第一轮","第二轮"]。
+// 单轮也存数组（["只有一个提问"]），全库格式统一。
+// 空值/损坏值返回空切片，由调用方决定是否报错。
+func parseTurns(raw string) []string {
+	raw = strings.TrimSpace(raw)
+	if raw == "" {
+		return []string{}
+	}
+	var turns []string
+	if err := json.Unmarshal([]byte(raw), &turns); err != nil {
+		return []string{}
+	}
+	out := make([]string, 0, len(turns))
+	for _, t := range turns {
+		out = append(out, t)
+	}
+	return out
+}
+
+// EncodeTurns 把轮次数组编码成 prompt 列的存储形态。
+func EncodeTurns(turns []string) string {
+	if turns == nil {
+		turns = []string{}
+	}
+	b, err := json.Marshal(turns)
+	if err != nil {
+		return "[]"
+	}
+	return string(b)
+}
+
+// normalizeTurns 清洗轮次：去掉首尾空白与空轮，最多保留 MaxTurns 轮。
+// 返回清洗后的轮次与「是否因超限被截断」。
+func normalizeTurns(turns []string) ([]string, bool) {
+	out := make([]string, 0, len(turns))
+	for _, t := range turns {
+		t = strings.TrimSpace(t)
+		if t == "" {
+			continue
+		}
+		out = append(out, t)
+	}
+	truncated := false
+	if len(out) > MaxTurns {
+		out = out[:MaxTurns]
+		truncated = true
+	}
+	return out, truncated
+}
+
 func rowToCase(id, name, prompt, scene, difficulty, tagsStr string, attachment int, expectToolsStr, attachmentsStr string) map[string]any {
+	turns := parseTurns(prompt)
 	var expectTools []string
 	if expectToolsStr != "" {
 		_ = json.Unmarshal([]byte(expectToolsStr), &expectTools)
@@ -169,13 +226,19 @@ func rowToCase(id, name, prompt, scene, difficulty, tagsStr string, attachment i
 	}
 
 	// 字段集合必须严格固定为：
-	// id / name / prompt / expect_tools / labels / attachments（+ 有附件时 attachment）。
-	// 不得多输出顶层 scene —— 前端只读 labels.scene，属契约偏离（HTTP 实测确认），已删除。
-	// 难度同理，只作为 labels 里的一个标签回传，不新增顶层字段；自定义标签同理（labels.tags）。
+	// id / name / prompt / turns / turn_count / expect_tools / labels / attachments
+	// （+ 有附件时 attachment）。不得多输出顶层 scene —— 前端只读 labels.scene，
+	// 属契约偏离（HTTP 实测确认），已删除。难度同理，只作为 labels 里的一个标签回传，
+	// 不新增顶层字段；自定义标签同理（labels.tags）。
+	//
+	// prompt 自多轮改造起是**字符串数组**（单轮也是长度 1 的数组）；
+	// turns 是同一份数据的别名，turn_count 供列表页判断单轮/多轮。
 	res := map[string]any{
 		"id":           id,
 		"name":         name,
-		"prompt":       prompt,
+		"prompt":       turns,
+		"turns":        turns,
+		"turn_count":   len(turns),
 		"expect_tools": expectTools,
 		"labels":       labels,
 		"attachments":  attachments,
@@ -514,8 +577,21 @@ func hasAllTags(caseTags, want []string) bool {
 //
 // 已下线的「测试目标」不再进键：历史上 targets 字段不同的两条用例，
 // 只要 prompt / scene / difficulty / 附件相同就算重复。
+// CaseDedupeKeyWithAtts 单轮/已归一化 prompt 的去重键（历史签名，保留给内部调用）。
 func CaseDedupeKeyWithAtts(prompt, scene, difficulty string, hasAttachment bool, attachments []string) string {
-	normPrompt := models.CleanWhitespace(prompt)
+	return CaseDedupeKeyForTurns([]string{prompt}, scene, difficulty, hasAttachment, attachments)
+}
+
+// CaseDedupeKeyForTurns 多轮用例去重键：**全部轮次按顺序** + scene + difficulty + 附件。
+//
+// 轮序参与判重：["A","B"] 与 ["B","A"] 是两条不同用例。
+// prompt / scene / difficulty 一律按「删除全部空白」归一化（models.CleanWhitespace，
+// 与评估器 normPrompt、预设索引键同一套空白语义）。若这里只用 TrimSpace，
+// 「写 一首诗」与「写一首诗」会各自入库，但运行时索引键相同 —— 索引互相覆盖，
+// 去重也就名存实亡。全角空格/NBSP/换行是最常见的来源（中英混排与 Word 复制）。
+// 难度是标签的一部分，因此与 scene 同等对待、一起参与拼键。
+func CaseDedupeKeyForTurns(turns []string, scene, difficulty string, hasAttachment bool, attachments []string) string {
+	normPrompt := turnsDedupePart(turns)
 	normScene := models.CleanWhitespace(scene)
 	normDifficulty := models.CleanWhitespace(difficulty)
 
@@ -541,9 +617,61 @@ func CaseDedupeKeyWithAtts(prompt, scene, difficulty string, hasAttachment bool,
 	return fmt.Sprintf("%s||%s||%s||%s", normPrompt, normScene, normDifficulty, attPart)
 }
 
-// CaseDedupeKey 计算用例去重唯一键：prompt + scene + difficulty + attachment
 func CaseDedupeKey(prompt, scene, difficulty string, hasAttachment bool) string {
 	return CaseDedupeKeyWithAtts(prompt, scene, difficulty, hasAttachment, nil)
+}
+
+// turnsDedupePart 把轮次数组拼成判重用的片段。
+//
+// 轮序参与判重：["A","B"] 与 ["B","A"] 视为**不同**用例。
+// 用 NUL 连接，避免 ["a b"] 与 ["a","b"] 拼出同一个键。
+func turnsDedupePart(turns []string) string {
+	norm := make([]string, 0, len(turns))
+	for _, t := range turns {
+		norm = append(norm, models.CleanWhitespace(t))
+	}
+	return strings.Join(norm, "\x00")
+}
+
+// extractTurns 从提交体里取轮次数组。
+//
+// 只认数组（顶层 prompt / turns 都接受）；字符串一律不认 ——
+// 多轮改造后 prompt 的契约就是数组，静默接受字符串会让「前端漏改」
+// 这种错误一直藏到运行期。
+// returns: 清洗后的轮次、是否被截断到 MaxTurns
+func extractTurns(item map[string]any) (turns []string, truncated bool, err error) {
+	raw, ok := item["prompt"]
+	if !ok || raw == nil {
+		raw, ok = item["turns"]
+		if !ok || raw == nil {
+			return nil, false, fmt.Errorf("缺少提问（prompt）")
+		}
+	}
+
+	switch v := raw.(type) {
+	case []string:
+		turns = v
+	case []any:
+		turns = make([]string, 0, len(v))
+		for _, e := range v {
+			if e == nil {
+				turns = append(turns, "")
+				continue
+			}
+			turns = append(turns, fmt.Sprintf("%v", e))
+		}
+	case string:
+		// 明确拒绝：多轮改造后只接受数组
+		return nil, false, fmt.Errorf("提问（prompt）必须是数组，收到字符串")
+	default:
+		return nil, false, fmt.Errorf("提问（prompt）格式无法识别")
+	}
+
+	turns, truncated = normalizeTurns(turns)
+	if len(turns) == 0 {
+		return nil, false, fmt.Errorf("提问为必填")
+	}
+	return turns, truncated, nil
 }
 
 func extractCaseFields(item map[string]any) (prompt, scene, difficulty string, tags []string, hasAttachment int, expectTools, attachments []string) {
@@ -683,10 +811,17 @@ func AddPresetCase(item map[string]any, customPath string) (bool, string, map[st
 	}
 	defer db.Close()
 
-	prompt, scene, difficulty, tags, hasAttachment, expectTools, attachments := extractCaseFields(item)
-	if prompt == "" {
-		return false, "提问为必填", nil
+	turns, truncated, err := extractTurns(item)
+	if err != nil {
+		return false, err.Error(), nil
 	}
+	truncNote := ""
+	if truncated {
+		truncNote = fmt.Sprintf("（超出 %d 轮的部分已忽略）", MaxTurns)
+	}
+	_, scene, difficulty, tags, hasAttachment, expectTools, attachments := extractCaseFields(item)
+	// prompt 列的存储形态：JSON 数组（单轮也是长度 1 的数组）
+	prompt := EncodeTurns(turns)
 
 	tx, err := db.Begin()
 	if err != nil {
@@ -697,7 +832,8 @@ func AddPresetCase(item map[string]any, customPath string) (bool, string, map[st
 	// 查重：提问和标签（scene, difficulty, attachment/attachments）完全一致的用例视为重复。
 	// 去重键按「删除全部空白」归一化，SQLite 的 trim()/replace() 覆盖不了 29 个空白码点，
 	// 因此这里取全表候选、在 Go 侧算键比对；单条新增是用户动作，全表扫描的量级无关紧要。
-	currDedupeKey := CaseDedupeKeyWithAtts(prompt, scene, difficulty, hasAttachment == 1, attachments)
+	// 多轮用例：**全部轮次按顺序**参与判重。
+	currDedupeKey := CaseDedupeKeyForTurns(turns, scene, difficulty, hasAttachment == 1, attachments)
 	existingRows, err := tx.Query("SELECT id, prompt, scene, difficulty, attachment, attachments FROM testcases")
 	if err == nil {
 		defer existingRows.Close()
@@ -709,7 +845,8 @@ func AddPresetCase(item map[string]any, customPath string) (bool, string, map[st
 				if eattachmentsStr != "" {
 					_ = json.Unmarshal([]byte(eattachmentsStr), &eattachments)
 				}
-				if CaseDedupeKeyWithAtts(eprompt, escene, edifficulty, eattachment == 1, eattachments) == currDedupeKey {
+				eTurns := parseTurns(eprompt)
+				if CaseDedupeKeyForTurns(eTurns, escene, edifficulty, eattachment == 1, eattachments) == currDedupeKey {
 					return false, fmt.Sprintf("用例已存在（编号：%s）", eid), nil
 				}
 			}
@@ -771,7 +908,7 @@ func AddPresetCase(item map[string]any, customPath string) (bool, string, map[st
 	}
 
 	resCase := rowToCase(caseID, name, prompt, scene, difficulty, string(tagsJSON), hasAttachment, string(expJSON), string(attJSON))
-	return true, fmt.Sprintf("已成功添加用例 %s", caseID), resCase
+	return true, fmt.Sprintf("已成功添加用例 %s%s", caseID, truncNote), resCase
 }
 
 // UpdatePresetCase 改写已有预设用例：编号（id）、序号（seq）、创建时间都不动，只改内容与 updated_at。
@@ -800,10 +937,16 @@ func UpdatePresetCase(item map[string]any, customPath string) (bool, string, map
 	}
 	defer db.Close()
 
-	prompt, scene, difficulty, tags, hasAttachment, expectTools, attachments := extractCaseFields(item)
-	if prompt == "" {
-		return false, "提问为必填", nil
+	turns, truncated, err := extractTurns(item)
+	if err != nil {
+		return false, err.Error(), nil
 	}
+	truncNote := ""
+	if truncated {
+		truncNote = fmt.Sprintf("（超出 %d 轮的部分已忽略）", MaxTurns)
+	}
+	_, scene, difficulty, tags, hasAttachment, expectTools, attachments := extractCaseFields(item)
+	prompt := EncodeTurns(turns)
 
 	tx, err := db.Begin()
 	if err != nil {
@@ -820,8 +963,9 @@ func UpdatePresetCase(item map[string]any, customPath string) (bool, string, map
 		return false, fmt.Sprintf("读取用例失败: %v", err), nil
 	}
 
-	// 2. 判重：提问 + 场景 + 难度 + 附件 与别人完全一致就拒绝（自定义标签不参与，见 CaseDedupeKeyWithAtts）
-	currDedupeKey := CaseDedupeKeyWithAtts(prompt, scene, difficulty, hasAttachment == 1, attachments)
+	// 2. 判重：提问 + 场景 + 难度 + 附件 与别人完全一致就拒绝（自定义标签不参与）。
+	// 多轮用例：全部轮次按顺序参与判重。
+	currDedupeKey := CaseDedupeKeyForTurns(turns, scene, difficulty, hasAttachment == 1, attachments)
 	dupRows, err := tx.Query("SELECT id, prompt, scene, difficulty, attachment, attachments FROM testcases WHERE id != ?", id)
 	if err == nil {
 		defer dupRows.Close()
@@ -833,7 +977,7 @@ func UpdatePresetCase(item map[string]any, customPath string) (bool, string, map
 				if oattachmentsStr != "" {
 					_ = json.Unmarshal([]byte(oattachmentsStr), &oattachments)
 				}
-				if CaseDedupeKeyWithAtts(oprompt, oscene, odifficulty, oattachment == 1, oattachments) == currDedupeKey {
+				if CaseDedupeKeyForTurns(parseTurns(oprompt), oscene, odifficulty, oattachment == 1, oattachments) == currDedupeKey {
 					return false, fmt.Sprintf("用例已存在（编号：%s）", oid), nil
 				}
 			}
@@ -867,7 +1011,7 @@ func UpdatePresetCase(item map[string]any, customPath string) (bool, string, map
 	}
 
 	resCase := rowToCase(id, name, prompt, scene, difficulty, string(tagsJSON), hasAttachment, string(expJSON), string(attJSON))
-	return true, fmt.Sprintf("已更新用例 %s", id), resCase
+	return true, fmt.Sprintf("已更新用例 %s%s", id, truncNote), resCase
 }
 
 // AddPresetCasesEx 批量新增或覆盖预设用例，额外返回去重跳过条数
@@ -914,7 +1058,8 @@ func AddPresetCasesEx(items []map[string]any, replace bool, customPath string) (
 					if eattsStr != "" {
 						_ = json.Unmarshal([]byte(eattsStr), &eatts)
 					}
-					existingMap[CaseDedupeKeyWithAtts(eprompt, escene, edifficulty, eatt == 1, eatts)] = eid
+					eTurns := parseTurns(eprompt)
+					existingMap[CaseDedupeKeyForTurns(eTurns, escene, edifficulty, eatt == 1, eatts)] = eid
 				}
 			}
 			rows.Close()
@@ -959,14 +1104,20 @@ func AddPresetCasesEx(items []map[string]any, replace bool, customPath string) (
 	seenInBatch := make(map[string]bool)
 	added := 0
 	skippedDup := 0
+	truncatedInBatch := 0
 
 	for _, it := range items {
-		prompt, scene, difficulty, tags, hasAttachment, expectTools, attachments := extractCaseFields(it)
-		if prompt == "" {
+		turns, truncated, err := extractTurns(it)
+		if err != nil {
 			continue
 		}
+		if truncated {
+			truncatedInBatch++
+		}
+		_, scene, difficulty, tags, hasAttachment, expectTools, attachments := extractCaseFields(it)
+		prompt := EncodeTurns(turns)
 
-		dedupeKey := CaseDedupeKeyWithAtts(prompt, scene, difficulty, hasAttachment == 1, attachments)
+		dedupeKey := CaseDedupeKeyForTurns(turns, scene, difficulty, hasAttachment == 1, attachments)
 		if (len(existingMap) > 0 && existingMap[dedupeKey] != "") || seenInBatch[dedupeKey] {
 			skippedDup++
 			continue
@@ -1009,6 +1160,9 @@ func AddPresetCasesEx(items []map[string]any, replace bool, customPath string) (
 		msg = fmt.Sprintf("已%s导入 %d 条，自动去重跳过 %d 条（预设共 %d 条）", modeText, added, skippedDup, total)
 	} else {
 		msg = fmt.Sprintf("已%s导入 %d 条（预设共 %d 条）", modeText, added, total)
+	}
+	if truncatedInBatch > 0 {
+		msg += fmt.Sprintf("；%d 条用例超出 %d 轮，超出部分已忽略", truncatedInBatch, MaxTurns)
 	}
 	return true, msg, added, skippedDup
 }

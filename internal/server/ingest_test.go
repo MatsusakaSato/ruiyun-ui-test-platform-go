@@ -293,7 +293,14 @@ func TestPresetImportIngestsAttachmentsE2E(t *testing.T) {
 		}
 		var atts []string
 		_ = json.Unmarshal([]byte(attsJSON), &atts)
-		seen[prompt] = atts
+		// prompt 列存 JSON 数组，按第 1 轮建索引
+		var turns []string
+		_ = json.Unmarshal([]byte(prompt), &turns)
+		key := ""
+		if len(turns) > 0 {
+			key = turns[0]
+		}
+		seen[key] = atts
 	}
 	for _, want := range []string{"本地附件用例", "远程附件用例"} {
 		atts, ok := seen[want]
@@ -645,7 +652,12 @@ func TestPresetImportReadsDifficultyColumn(t *testing.T) {
 	got := map[string]any{}
 	for _, c := range cases {
 		labels, _ := c["labels"].(map[string]any)
-		got[c["prompt"].(string)] = labels["difficulty"]
+		// prompt 自多轮改造起是数组，这里按第 1 轮建索引
+		turns, _ := c["prompt"].([]string)
+		if len(turns) == 0 {
+			continue
+		}
+		got[turns[0]] = labels["difficulty"]
 	}
 	if got["请帮我重构教学过程"] != "中" {
 		t.Errorf("难度列的值应落到 labels.difficulty 且已 TrimSpace，实际 %v", got["请帮我重构教学过程"])

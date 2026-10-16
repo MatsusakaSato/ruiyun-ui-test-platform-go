@@ -2,6 +2,7 @@ package testcasedb
 
 import (
 	"database/sql"
+	"fmt"
 	"path/filepath"
 	"sort"
 	"strings"
@@ -69,7 +70,7 @@ func TestAddPresetCase_IgnoresSuppliedIDAndName(t *testing.T) {
 	ok, msg, c := AddPresetCase(map[string]any{
 		"id":     "MY-OWN-001",
 		"name":   "我自己起的名字",
-		"prompt": "写一份班会主持稿",
+		"prompt": []string{"写一份班会主持稿"},
 		"scene":  "备课",
 	}, dbPath)
 	if !ok || c == nil {
@@ -114,7 +115,7 @@ func TestAddPresetCase_Deduplication(t *testing.T) {
 
 	// 1. 成功添加第一条用例
 	item1 := map[string]any{
-		"prompt": "查询2024年GDP数据",
+		"prompt": []string{"查询2024年GDP数据"},
 		"labels": map[string]any{
 			"scene": "数据统计",
 		},
@@ -135,7 +136,7 @@ func TestAddPresetCase_Deduplication(t *testing.T) {
 
 	// 2. 添加提问和标签完全一致的用例（带首尾空白）-> 应自动去重失败
 	itemDup := map[string]any{
-		"prompt": " 查询2024年GDP数据 ",
+		"prompt": []string{" 查询2024年GDP数据 "},
 		"labels": map[string]any{
 			"scene": "数据统计",
 		},
@@ -157,7 +158,7 @@ func TestAddPresetCase_Deduplication(t *testing.T) {
 
 	// 3. 相同 prompt 但不同标签（scene 不同） -> 允许添加
 	itemDiffScene := map[string]any{
-		"prompt": "查询2024年GDP数据",
+		"prompt": []string{"查询2024年GDP数据"},
 		"labels": map[string]any{
 			"scene": "经济分析",
 		},
@@ -172,7 +173,7 @@ func TestAddPresetCase_Deduplication(t *testing.T) {
 
 	// 4. 相同 prompt 但 attachment 不同 -> 允许添加
 	itemDiffAtt := map[string]any{
-		"prompt": "查询2024年GDP数据",
+		"prompt": []string{"查询2024年GDP数据"},
 		"labels": map[string]any{
 			"scene":      "数据统计",
 			"attachment": true,
@@ -197,26 +198,26 @@ func TestAddPresetCases_BatchDeduplication(t *testing.T) {
 
 	// 先添加一条既有用例
 	_, _, _ = AddPresetCase(map[string]any{
-		"prompt": "既有用例1",
+		"prompt": []string{"既有用例1"},
 		"scene":  "默认场景",
 	}, dbPath)
 
 	// 批量导入列表：含与既有用例重复、批次内自身重复、以及新用例
 	items := []map[string]any{
 		{
-			"prompt": "既有用例1", // 与既有用例完全相同 -> 应跳过
+			"prompt": []string{"既有用例1"}, // 与既有用例完全相同 -> 应跳过
 			"scene":  "默认场景",
 		},
 		{
-			"prompt": "新用例A",
+			"prompt": []string{"新用例A"},
 			"scene":  "场景A",
 		},
 		{
-			"prompt": "新用例A", // 批次内重复 -> 应跳过
+			"prompt": []string{"新用例A"}, // 批次内重复 -> 应跳过
 			"scene":  "场景A",
 		},
 		{
-			"prompt": "新用例B",
+			"prompt": []string{"新用例B"},
 			"scene":  "场景B",
 		},
 	}
@@ -237,9 +238,9 @@ func TestAddPresetCases_BatchDeduplication(t *testing.T) {
 
 	// 测试清空覆盖导入：即使 replace=true，批次内部重复仍应去重
 	replaceItems := []map[string]any{
-		{"prompt": "覆盖用例1", "scene": "S1"},
-		{"prompt": "覆盖用例1", "scene": "S1"}, // 批次内重复
-		{"prompt": "覆盖用例2", "scene": "S2"},
+		{"prompt": []string{"覆盖用例1"}, "scene": "S1"},
+		{"prompt": []string{"覆盖用例1"}, "scene": "S1"}, // 批次内重复
+		{"prompt": []string{"覆盖用例2"}, "scene": "S2"},
 	}
 	okRep, msgRep, addedRep := AddPresetCases(replaceItems, true, dbPath)
 	if !okRep {
@@ -261,21 +262,21 @@ func TestRemoveAttachmentFromAllCases(t *testing.T) {
 
 	// a：两个附件，其中一个将被删；删完仍有附件 → 保留「需要附件」标记
 	if ok, msg, _ := AddPresetCase(map[string]any{
-		"prompt":      "带两个附件的用例",
+		"prompt":      []string{"带两个附件的用例"},
 		"attachments": []string{"/tmp/up/keep.docx", "/tmp/up/gone.pdf"},
 	}, dbPath); !ok {
 		t.Fatalf("add a failed: %s", msg)
 	}
 	// b：只挂一个附件，删完变空
 	if ok, msg, _ := AddPresetCase(map[string]any{
-		"prompt":      "只挂一个附件的用例",
+		"prompt":      []string{"只挂一个附件的用例"},
 		"attachments": []string{"/tmp/up/gone.pdf"},
 	}, dbPath); !ok {
 		t.Fatalf("add b failed: %s", msg)
 	}
 	// c：只有标记、没有附件路径 → 不该被这次清理碰到
 	if ok, msg, _ := AddPresetCase(map[string]any{
-		"prompt": "只要附件不下文件",
+		"prompt": []string{"只要附件不下文件"},
 		"labels": map[string]any{"attachment": true},
 	}, dbPath); !ok {
 		t.Fatalf("add c failed: %s", msg)
@@ -296,7 +297,7 @@ func TestRemoveAttachmentFromAllCases(t *testing.T) {
 	}
 	byPrompt := map[string]map[string]any{}
 	for _, c := range cases {
-		byPrompt[c["prompt"].(string)] = c
+		byPrompt[firstTurn(c)] = c
 	}
 
 	a := byPrompt["带两个附件的用例"]
@@ -340,7 +341,7 @@ func TestCaseDedupe_DistinctAttachmentsNotDeduplicated(t *testing.T) {
 
 	// 用例1：提问相同，但附件是试卷A.docx
 	ok1, _, c1 := AddPresetCase(map[string]any{
-		"prompt":      "请批改试卷并给出分析",
+		"prompt":      []string{"请批改试卷并给出分析"},
 		"scene":       "教学评测",
 		"attachments": []string{"/path/to/试卷A.docx"},
 	}, dbPath)
@@ -350,7 +351,7 @@ func TestCaseDedupe_DistinctAttachmentsNotDeduplicated(t *testing.T) {
 
 	// 用例2：提问相同、场景相同，但附件是试卷B.docx -> 不应被误判为重复！
 	ok2, msg2, c2 := AddPresetCase(map[string]any{
-		"prompt":      "请批改试卷并给出分析",
+		"prompt":      []string{"请批改试卷并给出分析"},
 		"scene":       "教学评测",
 		"attachments": []string{"/path/to/试卷B.docx"},
 	}, dbPath)
@@ -360,7 +361,7 @@ func TestCaseDedupe_DistinctAttachmentsNotDeduplicated(t *testing.T) {
 
 	// 用例3：提问、场景、附件完全相同 -> 应该被拦截去重
 	ok3, _, _ := AddPresetCase(map[string]any{
-		"prompt":      "请批改试卷并给出分析",
+		"prompt":      []string{"请批改试卷并给出分析"},
 		"scene":       "教学评测",
 		"attachments": []string{"/other/folder/试卷A.docx"}, // 基名相同
 	}, dbPath)
@@ -388,8 +389,8 @@ func TestAddPresetCases_WhitespaceOnlyDifferenceDeduped(t *testing.T) {
 	dbPath := createTempDB(t)
 
 	items := []map[string]any{
-		{"prompt": "请批改试卷并给出分析", "scene": "教学评测"},
-		{"prompt": "请批改 试卷并给出分析", "scene": "教学评测"}, // 内部多一个空格
+		{"prompt": []string{"请批改试卷并给出分析"}, "scene": "教学评测"},
+		{"prompt": []string{"请批改 试卷并给出分析"}, "scene": "教学评测"}, // 内部多一个空格
 	}
 	ok, msg, added := AddPresetCases(items, false, dbPath)
 	if !ok {
@@ -409,13 +410,13 @@ func TestAddPresetCase_WhitespaceCandidateScan(t *testing.T) {
 	dbPath := createTempDB(t)
 
 	if ok, msg, _ := AddPresetCase(map[string]any{
-		"prompt": "查询 2024 年数据", "scene": "统计",
+		"prompt": []string{"查询 2024 年数据"}, "scene": "统计",
 	}, dbPath); !ok {
 		t.Fatalf("首条添加失败: %s", msg)
 	}
 
 	ok, msg, c := AddPresetCase(map[string]any{
-		"prompt": "查询2024年数据", "scene": "统计",
+		"prompt": []string{"查询2024年数据"}, "scene": "统计",
 	}, dbPath)
 	if ok || c != nil {
 		t.Fatalf("仅内部空白不同的用例应被判重，实际 ok=%v case=%v", ok, c)
@@ -431,7 +432,7 @@ func TestAddPresetCase_DifficultyRoundTrip(t *testing.T) {
 	dbPath := createTempDB(t)
 
 	ok, msg, c := AddPresetCase(map[string]any{
-		"prompt": "帮我写一份教学反思",
+		"prompt": []string{"帮我写一份教学反思"},
 		"labels": map[string]any{"scene": "备课", "difficulty": "难"},
 	}, dbPath)
 	if !ok || c == nil {
@@ -443,7 +444,7 @@ func TestAddPresetCase_DifficultyRoundTrip(t *testing.T) {
 
 	// 顶层 difficulty（前端手填用例走这条路）同样要落库
 	if ok, msg, _ := AddPresetCase(map[string]any{
-		"prompt":     "帮我写一份班会主持稿",
+		"prompt":     []string{"帮我写一份班会主持稿"},
 		"scene":      "备课",
 		"difficulty": "易",
 	}, dbPath); !ok {
@@ -458,8 +459,8 @@ func TestAddPresetCase_DifficultyRoundTrip(t *testing.T) {
 	names := map[string]any{}
 	for _, cc := range cases {
 		labels, _ := cc["labels"].(map[string]any)
-		got[cc["prompt"].(string)] = labels["difficulty"]
-		names[cc["prompt"].(string)] = cc["name"]
+		got[firstTurn(cc)] = labels["difficulty"]
+		names[firstTurn(cc)] = cc["name"]
 	}
 	if got["帮我写一份教学反思"] != "难" {
 		t.Errorf("读回的 labels.difficulty 应为 难，实际 %v", got["帮我写一份教学反思"])
@@ -479,7 +480,7 @@ func TestAddPresetCase_DifficultyParticipatesInDedupe(t *testing.T) {
 
 	item := func(difficulty string) map[string]any {
 		return map[string]any{
-			"prompt": "请批改试卷并给出分析",
+			"prompt": []string{"请批改试卷并给出分析"},
 			"labels": map[string]any{
 				"scene":      "教学评测",
 				"difficulty": difficulty,
@@ -520,8 +521,10 @@ func TestDedupeIgnoresLegacyTargets(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	// 历史行按**新格式**（prompt 为 JSON 数组）构造：
+	// 多轮改造后 prompt 只认数组，裸字符串会解析成空轮次。
 	if _, err := db.Exec(`INSERT INTO testcases (id, name, prompt, scene, difficulty, targets, attachment, expect_tools, attachments, seq)
-		VALUES ('CASE-001', '教学评测-001', '请批改试卷并给出分析', '教学评测', '易', '["word","ppt"]', 0, '[]', '[]', 1)`); err != nil {
+		VALUES ('CASE-001', '教学评测-001', '["请批改试卷并给出分析"]', '教学评测', '易', '["word","ppt"]', 0, '[]', '[]', 1)`); err != nil {
 		db.Close()
 		t.Fatalf("构造历史行失败: %v", err)
 	}
@@ -529,7 +532,7 @@ func TestDedupeIgnoresLegacyTargets(t *testing.T) {
 
 	// 单条新增：labels.targets 与历史值不同（excel vs word,ppt），仍应判重
 	ok, msg, c := AddPresetCase(map[string]any{
-		"prompt": "请批改试卷并给出分析",
+		"prompt": []string{"请批改试卷并给出分析"},
 		"labels": map[string]any{
 			"scene":      "教学评测",
 			"difficulty": "易",
@@ -543,7 +546,7 @@ func TestDedupeIgnoresLegacyTargets(t *testing.T) {
 
 	// 批量导入同一条：同样应被去重跳过
 	okBatch, msgBatch, added := AddPresetCases([]map[string]any{{
-		"prompt": "请批改试卷并给出分析",
+		"prompt": []string{"请批改试卷并给出分析"},
 		"labels": map[string]any{"scene": "教学评测", "difficulty": "易"},
 	}}, false, dbPath)
 	if !okBatch || added != 0 {
@@ -604,7 +607,7 @@ func TestQueryPresetCases_DifficultyFilter(t *testing.T) {
 		t.Helper()
 		out := []string{}
 		for _, c := range res["cases"].([]map[string]any) {
-			out = append(out, c["prompt"].(string))
+			out = append(out, firstTurn(c))
 		}
 		return out
 	}
@@ -673,7 +676,7 @@ func seedCase(t *testing.T, dbPath, prompt, scene, difficulty string, attachment
 	if attachment {
 		labels["attachment"] = true
 	}
-	if ok, msg, _ := AddPresetCase(map[string]any{"prompt": prompt, "labels": labels}, dbPath); !ok {
+	if ok, msg, _ := AddPresetCase(map[string]any{"prompt": []string{prompt}, "labels": labels}, dbPath); !ok {
 		t.Fatalf("准备用例 %q 失败: %s", prompt, msg)
 	}
 }
@@ -737,8 +740,13 @@ func TestInitDB_MigratesLegacyTableWithoutDifficulty(t *testing.T) {
 		t.Fatalf("迁移不应丢数据，期望 1 条，实际 %d", len(cases))
 	}
 	c := cases[0]
-	if c["id"] != "CASE-007" || c["name"] != "备课-007" || c["prompt"] != "老库里的用例" {
+	if c["id"] != "CASE-007" || c["name"] != "备课-007" {
 		t.Errorf("老行数据被改动了：%v", c)
+	}
+	// prompt 自多轮改造起只认 JSON 数组：老库里的裸字符串不再是合法格式，
+	// 解析为空轮次（旧数据已按用户要求清空，无需兼容裸字符串）。
+	if got := c["prompt"]; len(got.([]string)) != 0 {
+		t.Errorf("非数组的 prompt 应解析为空轮次，实际 %v", got)
 	}
 	labels, _ := c["labels"].(map[string]any)
 	if labels["scene"] != "备课" {
@@ -750,7 +758,7 @@ func TestInitDB_MigratesLegacyTableWithoutDifficulty(t *testing.T) {
 
 	// 迁移后库能照常写入，且序号接着最大的 CASE-NNN 往下排
 	ok, msg, added := AddPresetCases([]map[string]any{{
-		"prompt": "迁移后新增的用例",
+		"prompt": []string{"迁移后新增的用例"},
 		"labels": map[string]any{"scene": "备课", "difficulty": "难"},
 	}}, false, dbPath)
 	if !ok || added != 1 {
@@ -795,7 +803,7 @@ func TestAddPresetCase_TagsRoundTrip(t *testing.T) {
 	dbPath := createTempDB(t)
 
 	ok, msg, c := AddPresetCase(map[string]any{
-		"prompt": "帮我写一份教学反思",
+		"prompt": []string{"帮我写一份教学反思"},
 		"labels": map[string]any{
 			"scene": "备课",
 			"tags":  []any{" 回归 ", "冒烟", "回归", "", "备课"},
@@ -816,7 +824,7 @@ func TestAddPresetCase_TagsRoundTrip(t *testing.T) {
 
 	// 顶层 tags（与 scene / difficulty 的取值口径一致）
 	okTop, msgTop, cTop := AddPresetCase(map[string]any{
-		"prompt": "帮我写一份班会主持稿",
+		"prompt": []string{"帮我写一份班会主持稿"},
 		"scene":  "备课",
 		"tags":   []string{"回归"},
 	}, dbPath)
@@ -834,7 +842,7 @@ func TestAddPresetCase_TagsRoundTrip(t *testing.T) {
 
 	// 非数组的 tags（Excel 里同名列会是字符串）忽略掉，不能写坏标签列
 	okStr, msgStr, cStr := AddPresetCase(map[string]any{
-		"prompt": "标签传成字符串的用例",
+		"prompt": []string{"标签传成字符串的用例"},
 		"labels": map[string]any{"scene": "备课", "tags": "回归,冒烟"},
 	}, dbPath)
 	if !okStr || cStr == nil {
@@ -846,7 +854,7 @@ func TestAddPresetCase_TagsRoundTrip(t *testing.T) {
 
 	// 没有标签的用例：labels 里不出现 tags 键，落库列仍是 '[]' 而不是 null
 	okNo, msgNo, cNo := AddPresetCase(map[string]any{
-		"prompt": "没有标签的用例",
+		"prompt": []string{"没有标签的用例"},
 		"labels": map[string]any{"scene": "备课"},
 	}, dbPath)
 	if !okNo || cNo == nil {
@@ -861,7 +869,7 @@ func TestAddPresetCase_TagsRoundTrip(t *testing.T) {
 	}
 	defer db.Close()
 	var raw string
-	if err := db.QueryRow("SELECT tags FROM testcases WHERE prompt = '没有标签的用例'").Scan(&raw); err != nil {
+	if err := db.QueryRow("SELECT tags FROM testcases WHERE id = ?", cNo["id"]).Scan(&raw); err != nil {
 		t.Fatalf("读 tags 列失败: %v", err)
 	}
 	if raw != "[]" {
@@ -877,7 +885,7 @@ func TestAddPresetCase_TagsRoundTrip(t *testing.T) {
 	for _, cc := range cases {
 		l, _ := cc["labels"].(map[string]any)
 		tl, _ := l["tags"].([]string)
-		back[cc["prompt"].(string)] = tl
+		back[firstTurn(cc)] = tl
 	}
 	if len(back["帮我写一份教学反思"]) != 3 {
 		t.Errorf("回读的标签应保留 3 个，实际 %v", back["帮我写一份教学反思"])
@@ -892,14 +900,14 @@ func TestUpdatePresetCase(t *testing.T) {
 	dbPath := createTempDB(t)
 
 	ok, msg, c1 := AddPresetCase(map[string]any{
-		"prompt": "原提问",
+		"prompt": []string{"原提问"},
 		"labels": map[string]any{"scene": "备课", "difficulty": "易", "tags": []string{"回归"}},
 	}, dbPath)
 	if !ok || c1 == nil {
 		t.Fatalf("准备用例失败: %s", msg)
 	}
 	if _, msg2, c2 := AddPresetCase(map[string]any{
-		"prompt": "另一条用例",
+		"prompt": []string{"另一条用例"},
 		"labels": map[string]any{"scene": "备课", "difficulty": "易"},
 	}, dbPath); c2 == nil {
 		t.Fatalf("准备第二条用例失败: %s", msg2)
@@ -920,7 +928,7 @@ func TestUpdatePresetCase(t *testing.T) {
 	// 1. 正常改写：提问 / 场景 / 难度 / 标签全换
 	okUp, msgUp, cUp := UpdatePresetCase(map[string]any{
 		"id":     "CASE-001",
-		"prompt": "改后的提问",
+		"prompt": []string{"改后的提问"},
 		"labels": map[string]any{"scene": "评测", "difficulty": "难", "tags": []string{"冒烟", "回归"}},
 	}, dbPath)
 	if !okUp || cUp == nil {
@@ -953,14 +961,14 @@ func TestUpdatePresetCase(t *testing.T) {
 	if createdAfter != createdBefore {
 		t.Errorf("创建时间不应变：%s -> %s", createdBefore, createdAfter)
 	}
-	if promptAfter != "改后的提问" {
+	if promptAfter != `["改后的提问"]` {
 		t.Errorf("库里提问应已改写，实际 %q", promptAfter)
 	}
 
 	// 2. 只改自己的标签：不能和自己撞车
 	if ok2, msg2, _ := UpdatePresetCase(map[string]any{
 		"id":     "CASE-001",
-		"prompt": "改后的提问",
+		"prompt": []string{"改后的提问"},
 		"labels": map[string]any{"scene": "评测", "difficulty": "难", "tags": []string{"只改标签"}},
 	}, dbPath); !ok2 {
 		t.Fatalf("只改标签不应被自己判重: %s", msg2)
@@ -969,7 +977,7 @@ func TestUpdatePresetCase(t *testing.T) {
 	// 3. 改成与另一条用例完全一致 -> 拒绝
 	okDup, msgDup, cDup := UpdatePresetCase(map[string]any{
 		"id":     "CASE-001",
-		"prompt": "另一条用例",
+		"prompt": []string{"另一条用例"},
 		"labels": map[string]any{"scene": "备课", "difficulty": "易"},
 	}, dbPath)
 	if okDup || cDup != nil {
@@ -980,17 +988,17 @@ func TestUpdatePresetCase(t *testing.T) {
 	}
 
 	// 4. 编号不存在 / 提问为空
-	if okNo, msgNo, _ := UpdatePresetCase(map[string]any{"id": "CASE-999", "prompt": "x"}, dbPath); okNo {
+	if okNo, msgNo, _ := UpdatePresetCase(map[string]any{"id": "CASE-999", "prompt": []string{"x"}}, dbPath); okNo {
 		t.Error("不存在的编号应报错")
 	} else if !strings.Contains(msgNo, "不存在") {
 		t.Errorf("不存在的编号应给出明确提示，实际 %q", msgNo)
 	}
-	if okEmpty, msgEmpty, _ := UpdatePresetCase(map[string]any{"id": "CASE-001", "prompt": "  "}, dbPath); okEmpty {
+	if okEmpty, msgEmpty, _ := UpdatePresetCase(map[string]any{"id": "CASE-001", "prompt": []string{"  "}}, dbPath); okEmpty {
 		t.Error("提问为空应报错")
 	} else if msgEmpty != "提问为必填" {
 		t.Errorf("提问为空的提示应为「提问为必填」，实际 %q", msgEmpty)
 	}
-	if _, msgNoID, _ := UpdatePresetCase(map[string]any{"prompt": "x"}, dbPath); !strings.Contains(msgNoID, "id") {
+	if _, msgNoID, _ := UpdatePresetCase(map[string]any{"prompt": []string{"x"}}, dbPath); !strings.Contains(msgNoID, "id") {
 		t.Errorf("缺 id 应给出明确提示，实际 %q", msgNoID)
 	}
 }
@@ -1024,7 +1032,7 @@ func TestQueryPresetCases_TagFilter(t *testing.T) {
 		if attachment {
 			labels["attachment"] = true
 		}
-		if ok, msg, _ := AddPresetCase(map[string]any{"prompt": prompt, "labels": labels}, dbPath); !ok {
+		if ok, msg, _ := AddPresetCase(map[string]any{"prompt": []string{prompt}, "labels": labels}, dbPath); !ok {
 			t.Fatalf("准备用例 %q 失败: %s", prompt, msg)
 		}
 	}
@@ -1037,7 +1045,7 @@ func TestQueryPresetCases_TagFilter(t *testing.T) {
 		t.Helper()
 		out := []string{}
 		for _, c := range res["cases"].([]map[string]any) {
-			out = append(out, c["prompt"].(string))
+			out = append(out, firstTurn(c))
 		}
 		return out
 	}
@@ -1203,7 +1211,7 @@ func TestInitDB_MigratesLegacyTableWithoutTags(t *testing.T) {
 
 	// 迁移后可照常写入并读出标签
 	ok, msg, c := AddPresetCase(map[string]any{
-		"prompt": "迁移后新增的带标签用例",
+		"prompt": []string{"迁移后新增的带标签用例"},
 		"labels": map[string]any{"scene": "备课", "tags": []string{"回归"}},
 	}, dbPath)
 	if !ok || c == nil {
@@ -1220,9 +1228,27 @@ func TestInitDB_MigratesLegacyTableWithoutTags(t *testing.T) {
 	for _, cc := range after {
 		l, _ := cc["labels"].(map[string]any)
 		tl, _ := l["tags"].([]string)
-		got[cc["prompt"].(string)] = tl
+		got[firstTurn(cc)] = tl
 	}
 	if len(got["迁移后新增的带标签用例"]) != 1 || got["迁移后新增的带标签用例"][0] != "回归" {
 		t.Errorf("迁移后写入的标签应能读回，实际 %v", got["迁移后新增的带标签用例"])
 	}
+}
+
+// firstTurn 取用例的第 1 轮提问。
+// prompt 自多轮改造起是数组（单轮也是长度 1 的数组），测试里按第 1 轮建索引。
+func firstTurn(c map[string]any) string {
+	switch v := c["prompt"].(type) {
+	case []string:
+		if len(v) > 0 {
+			return v[0]
+		}
+	case []any:
+		if len(v) > 0 {
+			return fmt.Sprintf("%v", v[0])
+		}
+	case string:
+		return v
+	}
+	return ""
 }

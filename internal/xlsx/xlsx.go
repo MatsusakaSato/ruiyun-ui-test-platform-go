@@ -22,6 +22,33 @@ var (
 	attachmentHeaders = []string{"附件", "参考文件", "文件", "附件名", "attachment", "attachments", "file"}
 )
 
+// MaxTurnCols 多轮列的最大数量，与 testcasedb.MaxTurns 一致。
+// 表头识别 prompt_1 / prompt_2 / … / prompt_8（也接受 提问1 / 提问_1 等写法）。
+const MaxTurnCols = 8
+
+// turnColRe 匹配「第 N 轮」列头：prompt_1 / 提问2 / 提问_3 / turn1 / 第1轮 等。
+var turnColRe = regexp.MustCompile(`^(?:prompt|提问|问题|turn|轮次|第)[\s_\-]*(\d+)[\s_\-]*(?:轮)?$`)
+
+// turnColIndex 解析「第 N 轮」列头，返回 1-based 轮号；不匹配返回 0。
+func turnColIndex(header string) int {
+	h := strings.ToLower(strings.TrimSpace(header))
+	if h == "" {
+		return 0
+	}
+	m := turnColRe.FindStringSubmatch(h)
+	if m == nil {
+		return 0
+	}
+	n := 0
+	for _, r := range m[1] {
+		n = n*10 + int(r-'0')
+	}
+	if n < 1 || n > MaxTurnCols {
+		return 0
+	}
+	return n
+}
+
 func isHeaderLike(value string) bool {
 	v := strings.TrimSpace(value)
 	if v == "" || len([]rune(v)) > 12 {
@@ -177,6 +204,26 @@ func DetectColumns(rows [][]string) map[string]any {
 	}
 	difficultyCol := headerCol(difficultyHeaders, excludeDifficulty, nil)
 
+	// 多轮列：prompt_1 / 提问2 / 第3轮 …（表头必须带数字，普通「提问」列不受影响）
+	turnCols := make(map[int]int) // 轮号(1-based) -> 列下标
+	excludeTurn := copySet(excludeDifficulty)
+	if difficultyCol != nil {
+		excludeTurn[*difficultyCol] = true
+	}
+	if promptCol != nil {
+		excludeTurn[*promptCol] = true
+	}
+	for i, h := range header {
+		if excludeTurn[i] {
+			continue
+		}
+		if n := turnColIndex(h); n > 0 {
+			if _, dup := turnCols[n]; !dup {
+				turnCols[n] = i
+			}
+		}
+	}
+
 	actualPromptCol := 0
 	if promptCol != nil {
 		actualPromptCol = *promptCol
@@ -211,6 +258,14 @@ func DetectColumns(rows [][]string) map[string]any {
 	}
 
 	hasPromptHeader := promptCol != nil
+	// 多轮模板：以 prompt_1 为第 1 轮，普通「提问」列可缺省
+	hasTurnCols := len(turnCols) > 0
+	if hasTurnCols && turnCols[1] != 0 {
+		actualPromptCol = turnCols[1]
+	}
+	if hasTurnCols {
+		hasPromptHeader = true
+	}
 	isValidTemplate := headIdx != nil && hasPromptHeader
 	var templateErr string
 	if headIdx == nil {
@@ -229,6 +284,7 @@ func DetectColumns(rows [][]string) map[string]any {
 		"scene_col":        sceneCol,
 		"difficulty_col":   difficultyCol,
 		"attachment_col":   attachmentCol,
+		"turn_cols":        turnCols,
 		"total_rows":       len(body),
 		"preview":          body,
 	}
@@ -249,6 +305,8 @@ type CaseCols struct {
 	Scene      *int
 	Attachment *int
 	Difficulty *int
+	// TurnCols 多轮列：轮号(1-based) -> 列下标。空表示单轮模板。
+	TurnCols map[int]int
 }
 
 // RowsToItems 按列下标从数据行里取值
@@ -277,7 +335,36 @@ func RowsToItems(rows [][]string, headIdx *int, cols CaseCols) map[string]any {
 	for _, r := range body {
 		pCol := cols.Prompt
 		prompt := getVal(r, &pCol)
-		if prompt == "" {
+
+		// 多轮：按轮号从小到大收集非空的 prompt_N 列，拼成轮次数组。
+		// 兼容两种模板：只用 prompt_1..N（无普通「提问」列），
+		// 或「提问」列 + prompt_2..N（提问列即第 1 轮）。
+		var turns []string
+		if len(cols.TurnCols) > 0 {
+			maxN := 0
+			for n := range cols.TurnCols {
+				if n > maxN {
+					maxN = n
+				}
+			}
+			for n := 1; n <= maxN; n++ {
+				ci, ok := cols.TurnCols[n]
+				if !ok {
+					continue
+				}
+				v := getVal(r, &ci)
+				if n == 1 && v == "" {
+					v = prompt // 用普通「提问」列兜底第 1 轮
+				}
+				if v != "" {
+					turns = append(turns, v)
+				}
+			}
+		} else if prompt != "" {
+			turns = append(turns, prompt)
+		}
+
+		if len(turns) == 0 {
 			hasAny := false
 			for _, c := range r {
 				if strings.TrimSpace(c) != "" {
@@ -320,6 +407,10 @@ func RowsToItems(rows [][]string, headIdx *int, cols CaseCols) map[string]any {
 		knownCols := map[int]bool{
 			cols.Prompt: true,
 		}
+		// 多轮列不算「未知列」，否则 prompt_2 会被当成自定义标签写进 labels
+		for _, ci := range cols.TurnCols {
+			knownCols[ci] = true
+		}
 		if cols.Scene != nil {
 			knownCols[*cols.Scene] = true
 		}
@@ -344,10 +435,10 @@ func RowsToItems(rows [][]string, headIdx *int, cols CaseCols) map[string]any {
 			}
 		}
 
-		cleanPrompt := cellNL.ReplaceAllString(prompt, "\n")
 		// 编号（CASE-NNN）与名称由服务端在入库时生成，这里不再从表格推导。
+		// prompt 自多轮改造起是**数组**（单轮也是长度 1 的数组）。
 		item := map[string]any{
-			"prompt":      cleanPrompt,
+			"prompt":      turns,
 			"scene":       scene,
 			"difficulty":  difficulty,
 			"attachments": attachments,

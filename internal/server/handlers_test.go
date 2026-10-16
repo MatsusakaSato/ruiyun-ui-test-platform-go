@@ -207,7 +207,7 @@ func TestPresetCasesPostReturnsDifficultyLabel(t *testing.T) {
 		"item": map[string]any{
 			"id":     "MY-OWN-001",
 			"name":   "我自己起的名字",
-			"prompt": "帮我写一份教学反思",
+			"prompt": []string{"帮我写一份教学反思"},
 			"labels": map[string]any{"scene": "备课", "difficulty": "难"},
 		},
 	})
@@ -259,7 +259,7 @@ func TestPresetCasesGetFiltersByDifficulty(t *testing.T) {
 			labels["attachment"] = true
 		}
 		if ok, msg, _ := testcasedb.AddPresetCase(map[string]any{
-			"prompt": prompt,
+			"prompt": []string{prompt},
 			"labels": labels,
 		}, ""); !ok {
 			t.Fatalf("准备用例 %q 失败: %s", prompt, msg)
@@ -285,7 +285,10 @@ func TestPresetCasesGetFiltersByDifficulty(t *testing.T) {
 		}
 		var prompts []string
 		for _, c := range raw["cases"].([]any) {
-			prompts = append(prompts, c.(map[string]any)["prompt"].(string))
+			// prompt 自多轮改造起是数组，列表断言取第 1 轮
+			if arr, ok := c.(map[string]any)["prompt"].([]any); ok && len(arr) > 0 {
+				prompts = append(prompts, arr[0].(string))
+			}
 		}
 		return raw, prompts
 	}
@@ -343,7 +346,7 @@ func TestPresetCasesPostUpdatesCase(t *testing.T) {
 
 	_, add := post(map[string]any{
 		"action": "add",
-		"prompt": "帮我写一份教学反思",
+		"prompt": []string{"帮我写一份教学反思"},
 		"labels": map[string]any{"scene": "备课", "difficulty": "易", "tags": []string{"回归"}},
 	})
 	if add["ok"] != true {
@@ -368,7 +371,7 @@ func TestPresetCasesPostUpdatesCase(t *testing.T) {
 	code, up := post(map[string]any{
 		"action": "update",
 		"id":     id,
-		"prompt": "帮我写一份教学反思（改）",
+		"prompt": []string{"帮我写一份教学反思（改）"},
 		"labels": map[string]any{"scene": "评测", "difficulty": "难", "tags": []string{"冒烟", "回归"}},
 	})
 	if code != http.StatusOK || up["ok"] != true {
@@ -401,7 +404,7 @@ func TestPresetCasesPostUpdatesCase(t *testing.T) {
 		Total int `json:"total"`
 		Cases []struct {
 			ID     string         `json:"id"`
-			Prompt string         `json:"prompt"`
+			Prompt []string       `json:"prompt"`
 			Labels map[string]any `json:"labels"`
 		} `json:"cases"`
 	}
@@ -411,12 +414,12 @@ func TestPresetCasesPostUpdatesCase(t *testing.T) {
 	if list.Total != 1 || len(list.Cases) != 1 {
 		t.Fatalf("编辑不应新增用例，期望库里 1 条，实际 total=%d cases=%d", list.Total, len(list.Cases))
 	}
-	if list.Cases[0].ID != id || list.Cases[0].Prompt != "帮我写一份教学反思（改）" {
+	if list.Cases[0].ID != id || len(list.Cases[0].Prompt) != 1 || list.Cases[0].Prompt[0] != "帮我写一份教学反思（改）" {
 		t.Errorf("库里应是改写后的那一条，实际 %+v", list.Cases[0])
 	}
 
 	// 3. 缺 id：400 且不能退化成「新增」
-	codeNoID, noID := post(map[string]any{"action": "update", "prompt": "缺编号的编辑"})
+	codeNoID, noID := post(map[string]any{"action": "update", "prompt": []string{"缺编号的编辑"}})
 	if codeNoID != http.StatusBadRequest || noID["ok"] != false {
 		t.Errorf("缺 id 应 400，实际 status=%d body=%v", codeNoID, noID)
 	}
@@ -444,7 +447,7 @@ func TestPresetCasesGetFiltersByTags(t *testing.T) {
 		if len(tags) > 0 {
 			labels["tags"] = tags
 		}
-		body, _ := json.Marshal(map[string]any{"action": "add", "prompt": prompt, "labels": labels})
+		body, _ := json.Marshal(map[string]any{"action": "add", "prompt": []string{prompt}, "labels": labels})
 		req := httptest.NewRequest(http.MethodPost, "http://127.0.0.1/api/preset-cases", bytes.NewReader(body))
 		req.Header.Set("Content-Type", "application/json")
 		rec := httptest.NewRecorder()
@@ -472,7 +475,9 @@ func TestPresetCasesGetFiltersByTags(t *testing.T) {
 		}
 		var prompts []string
 		for _, c := range raw["cases"].([]any) {
-			prompts = append(prompts, c.(map[string]any)["prompt"].(string))
+			if arr, ok := c.(map[string]any)["prompt"].([]any); ok && len(arr) > 0 {
+				prompts = append(prompts, arr[0].(string))
+			}
 		}
 		tags := toStringList(raw["tags"])
 		return prompts, tags
