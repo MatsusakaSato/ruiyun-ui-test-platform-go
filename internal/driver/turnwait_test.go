@@ -105,13 +105,48 @@ func TestWaitTurnDoneDetectsCompletion(t *testing.T) {
 	}
 }
 
-// TestWaitTurnDoneStartedZeroPrev 发送前取不到条数时退化为只看静默
-func TestWaitTurnDoneStartedZeroPrev(t *testing.T) {
+// TestWaitTurnDonePrevUnknownMustNotSkip 关键回归（真实线上现象的成因）：
+// 发送前取不到 assistant 条数（prevCount = -1）时，**不能**把上一轮的
+// 静默状态当成本轮已完成。
+//
+// 线上现象：控制台打「第 2 轮已完成」，但会话里只有一轮 —— 第 2 轮
+// 压根没发出去。原因就是 prevCount=-1 时旧逻辑直接放弃了「本轮已开始」
+// 这个判据，退化成只看静默，而上一轮刚答完正好是静默且完整的。
+func TestWaitTurnDonePrevUnknownMustNotSkip(t *testing.T) {
+	dir := t.TempDir()
+	// 会话里已有完整的第 1 轮，且完全静默
+	writeSession(t, dir, []map[string]any{user("q1"), asst("a1")})
+
+	d := &RuiyunUIDriver{}
+	start := time.Now()
+	got := d.WaitTurnDone(dir, -1, 1.5, 0.1)
+	elapsed := time.Since(start)
+
+	if got {
+		t.Error("取不到发送前条数时，不得把上一轮的完成状态当成本轮已完成（第 2 轮会被跳过）")
+	}
+	if elapsed < 900*time.Millisecond {
+		t.Errorf("应当一直等到超时，实际只用了 %v", elapsed)
+	}
+}
+
+// TestWaitTurnDonePrevUnknownThenTurnArrives 取不到基准后，
+// 本轮真的答完了仍要能正常判为完成（不能因为收紧判据而卡死）。
+func TestWaitTurnDonePrevUnknownThenTurnArrives(t *testing.T) {
 	dir := t.TempDir()
 	writeSession(t, dir, []map[string]any{user("q1"), asst("a1")})
+
 	d := &RuiyunUIDriver{}
-	if !d.WaitTurnDone(dir, -1, 3.0, 0.2) {
-		t.Error("prevCount 取不到时应退化为只看静默并返回 true")
+	go func() {
+		time.Sleep(400 * time.Millisecond)
+		writeSession(t, dir, []map[string]any{
+			user("q1"), asst("a1"),
+			user("q2"), map[string]any{"role": "assistant", "content": "第二轮答复", "completedAt": "2026-10-16T10:00:09Z"},
+		})
+	}()
+
+	if !d.WaitTurnDone(dir, -1, 6.0, 0.3) {
+		t.Error("本轮答完后应判为已完成（基准未知也不能卡死）")
 	}
 }
 
@@ -180,5 +215,31 @@ func TestSendFailureErrorTruncatesLongText(t *testing.T) {
 	}
 	if !strings.Contains(err.Error(), "…") && len([]rune(err.Error())) > 200 {
 		t.Errorf("报错过长：%d 字", len([]rune(err.Error())))
+	}
+}
+
+// TestUserMessageCount 数用户提问条数（用于核对某轮是否真的发出去了）
+func TestUserMessageCount(t *testing.T) {
+	dir := t.TempDir()
+	writeSession(t, dir, []map[string]any{user("q1"), asst("a1"), user("q2"), asst("a2")})
+	if got := userMessageCount(dir); got != 2 {
+		t.Errorf("应数到 2 条提问，实际 %d", got)
+	}
+
+	// 空内容的 user 不计
+	writeSession(t, dir, []map[string]any{user("q1"), user("   "), asst("a1")})
+	if got := userMessageCount(dir); got != 1 {
+		t.Errorf("空提问不应计入，实际 %d", got)
+	}
+
+	// 文件缺失返回 -1
+	if got := userMessageCount(filepath.Join(dir, "nope")); got != -1 {
+		t.Errorf("文件缺失应返回 -1，实际 %d", got)
+	}
+
+	// 只有一轮的用户消息
+	writeSession(t, dir, []map[string]any{user("只有一轮"), asst("a1")})
+	if got := userMessageCount(dir); got != 1 {
+		t.Errorf("应数到 1 条，实际 %d", got)
 	}
 }

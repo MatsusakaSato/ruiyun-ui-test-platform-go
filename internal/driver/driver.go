@@ -1168,6 +1168,45 @@ func (d *RuiyunUIDriver) AssistantCount(sessDir string) int {
 	return assistantMessageCount(sessDir)
 }
 
+// userMessageCount 数会话里「已完成」的 user 消息；取不到时返回 -1。
+//
+// 与 assistantMessageCount 的区别：assistant 的内容是逐步流式写入的，
+// user 消息则在应用收下提问时就落盘了 —— 所以用它核对「某一轮到底有没有
+// 发出去」比 assistant 更直接。
+func userMessageCount(sessDir string) int {
+	data, err := os.ReadFile(filepath.Join(sessDir, "session.messages.json"))
+	if err != nil {
+		return -1
+	}
+	var root map[string]any
+	if err := json.Unmarshal(data, &root); err != nil {
+		return -1
+	}
+	msgs, ok := root["messages"].([]any)
+	if !ok {
+		return -1
+	}
+	n := 0
+	for _, m := range msgs {
+		mm, ok := m.(map[string]any)
+		if !ok {
+			continue
+		}
+		if fmt.Sprintf("%v", mm["role"]) != "user" {
+			continue
+		}
+		if strings.TrimSpace(fmt.Sprintf("%v", mm["content"])) != "" {
+			n++
+		}
+	}
+	return n
+}
+
+// UserMessageCount 会话里已完成提问的条数（取不到返回 -1）
+func (d *RuiyunUIDriver) UserMessageCount(sessDir string) int {
+	return userMessageCount(sessDir)
+}
+
 // WaitTurnDone 等待「第 N 轮」生成完成。
 //
 // 与 WaitSettled 的区别（多轮必须用它）：
@@ -1177,8 +1216,13 @@ func (d *RuiyunUIDriver) AssistantCount(sessDir string) int {
 // 这里先要求 assistant 条数比发送前**多**（说明本轮真的开始了），
 // 再要求日志静默，两个条件都满足才算本轮结束。
 //
-// prevCount 为发送前的 assistant 条数（用 assistantMessageCount 取，
-// 取不到时传 -1，此时退化为「只看静默」的行为）。
+// prevCount 为发送前的 assistant 条数（用 assistantMessageCount 取）。
+// 取不到时传 -1：会把首次可读到的条数当成本轮基准，仍要求**更多**
+// assistant 才算本轮开始，绝不因此跳过判据。
+//
+// 为什么不能因取不到条数就放行：那样上一轮残留的静默状态会被当成本轮
+// 已完成，函数立刻返回 true，而本轮其实一次都没发出去。实测现象就是
+// 控制台报「第 2 轮已完成」、会话里却只有一轮。
 func (d *RuiyunUIDriver) WaitTurnDone(sessDir string, prevCount int, timeoutS, quietS float64) bool {
 	deadline := time.Now().Add(time.Duration(timeoutS * float64(time.Second)))
 	msgFile := filepath.Join(sessDir, "session.messages.json")
@@ -1202,14 +1246,26 @@ func (d *RuiyunUIDriver) WaitTurnDone(sessDir string, prevCount int, timeoutS, q
 			lastSig = sig
 			lastChange = time.Now()
 		}
-		// 本轮开始的判据：assistant 条数超过发送前
-		if !started && prevCount >= 0 {
-			if cur := assistantMessageCount(sessDir); cur > prevCount {
-				started = true
+		// 本轮开始的判据：assistant 条数**多于**发送前的条数。
+		//
+		// prevCount 可能是 -1（发送前那一刻文件还没写成 / 解析不了）。
+		// 这种情况**不能**当作「跳过判据」：一旦跳过，上一轮残留的静默状态
+		// 会被当成本轮已完成，函数立刻返回 true，本轮根本没发出去 ——
+		// 实测就是「第 2 轮已完成」但会话里只有一轮的原因。
+		// 正确做法是等到能读出真实条数为止（用本轮的局部基准）。
+		if !started {
+			if cur := assistantMessageCount(sessDir); cur >= 0 {
+				if prevCount < 0 {
+					// 发送前取不到基准：用首次可读到的条数当基准，
+					// 之后必须看到比它更多的 assistant 才算本轮开始。
+					prevCount = cur
+				} else if cur > prevCount {
+					started = true
+				}
 			}
 		}
 		// 本轮结束的判据：已开始 + 日志静默 + 末条是已完成 assistant
-		if started || prevCount < 0 {
+		if started {
 			if sig[0] > 0 && time.Since(lastChange).Seconds() >= quietS && looksComplete(msgFile) {
 				return true
 			}

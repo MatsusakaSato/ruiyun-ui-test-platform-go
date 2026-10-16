@@ -409,9 +409,22 @@ func RunUICases(cfg map[string]any, cases []map[string]any, uidriver *driver.Rui
 				// 发送前的已完成 assistant 条数：等待本轮结束时用它判断
 				// 「本轮是否真的开始了」。不记的话，上一轮残留的静默状态
 				// 会被误判成本轮已结束（轮次会被跳过）。
+				//
+				// 取不到（-1）时重试几次：这个基准一旦缺失，等待逻辑就少了
+				// 最关键的一环。会话文件通常在第 1 轮答完后就已写好，短暂
+				// 读不到多与应用还没落盘有关，等一会儿基本都能读到。
 				prevAsst := -1
 				if ti > 0 {
-					prevAsst = uidriver.AssistantCount(sess)
+					for attempt := 0; attempt < 10; attempt++ {
+						if n := uidriver.AssistantCount(sess); n >= 0 {
+							prevAsst = n
+							break
+						}
+						time.Sleep(200 * time.Millisecond)
+					}
+					if prevAsst < 0 {
+						logger(fmt.Sprintf("        提示：第 %d 轮发送前未能读到会话条数，将改用首次可读条数作为基准", ti+1))
+					}
 				}
 
 				how, sendErr := uidriver.Send()
@@ -480,6 +493,21 @@ func RunUICases(cfg map[string]any, cases []map[string]any, uidriver *driver.Rui
 					break
 				}
 				logger(fmt.Sprintf("        第 %d 轮已完成", ti+1))
+			}
+
+			// 兜底核对：发送循环声称跑完了 N 轮，会话里就必须有 N 条用户消息。
+			// 少一条就说明某一轮「被判完成」但实际没发出去 —— 宁可在这里
+			// 如实标记出来，也不要让它静默通过（线上出现过「控制台说第 2 轮
+			// 已完成、会话里只有一轮」的情况，报告却显示通过）。
+			if sess != "" && !sendFailed {
+				if want, got := len(turns), uidriver.UserMessageCount(sess); got >= 0 && got < want {
+					res.AbortedAtTurn = got
+					res.WaitedLimit = true
+					res.WaitNote = fmt.Sprintf("会话中实际只有 %d 轮提问（提交 %d 轮），第 %d 轮未能发出",
+						got, want, got+1)
+					logger(fmt.Sprintf("        警告：会话中只有 %d 轮提问（提交 %d 轮），第 %d 轮未发出",
+						got, want, got+1))
+				}
 			}
 
 			if sendFailed {
