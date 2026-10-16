@@ -207,6 +207,38 @@ func nonNilSlices(v any) []string {
 	return []string{}
 }
 
+// nonNilStrings 把 nil 字符串切片换成空切片（契约要求空集合为 []）
+func nonNilStrings(v []string) []string {
+	if v == nil {
+		return []string{}
+	}
+	return v
+}
+
+// findingsToRows 把 findings 转成归档用的行。会话级与轮级共用，
+// 避免两处字段不一致（前端按同一套字段渲染）。
+func findingsToRows(fs []*models.Finding) []map[string]any {
+	out := []map[string]any{}
+	for _, f := range fs {
+		if f == nil {
+			continue
+		}
+		out = append(out, map[string]any{
+			"rule":       f.Rule,
+			"detail":     f.Detail,
+			"tool":       f.Tool,
+			"evidence":   f.Evidence,
+			"step_index": f.StepIndex,
+		})
+	}
+	return out
+}
+
+// nonNilFindings 同 findingsToRows，语义更直白（轮级用）
+func nonNilFindings(fs []*models.Finding) []map[string]any {
+	return findingsToRows(fs)
+}
+
 func argSummary(arguments any, limit int) string {
 	// 非 ASCII 原样输出、键排序后的规范 JSON 形态。
 	// 分隔符必须是 ", " / ": "，紧凑格式会产出不一致的字符串。
@@ -632,6 +664,11 @@ func BuildCaseDetail(caseResult *models.CaseResult, findingsByStep map[string][]
 			"artifacts":         []map[string]any{},
 			"artifact_kinds":    []string{},
 			"artifacts_version": artifacts.ExtractVersion,
+			// 多轮信息即使没有 trace 也要如实带出，否则归档里只剩第 1 轮
+			"prompts":        nonNilStrings(caseResult.Prompts),
+			"turn_count":     caseResult.TurnCount,
+			"aborted_at_turn": caseResult.AbortedAtTurn,
+			"turns":          []map[string]any{},
 		}
 	}
 
@@ -806,17 +843,7 @@ func BuildCaseDetail(caseResult *models.CaseResult, findingsByStep map[string][]
 		artKinds = []string{}
 	}
 
-	findingsDTO := []map[string]any{}
-	for _, f := range caseResult.Findings {
-		fm := map[string]any{
-			"rule":       f.Rule,
-			"detail":     f.Detail,
-			"tool":       f.Tool,
-			"evidence":   f.Evidence,
-			"step_index": f.StepIndex,
-		}
-		findingsDTO = append(findingsDTO, fm)
-	}
+	findingsDTO := findingsToRows(caseResult.Findings)
 
 	ansExcerpt := trace.FinalAnswer
 	if utf8.RuneCountInString(ansExcerpt) > 600 {
@@ -854,7 +881,43 @@ func BuildCaseDetail(caseResult *models.CaseResult, findingsByStep map[string][]
 		"artifact_kinds":    artKinds,
 		"artifacts_version": artifacts.ExtractVersion,
 		"findings":          findingsDTO,
+		// 多轮：把每一轮的提问/答复/耗时/工具一并带进归档。
+		// 不写这几项时，归档里只有 prompt（第 1 轮），前端与报告都看不到
+		// 后续轮次 —— 表现为「多轮用例只展示了一轮」。
+		"prompts":         nonNilStrings(caseResult.Prompts),
+		"turn_count":      caseResult.TurnCount,
+		"aborted_at_turn": caseResult.AbortedAtTurn,
+		"turns":           turnDetailRows(caseResult),
 	}
+}
+
+// turnDetailRows 把每一轮整理成归档用的行；没有多轮信息时返回空切片。
+func turnDetailRows(c *models.CaseResult) []map[string]any {
+	out := []map[string]any{}
+	if c == nil || c.Trace == nil {
+		return out
+	}
+	for _, tn := range c.Trace.Turns {
+		if tn == nil {
+			continue
+		}
+		out = append(out, map[string]any{
+			"index":          tn.Index,
+			"prompt":         tn.Prompt,
+			"answer":         tn.Answer,
+			"answer_chars":   utf8.RuneCountInString(tn.Answer),
+			"tool_calls":     len(tn.ToolCalls),
+			"thinking_steps": len(tn.ThinkingSteps),
+			"elapsed_s":      RoundToOneDecimal(tn.ElapsedS),
+			"incomplete":     tn.Incomplete,
+			"incomplete_why": tn.IncompleteWhy,
+			"system_errors":  nonNilStrings(tn.SystemErrors),
+			"waited_limit":   tn.WaitedLimit,
+			"wait_note":      tn.WaitNote,
+			"findings":       nonNilFindings(c.TurnFindings[tn.Index]),
+		})
+	}
+	return out
 }
 
 // BuildRoundDetail 构建整轮详情

@@ -61,6 +61,8 @@ const pc = await import(pathToFileURL(WEB + '/js/page-cases.js').href);
 const ph = await import(pathToFileURL(WEB + '/js/page-home.js').href);
 const hist = await import(pathToFileURL(WEB + '/js/page-history.js').href);
 const u = await import(pathToFileURL(WEB + '/js/utils.js').href);
+const caseTurns = u.caseTurns;
+const caseTurnCount = u.caseTurnCount;
 
 const $ = id => document.getElementById(id);
 const click = el => el.dispatchEvent(new window.MouseEvent('click', { bubbles: true, cancelable: true }));
@@ -224,6 +226,29 @@ hist.setEvalScope('turn');
 ok('setEvalScope 接受 turn', state.EVAL_SCOPE === 'turn');
 hist.setEvalScope('乱七八糟');
 ok('setEvalScope 把非法值归一成 case', state.EVAL_SCOPE === 'case');
+
+/* ---- 归档轮次字段（prompts 优先于 prompt）---- */
+// 归档里 prompt 只保留第 1 轮、prompts 才是完整轮次。若只看 prompt，
+// 多轮用例在历史页会被显示成单轮（用户报告的问题）。
+const archived = { case_id: 'C1', prompt: '你好，我是翟嘉乐', prompts: ['你好，我是翟嘉乐', '我是谁？'], turn_count: 2 };
+
+ok('caseTurns 优先读 prompts', JSON.stringify(caseTurns(archived)) === JSON.stringify(['你好，我是翟嘉乐', '我是谁？']),
+  JSON.stringify(caseTurns(archived)));
+ok('caseTurnCount 数到 2 轮', caseTurnCount(archived) === 2, String(caseTurnCount(archived)));
+ok('caseTurns 在无 prompts 时回落 prompt', JSON.stringify(caseTurns({ prompt: '只有一轮' })) === JSON.stringify(['只有一轮']),
+  JSON.stringify(caseTurns({ prompt: '只有一轮' })));
+ok('caseTurns 在 prompts 为空数组时回落 prompt', JSON.stringify(caseTurns({ prompt: '回落', prompts: [] })) === JSON.stringify(['回落']),
+  JSON.stringify(caseTurns({ prompt: '回落', prompts: [] })));
+ok('caseTurns 容忍空对象', caseTurns({}).length === 0);
+ok('caseTurns 容忍 null', caseTurns(null).length === 0);
+
+// 历史页应据此识别出多轮
+state.lastRoundData = { run_id: 'r', cases: [archived] };
+ok('roundHasMultiTurn 能识别归档里的多轮', hist.roundHasMultiTurn() === true);
+
+// 轮次折叠预览也要看到两轮
+const prev = hist.promptPreview({ cases: [archived] });
+ok('promptPreview 展示多轮（含 + 计数不适用但含首轮）', prev.includes('你好，我是翟嘉乐'), prev.slice(0, 120));
 
 /* ---- 汇总 ---- */
 // startEval 会起 pollEval 的 setInterval 轮询；冒烟不验证轮询，

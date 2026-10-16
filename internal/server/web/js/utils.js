@@ -25,6 +25,21 @@ export function toTurns(p) {
   return [];
 }
 
+// caseTurns 从「用例对象」里取全部轮次。
+//
+// 归档同时给了两个字段：prompts 是完整轮次数组，prompt 只保留了第 1 轮
+// （历史兼容）。只看 prompt 会把多轮用例显示成单轮，所以统一走这里：
+// 有 prompts 就用它，否则回落到 prompt（旧数据只有 prompt）。
+export function caseTurns(c) {
+  if (c && Array.isArray(c.prompts) && c.prompts.length) return toTurns(c.prompts);
+  return toTurns(c && c.prompt);
+}
+
+// caseTurnCount 用例的轮数（含 prompts 回落）
+export function caseTurnCount(c) {
+  return caseTurns(c).filter(t => String(t).trim() !== '').length;
+}
+
 // 第 1 轮（列表、标题、日志等单行展示用）
 export function firstTurn(p) {
   const t = toTurns(p);

@@ -1,6 +1,6 @@
 /* ================= 历史记录与详情面板（轨迹/报告/问题/质量评估） ================= */
 
-import { $, esc, fmtPct, FM_NAME, sessionLink, revealInFinder, toTurns, firstTurn, turnCount } from './utils.js';
+import { $, esc, fmtPct, FM_NAME, sessionLink, revealInFinder, toTurns, firstTurn, turnCount, caseTurns, caseTurnCount } from './utils.js';
 import { state } from './state.js';
 import { renderHistoryPane } from './nav.js';
 import { openLlm } from './modals.js';
@@ -111,16 +111,16 @@ export function artLink(r) {
 
 const PREVIEW_CHARS = 42;
 export function promptPreview(r) {
-  const cases = (r.cases || []).filter(c => turnCount(c.prompt) > 0);
+  const cases = (r.cases || []).filter(c => caseTurnCount(c) > 0);
   if (!cases.length) return '';
   const cut = t => {
     const t2 = t.trim().replace(/\s+/g, ' ');
     return t2.length > PREVIEW_CHARS ? t2.slice(0, PREVIEW_CHARS) + '…' : t2;
   };
-  const first = cut(firstTurn(cases[0].prompt));
+  const first = cut(firstTurn(caseTurns(cases[0])));
   const more = cases.length > 1 ? `<span class="rp-more">+${cases.length - 1}</span>` : '';
   const full = cases.map((c, i) => {
-    const ts = toTurns(c.prompt).map(t => String(t).trim()).filter(t => t !== '');
+    const ts = caseTurns(c).map(t => String(t).trim()).filter(t => t !== '');
     // 多轮用例在悬停里把各轮依次列出
     return ts.length > 1
       ? `${i + 1}. ${ts.map((t, k) => `【第 ${k + 1} 轮】${t}`).join('\n     ')}`
@@ -294,8 +294,11 @@ export function pickCase(i) {
 
 
 // 用例提问的展示块：多轮用例逐轮列出（第 1 轮加粗底色，便于与单轮区分）
+//
+// 优先读 prompts（归档里的完整轮次数组）：prompt 字段只保留了第 1 轮，
+// 只看它会把这个多轮用例显示成单轮。
 function promptBlock(c) {
-  const ts = toTurns(c.prompt).map(t => String(t).trim()).filter(t => t !== '');
+  const ts = caseTurns(c).map(t => String(t).trim()).filter(t => t !== '');
   if (!ts.length) return '';
   if (ts.length === 1) {
     return `<div class="prompt-block"><b>提问：</b>${esc(ts[0])}</div>`;
@@ -694,7 +697,7 @@ export function evCaseTable(c, i, sm) {
   return `<div class="card ev-case">
     <div class="ev-case-hd">
       <div class="ev-case-tt"><b style="font-size:12.5px">${esc(c.case_id)}</b>
-        <span class="ev-case-prompt" title="${esc(toTurns(c.prompt).join('  ⏎  '))}">${turnCount(c.prompt) > 1 ? `<span class="tag t-turn t-turn-multi">多轮 · ${turnCount(c.prompt)}</span>` : ''}${esc(clip(firstTurn(c.prompt) || '（没有提问）', 78))}</span></div>
+        <span class="ev-case-prompt" title="${esc(caseTurns(c).join('  ⏎  '))}">${caseTurnCount(c) > 1 ? `<span class="tag t-turn t-turn-multi">多轮 · ${caseTurnCount(c)}</span>` : ''}${esc(clip(firstTurn(caseTurns(c)) || '（没有提问）', 78))}</span></div>
       <div class="ev-case-meta">${meta.join('')}</div>
       ${je ? `<div class="ev-case-err">打分失败的原因：${esc(je)}`
         + (c.judge_raw ? `<div class="pb-detail">${esc(c.judge_raw)}</div>` : '') + '</div>' : ''}
@@ -761,7 +764,7 @@ export function evEmpty() {
 // 摆出来只会让人以为有区别（用户确认：开关对单轮用例不生效）。
 export function roundHasMultiTurn() {
   const j = state.lastRoundData || {};
-  return (j.cases || []).some(c => turnCount(c.prompt) > 1);
+  return (j.cases || []).some(c => caseTurnCount(c) > 1);
 }
 
 function evalScopePicker() {
