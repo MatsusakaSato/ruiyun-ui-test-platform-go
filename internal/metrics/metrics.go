@@ -122,6 +122,42 @@ func ReproSubBlock(r *repro.ReproRecipe) map[string]any {
 }
 
 // BuildMetrics 生成测试报告与轮次归档所需的全部指标
+// turnRows 把用例的逐轮轨迹摊平成报告用的行。
+//
+// 单轮用例（Turns 为空）返回 nil，报告层按「没有逐轮数据」处理，
+// 保持与改造前完全一致的展示。多轮用例每轮一行：
+// 轮次、提问、答复字数、耗时、工具/思考数，以及该轮是否完整答复。
+// 轮级 findings 只用于定位是哪一轮出问题，不参与通过性判定。
+func turnRows(c *models.CaseResult, tr *models.ExecutionTrace) []map[string]any {
+	if c == nil || tr == nil || len(tr.Turns) == 0 {
+		return nil
+	}
+	rows := make([]map[string]any, 0, len(tr.Turns))
+	for _, t := range tr.Turns {
+		if t == nil {
+			continue
+		}
+		rows = append(rows, map[string]any{
+			"index":          t.Index,
+			"prompt":         t.Prompt,
+			"answer_chars":   utf8.RuneCountInString(t.Answer),
+			"elapsed_s":      trajectory.RoundToOneDecimal(t.ElapsedS),
+			"tool_calls":     len(t.ToolCalls),
+			"thinking_steps": len(t.ThinkingSteps),
+			"incomplete":     t.Incomplete,
+			"incomplete_why": t.IncompleteWhy,
+			"waited_limit":   t.WaitedLimit,
+			"wait_note":      t.WaitNote,
+			"errors":         t.SystemErrors,
+			"findings":       len(c.TurnFindings[t.Index]),
+		})
+	}
+	if len(rows) == 0 {
+		return nil
+	}
+	return rows
+}
+
 func BuildMetrics(caseResults []*models.CaseResult, cfg map[string]any, recipes []*repro.ReproRecipe, stageTimes map[string]float64) map[string]any {
 	var findings []*models.Finding
 	var uiFailed []*models.CaseResult
@@ -399,8 +435,7 @@ func BuildMetrics(caseResults []*models.CaseResult, cfg map[string]any, recipes 
 
 	// 用例行列表
 	var caseRows []map[string]any
-	for _, c := range caseResults {
-		tr := c.Trace
+	for _, c := range caseResults {		tr := c.Trace
 		toolNames := []string{}
 		thinkingCount := 0
 		toolCalls := 0
@@ -412,10 +447,15 @@ func BuildMetrics(caseResults []*models.CaseResult, cfg map[string]any, recipes 
 			answerChars = utf8.RuneCountInString(tr.FinalAnswer)
 		}
 		caseRows = append(caseRows, map[string]any{
-			"case_id":        c.CaseID,
-			"name":           c.Name,
-			"prompt":         c.Prompt,
-			"status":         c.Status(),
+			"case_id":         c.CaseID,
+			"name":            c.Name,
+			"prompt":          c.Prompt,
+			"prompts":         c.Prompts,
+			"turn_count":      c.TurnCount,
+			"turns":           turnRows(c, tr),
+			"turn_findings":   c.TurnFindings,
+			"aborted_at_turn": c.AbortedAtTurn,
+			"status":          c.Status(),
 			"session_id":     c.SessionID,
 			"tool_calls":     toolCalls,
 			"thinking_steps": thinkingCount,

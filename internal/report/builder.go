@@ -8,6 +8,8 @@ import (
 	"path/filepath"
 	"strings"
 	"time"
+
+	"ruiyun-ui-test-platform-go/internal/models"
 )
 
 // ReportData 报告渲染上下文
@@ -103,6 +105,30 @@ func RenderReport(metrics map[string]any, outPath string, appVersion, bundleID, 
 				return nil
 			}
 			return m[caseID]
+		},
+		// turnFindings 取某一轮的轮级发现：TurnFindings 的键是 int，
+		// 模板里从 turns 行拿到的是 any，这里统一按 int 取，取不到返回 nil。
+		"turnFindings": func(m map[int][]*models.Finding, idx any) []*models.Finding {
+			if m == nil {
+				return nil
+			}
+			n, ok := idx.(int)
+			if !ok {
+				return nil
+			}
+			return m[n]
+		},
+		// add1 轮次序号是 0-based，展示时 +1
+		"add1": func(v any) int {
+			if n, ok := v.(int); ok {
+				return n + 1
+			}
+			return 0
+		},
+		// isMulti 轮数 > 1 才算多轮（单轮不额外渲染逐轮区）
+		"isMulti": func(v any) bool {
+			n, ok := v.(int)
+			return ok && n > 1
 		},
 		"mapGet": func(m any, key string, fallback any) any {
 			if m == nil {
