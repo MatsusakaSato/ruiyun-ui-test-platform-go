@@ -1168,6 +1168,77 @@ func (d *RuiyunUIDriver) AssistantCount(sessDir string) int {
 	return assistantMessageCount(sessDir)
 }
 
+// composerBusy 判断输入区当前是否处于「生成中」：此时应用会把发送按钮
+// 换成停止按钮，输入框也不接受新内容，这时候发送必然失败。
+//
+// 判据取「可见按钮里有没有 stop 类按钮」——比读文案稳，不受中英文与
+// 提示语改动影响。看 DOM 实测：生成中输入区只有 chat-input-btn--stop。
+func (d *RuiyunUIDriver) composerBusy() bool {
+	if d.CDP == nil {
+		return false // 未连接 CDP（如单测环境）：无从判断，按「不在生成」处理
+	}
+	expr := `(() => {
+  const els = [...document.querySelectorAll('button,[role="button"]')];
+  for (const el of els) {
+    const r = el.getBoundingClientRect();
+    if (r.width <= 0 || r.height <= 0) continue;
+    const blob = ((el.className||'').toString() + ' '
+                + (el.getAttribute('aria-label')||'') + ' '
+                + (el.getAttribute('title')||'')).toLowerCase();
+    if (blob.includes('stop') || blob.includes('停止')) return true;
+  }
+  return false;
+})()`
+	val, err := d.CDP.EvalJS(expr, 15*time.Second, false)
+	if err != nil || val == nil {
+		return false
+	}
+	b, _ := val.(bool)
+	return b
+}
+
+// WaitComposerReady 等输入区回到「可以发送下一轮」的状态。
+//
+// 两个条件都满足才算就绪：
+//  1. 停止按钮消失（应用不再生成）
+//  2. 会话日志静默且本轮答复已完整（sessDir 为空时跳过这条）
+//
+// 为什么需要它：WaitNewSession 只等会话目录出现，而目录在**发送瞬间**就
+// 建好了，并不代表这一轮答完。多轮时若不等就发下一轮，应用仍在生成、
+// 发送按钮已被换成停止按钮，发送必然失败（线上 run_20261016_162406）。
+func (d *RuiyunUIDriver) WaitComposerReady(timeoutS, quietS float64, sessDir string) bool {
+	deadline := time.Now().Add(time.Duration(timeoutS * float64(time.Second)))
+	msgFile := ""
+	if sessDir != "" {
+		msgFile = filepath.Join(sessDir, "session.messages.json")
+	}
+	var lastSig [2]int64
+	lastChange := time.Now()
+
+	for time.Now().Before(deadline) {
+		if !d.CheckAppAlive() {
+			return false
+		}
+		if msgFile != "" {
+			fi, err := os.Stat(msgFile)
+			var sig [2]int64
+			if err == nil {
+				sig = [2]int64{fi.Size(), fi.ModTime().UnixNano()}
+			}
+			if sig != lastSig {
+				lastSig = sig
+				lastChange = time.Now()
+			}
+		}
+		quietOK := msgFile == "" || (time.Since(lastChange).Seconds() >= quietS && looksComplete(msgFile))
+		if !d.composerBusy() && quietOK {
+			return true
+		}
+		time.Sleep(500 * time.Millisecond)
+	}
+	return false
+}
+
 // userMessageCount 数会话里「已完成」的 user 消息；取不到时返回 -1。
 //
 // 与 assistantMessageCount 的区别：assistant 的内容是逐步流式写入的，

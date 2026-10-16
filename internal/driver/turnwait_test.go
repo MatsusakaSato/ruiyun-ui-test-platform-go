@@ -243,3 +243,45 @@ func TestUserMessageCount(t *testing.T) {
 		t.Errorf("应数到 1 条，实际 %d", got)
 	}
 }
+
+// TestWaitComposerReadyRespectsQuiet 无会话目录时只看「是否在生成」，
+// 攒够静默时间即返回；这里用一个必然超时的短窗口验证不会误判成功。
+func TestWaitComposerReadyNoSessionNeedsQuiet(t *testing.T) {
+	d := &RuiyunUIDriver{}
+	// sessDir 为空 -> quietOK 恒真；composerBusy 会因 CDP 未连接返回 false，
+	// 因此应当就绪。
+	if !d.WaitComposerReady(2.0, 0.1, "") {
+		t.Error("无会话目录且未连接 CDP 时应判为就绪")
+	}
+}
+
+// TestWaitComposerReadyWaitsForSessionComplete 会话目录存在但日志还没写完时，
+// 不能判为就绪 —— 这正是「第 1 轮还没答完就去发第 2 轮」的防线。
+func TestWaitComposerReadyWaitsForSessionComplete(t *testing.T) {
+	dir := t.TempDir()
+	// 只有一条 user，没有 assistant -> looksComplete 为 false
+	writeSession(t, dir, []map[string]any{user("q1")})
+
+	d := &RuiyunUIDriver{}
+	start := time.Now()
+	got := d.WaitComposerReady(1.5, 0.2, dir)
+	elapsed := time.Since(start)
+
+	if got {
+		t.Error("本轮还没答完（无 assistant）时不应判为就绪")
+	}
+	if elapsed < 1*time.Second {
+		t.Errorf("应等到超时，实际 %v", elapsed)
+	}
+}
+
+// TestWaitComposerReadyAfterTurnComplete 本轮答完后判为就绪
+func TestWaitComposerReadyAfterTurnComplete(t *testing.T) {
+	dir := t.TempDir()
+	writeSession(t, dir, []map[string]any{user("q1"), asst("a1")})
+
+	d := &RuiyunUIDriver{}
+	if !d.WaitComposerReady(3.0, 0.2, dir) {
+		t.Error("本轮答完后应判为就绪")
+	}
+}

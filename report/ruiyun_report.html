@@ -114,8 +114,8 @@
     <span><b>应用版本</b> 2.0.17</span>
     <span><b>Bundle</b> com.yanxiu.srtclaw</span>
     <span><b>运行模式</b> UI 自动化</span>
-    <span><b>生成时间</b> 2026-10-16 16:14:46</span>
-    <span><b>总耗时</b> 54.9s</span>
+    <span><b>生成时间</b> 2026-10-16 16:24:19</span>
+    <span><b>总耗时</b> 12.8s</span>
   </div>
 </header>
 
@@ -157,11 +157,11 @@
     </span>
     <b>用例 1</b>
     <span class="mono">CASE-001</span>
-    <span class="mono" style="color:var(--tx3)">sess_1a143c6e4ac_569acc</span>
+    <span class="mono" style="color:var(--tx3)">sess_1a143cfb530_49104c</span>
   </div>
 
   <div class="case-prompt"><b>提示词：</b>你好，我是翟嘉乐</div>
-  
+  <div style="color:var(--p0);font-size:12.5px;margin-top:6px">UI 异常：第 2 轮发送失败: 发送未生效：输入框仍留有内容（&#34;我是谁？\n&#34;）；未找到可用的发送按钮；现场已导出 artifacts/ui_send_failed.json</div>
   
 
   
@@ -174,7 +174,7 @@
   <h3>客观信息</h3>
   <div class="tbl-wrap">
   <table>
-    <tr><td>平台实测耗时</td><td style="text-align:right"><b>17.9s</b></td></tr>
+    <tr><td>平台实测耗时</td><td style="text-align:right"><b>12.8s</b></td></tr>
     <tr><td>首响延迟（提问 → 模型响应）</td><td style="text-align:right"><b>—</b></td></tr>
     <tr><td>生成时长</td><td style="text-align:right"><b>—</b></td></tr>
     <tr><td>会话时长</td><td style="text-align:right"><b>—</b></td></tr>
@@ -205,7 +205,7 @@
   <h3>逐轮明细（共 2 轮，实际执行 1 轮）</h3>
   
   <div class="mono" style="color:var(--p0);margin:-4px 0 9px">
-    该用例未跑完：提交 2 轮，实际执行 1 轮。
+    该用例未跑完：提交 2 轮，实际执行 1 轮，在第 2 轮中止。
   </div>
   
   
@@ -215,7 +215,7 @@
       <b>第 1 轮</b>
       
       
-      <span class="mono" style="color:var(--tx3)">9.3s · 答复 168 字 · 工具 0 · 思考 0</span>
+      <span class="mono" style="color:var(--tx3)">8s · 答复 166 字 · 工具 0 · 思考 0</span>
     </div>
     <div class="turn-prompt"><b>提问：</b>你好，我是翟嘉乐</div>
     
@@ -224,15 +224,15 @@
       
       <div class="finding" style="margin-top:8px">
         <div class="f-hd"><b>OUTPUT_TRUNCATED</b></div>
-        <div class="f-detail"><b>具体表现：</b>最终答案疑似被强制截断（命中信号：缺完成标记；共 168 字）。【缺完成标记】消息无 completedAt 字段，说明生成未走完正常结束流程</div>
+        <div class="f-detail"><b>具体表现：</b>最终答案疑似被强制截断（命中信号：缺完成标记；共 166 字）。【缺完成标记】消息无 completedAt 字段，说明生成未走完正常结束流程</div>
         <div class="evi">你好呀，翟嘉乐！👋 很高兴认识你～
 
 我是睿云智能工作台（SRTClaw），可以帮你做很多教学相关的事情，比如：
 
-- 📚 备课：教学设计、教案、课件、问题链设计
+- 📚 备课：教学设计、教案生成、课件制作
 - 📝 出题：课后作业、试题质检、作文批改
-- 📊 分析：学情分析、教材分析、课堂实录分析
-- 🎨 幼教：活动设计、环创指导、家园沟通
+- 📊 分析：学情分析、课堂分析、教学设计批注
+- 🎨 幼教：活动设计、环创指导、课程故事
 
 今天想做点什么？直接告诉我就好 😊</div>
       </div>

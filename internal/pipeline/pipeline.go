@@ -59,6 +59,18 @@ func eventsForSession(events []map[string]any, sessDir string, tSend float64) []
 	return owned
 }
 
+// turnWaitS 轮间等待上限：取「每轮上限」与「整用例剩余额度」中较小者，且不小于 1 秒。
+func turnWaitS(caseTimeout, caseTotalTimeout, t0 float64) float64 {
+	w := caseTimeout
+	if remaining := caseTotalTimeout - (float64(time.Now().UnixNano())/1e9 - t0); remaining < w {
+		w = remaining
+	}
+	if w < 1 {
+		w = 1
+	}
+	return w
+}
+
 // normalizeCaseTurns 取用例的轮次数组。
 //
 // 契约：caseData["prompt"] 是字符串数组（单轮也是长度 1 的数组）。
@@ -394,6 +406,30 @@ func RunUICases(cfg map[string]any, cases []map[string]any, uidriver *driver.Rui
 						break
 					}
 				}
+				// 第 2..N 轮：先等上一轮生成完、输入区回到可发送状态，**再**输入。
+				//
+				// 顺序很关键：应用在生成期间会把发送按钮换成「停止」按钮、
+				// 输入框也不接受新内容。若先生成文本再等，文本可能被塞进一个
+				// 尚不可用的输入框里，等到就绪时内容已经不在了。
+				//
+				// 线上现象（run_20261016_162406）：第 1 轮发出仅 4 秒就发第 2 轮，
+				// 此时仍在生成，DOM 里输入区只有 chat-input-btn--stop、
+				// 没有 send 按钮，发送必然失败。WaitNewSession 只等会话**目录**
+				// 出现，而目录在发送瞬间就建好了，并不代表这一轮答完了。
+				if ti > 0 {
+					if !uidriver.WaitComposerReady(turnWaitS(caseTimeout, caseTotalTimeout, t0), quietS, sess) {
+						if !uidriver.CheckAppAlive() {
+							return results
+						}
+						res.UIOk = false
+						res.UIError = fmt.Sprintf("第 %d 轮发送前，上一轮仍未生成完成（输入区未恢复可发送）", ti+1)
+						res.AbortedAtTurn = ti
+						logger(fmt.Sprintf("        失败：%s", res.UIError))
+						sendFailed = true
+						break
+					}
+				}
+
 				if err := uidriver.TypeText(turnText); err != nil {
 					if !uidriver.CheckAppAlive() {
 						return results
@@ -477,13 +513,7 @@ func RunUICases(cfg map[string]any, cases []map[string]any, uidriver *driver.Rui
 				// 于是本轮还没生成就被当成结束。
 				//
 				// 轮间等待上限取「每轮上限」与「总时长剩余额度」中较小的那个。
-				turnWait := caseTimeout
-				if remaining := caseTotalTimeout - (float64(time.Now().UnixNano())/1e9 - t0); remaining < turnWait {
-					turnWait = remaining
-				}
-				if turnWait < 1 {
-					turnWait = 1
-				}
+				turnWait := turnWaitS(caseTimeout, caseTotalTimeout, t0)
 				if !uidriver.WaitTurnDone(sess, prevAsst, turnWait, quietS) {
 					if !uidriver.CheckAppAlive() {
 						return results
