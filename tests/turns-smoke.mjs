@@ -6,7 +6,7 @@
          cp tests/turns-smoke.mjs /Users/amano/.workbuddy/binaries/node/workspace/
          cd /Users/amano/.workbuddy/binaries/node/workspace && node turns-smoke.mjs
    （本文件放在项目内是为了受工作区写权限约束，依赖仍取工作区外的 node_modules） */
-import { readFileSync } from 'node:fs';
+import { readFileSync, readdirSync } from 'node:fs';
 import { pathToFileURL } from 'node:url';
 import { JSDOM } from 'jsdom';
 
@@ -300,6 +300,24 @@ const legacyHtml = hist.caseTimeline(legacyArchive);
 ok('旧归档回落平坦展示', !legacyHtml.includes('class="turn-sec"'));
 ok('旧归档仍展示平铺步骤', legacyHtml.includes('tool_old'));
 ok('旧归档仍展示末轮答复', legacyHtml.includes('末轮答复'));
+
+/* ---- 样式作用域守卫：按轮展示用的类名不能与别的 css 文件重名 ----
+   cases.css 里已经有 .turn-no（用例库的轮次行），历史页当初也用了同名类，
+   结果两边互相串味：历史页把用例库的标签改成了粗体强调色，用例库的
+   flex:0 0 56px 又套到了历史页头上（实测 computed flex-basis=56px）。
+   类名一重名就是隐式耦合，这里用断言把它钉住。 */
+const CSS_DIR = WEB + '/css';
+const cssFiles = readdirSync(CSS_DIR).filter(f => f.endsWith('.css'));
+const cssText = Object.fromEntries(cssFiles.map(f => [f, readFileSync(CSS_DIR + '/' + f, 'utf8')]));
+const phSrc = readFileSync(WEB + '/js/page-history.js', 'utf8');
+for (const cls of ['turn-sec', 'turn-sec-hd', 'turn-sec-no', 'turn-out', 'tl-sec', 'turn-err']) {
+  const re = new RegExp('\\.' + cls + '(?![\\w-])');
+  const hits = cssFiles.filter(f => re.test(cssText[f]));
+  ok(`.${cls} 只在 history.css 定义`, hits.length === 1 && hits[0] === 'history.css', hits.join(',') || '无');
+  ok(`.${cls} 被 page-history.js 使用`, phSrc.includes(cls));
+}
+ok('历史页不再使用与用例库重名的 .turn-no',
+  !/class="turn-no"/.test(phSrc) && !/\.turn-no\{/.test(cssText['history.css']));
 
 /* ---- 汇总 ---- */
 // startEval 会起 pollEval 的 setInterval 轮询；冒烟不验证轮询，

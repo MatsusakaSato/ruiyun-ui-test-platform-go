@@ -458,7 +458,7 @@ function turnSections(c) {
     const out = String(t.answer_excerpt || t.answer || '');
     h += `<div class="turn-sec">
       <div class="turn-sec-hd">
-        <span class="turn-no">第 ${k + 1} 轮</span>
+        <span class="turn-sec-no">第 ${k + 1} 轮</span>
         ${t.incomplete ? '<span class="badge b-fail">未答复</span>' : ''}
         <span class="mono">${t.elapsed_s ?? '—'}s · 工具 ${t.tool_calls ?? 0} · 思考 ${t.thinking_steps ?? 0} · 答复 ${t.answer_chars ?? 0} 字</span>
       </div>
