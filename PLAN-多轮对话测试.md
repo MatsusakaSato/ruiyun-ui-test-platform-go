@@ -725,3 +725,133 @@ prompt: '你好，我是翟嘉乐'
 
 本节的改动同时把测试断言从「包含某个措辞」改成「块的数量与结构」——
 后者更贴近用户真正在意的东西，也不容易被措辞微调搞坏。
+
+---
+
+## 18. 报告只展示最后一轮（2026-10-16，run_20261016_165033）
+
+用户反馈：**「归档报告只能展示最后一轮的调用链路和输出内容，我需要按时间线
+依次展示所有内容」**。
+
+这一轮暴露的是**两个独立的缺陷叠在一起**——只修一个，现象都还在。
+
+### 18.1 证据：那份归档报告根本不是这一轮的
+
+`run_20261016_165033/console.log`：
+
+```
+[3/3] 生成测试报告…
+  警告：报告渲染出错: 渲染 HTML 报告失败: template: report:158:29:
+  executing "report" at <eq $t.incomplete>: error calling eq: missing argument
+  for comparison
+  本轮数据已归档：/Users/amano/.ruiyun-autotest/rounds/run_20261016_165033
+```
+
+报告**没渲染出来**，但归档照样"成功"，因为归档那一步是这么写的：
+
+```go
+if reportBytes, err := os.ReadFile(reportPath); err == nil {
+    os.WriteFile(filepath.Join(roundDir, "report.html"), reportBytes, 0644)
+}
+```
+
+`reportPath`（`report/ruiyun_report.html`）上留着的**是上一次运行写下的文件**：
+
+| 文件 | md5 |
+|---|---|
+| `report/ruiyun_report.html`（16:42 那轮） | b5fb1517…deb5 |
+| `rounds/run_20261016_164209/report.html` | b5fb1517…deb5 |
+| `rounds/run_20261016_165033/report.html` | b5fb1517…deb5 |
+
+三份一模一样。用户点开的"本轮归档报告"是 16:42 那份旧档案——所以看起来
+"只有最后一轮"（那份旧报告里第 1 轮确实没有工具调用）。
+
+### 18.2 证据：归档详情本来就没有轮次维度
+
+即便报告是新的，归档数据 `round_detail.json` 也只支持"整会话 + 最后一轮"：
+
+- `cases[0].steps`：**33** 个步骤（真实会话 `sess_1a0ccdbb6e7_f24c81`，轮 0 有 9 步、
+  轮 1 有 24 步），步骤**没有轮次归属**，前端只能平铺成一堆；
+- `cases[0].answer_excerpt`：**只有最后一轮的答复**（1021 字，轮 0 的 236 字答复没有）；
+- `cases[0].turns[]`：有轮次，但只有 `prompt` / `answer` / `answer_chars`，
+  **没有每轮自己的 `steps`**。
+
+而 HTML 报告走的是**另一条路**（`metrics.turnRows`）：那里每轮只有
+`tools` 与 `answer_chars` —— 有链路、有字数，**没有答复原文**，所以"输出内容"
+在报告里从来只有最后一轮（靠 `tr.FinalAnswer`）。
+
+### 18.3 修复
+
+**a. `pipeline.archiveReport`：渲染失败绝不归档旧报告**
+
+提取成独立函数并加测试：`reportOK=false` 时**删掉**归档目录里的 `report.html`
+（同 run_id 重跑的残留）并明确告警，而不是把上一轮的文件拷过去。宁可归档里
+没有报告（前端 404），也不要一份张冠李戴的旧报告。
+
+**b. `trajectory.buildSteps`：用例级与轮级共用一份时间线构造**
+
+原来合并"工具 + 思考步"的逻辑只存在于 `BuildCaseDetail` 的会话级分支里。
+抽成 `buildSteps(toolCalls, thinking, sessionID, findingsByStep)` 后：
+
+- 会话级 `steps` 照旧（老前端与单轮展示不受影响）；
+- `turns[].steps` 每轮一份（`ToolCall.TurnIndex` / `TurnTrace` 切分天然支持）；
+- `turns[].answer_excerpt` 每轮一份答复原文（600 字截断，与会话级同口径）。
+
+**c. `metrics.turnRows`：逐轮带出答复原文**
+
+报告用不到原文就只能显示"答复 N 字"。现在 `turn_rows[].answer` 与
+`case_rows[].answer` 都带原文，报告每轮都有"输出内容"。
+
+**d. `report/template.html`：每轮一个「输出内容」小节**
+
+多轮分支与单轮分支**同形**（用户的既定要求：像单轮一样多展示几次）：
+
+```
+提示词 → 调用链路（执行顺序）→ 输出内容 → 客观信息 → 问题发现
+```
+
+长答复限高 320px 可滚动（`max-height` + `overflow:auto`），不把轮次分隔撑散。
+顺带删掉已经没人用的 `.turn-block` / `.turn-hd` / `.turn-prompt` 死样式。
+
+**e. 历史页（`page-history.js`）：多轮按轮渲染**
+
+`round_detail.json` 的 `turns[].steps` 存在时，用例详情按
+`第 N 轮 → 提问 → 步骤时间线 → 输出内容` 依次排开；旧的归档没有
+`turns[].steps`，**回落成原来的平坦展示**（不凭空造轮次）。
+按轮渲染后，会话级的"自动确认"与被用例级产物重新补回时间线尾部，不丢数据。
+
+### 18.4 验证
+
+1. `go test ./...` 全绿（新增 `trajectory` / `metrics` / `report` / `pipeline`
+   四处断言，其中 `pipeline` 的测试直接锁住"渲染失败不写旧报告"）。
+2. jsdom 冒烟 `tests/turns-smoke.mjs`：**70/70**（新增 11 项：按轮分段、
+   每轮各自的提问/输出、输出按时间线排、每轮只渲染本轮步骤、自动确认不丢、
+   旧归档回落）。
+3. 真实会话回归 `sess_1a0ccdbb6e7_f24c81`（2 轮，轮 0 四个工具、轮 1 十个工具）：
+
+   | | 轮 0 | 轮 1 |
+   |---|---|---|
+   | 报告调用链路 | read_skill_file → ToolSearch → doc_create → doc_check | mcp_paid_search → … → edit_memory |
+   | 报告输出内容 | 236 字（空白 Word 文档已生成 ✅） | 1021 字（北京市职称评审结论） |
+   | 归档 turns[].steps | 9 步 | 24 步 |
+
+4. 用户在 17:04 自己跑的 `run_20261016_170450`：`console.log` 无渲染告警，
+   归档 `report.html` 两个用例块、两个「输出内容」小节，`round_detail.json`
+   的 `turns[]` 每轮带自己的 `steps`。
+5. 新增核对工具 `tests/archivedemo/round.go`（真实会话同时跑报告与归档两条链路）。
+
+### 18.5 教训
+
+1. **「读上一次运行留下的文件」必须带本轮成功标记。** 渲染失败 → 拷旧文件，
+   是静默地把旧结论当成新结论发出去。凡是 fallback 到"磁盘上已有的文件"，
+   都要先问一句：这份文件凭什么保证是本轮的？
+2. **第 16 节的教训又咬了一次**：同一份"多轮"数据有两条序列化路径
+   （报告走 `metrics.turnRows`，历史页走 `trajectory.BuildCaseDetail`）。
+   这次两处一起补、两处各加断言——只补一处，用户换个入口看到的问题照旧。
+3. **"有字数没原文"是一种假完整**：`answer_chars` 让报告看起来很全，
+   但用户要的"内容"一个字都看不到。展示型字段要问：读者真正要看的是哪个。
+4. **环境**：沙箱里默认 `GOCACHE`（`~/Library/Caches/go-build`）不可写，
+   air 的重建会以 `exit status 1` 静默失败（`bin/build-errors.log`）。
+   构建一律 `GOCACHE=$PWD/.gocache`。dev 实例的 web 资源直读磁盘（刷新即生效），
+   但 `//go:embed` 进来的报告模板必须**重启进程**才生效——改完报告一定要重建
+   `bin/ruiyun` 与 `bin/ruiyun.dev`。
