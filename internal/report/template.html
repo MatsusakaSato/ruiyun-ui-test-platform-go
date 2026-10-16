@@ -235,7 +235,13 @@
        轮级发现放在对应轮次里，便于一眼看出是哪一轮出的问题；
        通过性仍只由上面的会话级判定决定。 -->
   {{ if isMulti $c.turn_count }}
-  <h3>逐轮明细（共 {{ $c.turn_count }} 轮）</h3>
+  {{ $ran := len $c.turns }}
+  <h3>逐轮明细（共 {{ $c.turn_count }} 轮{{ if ne $ran $c.turn_count }}，实际执行 {{ $ran }} 轮{{ end }}）</h3>
+  {{ if ne $ran $c.turn_count }}
+  <div class="mono" style="color:var(--p0);margin:-4px 0 9px">
+    该用例未跑完：提交 {{ $c.turn_count }} 轮，实际执行 {{ $ran }} 轮{{ if ge $c.aborted_at_turn 0 }}，在第 {{ add1 $c.aborted_at_turn }} 轮中止{{ end }}。
+  </div>
+  {{ end }}
   {{ range $t := $c.turns }}
   {{ $tf := turnFindings $c.turn_findings $t.index }}
   <div class="turn-block{{ if $t.incomplete }} turn-bad{{ end }}">

@@ -112,3 +112,36 @@ func TestReportMultiTurnNoTurnsFallsBack(t *testing.T) {
 		t.Error("轨迹缺失时不应虚拟出轮次行")
 	}
 }
+
+// TestReportAbortedTurnsExplained 提交 3 轮但只跑完 2 轮时，
+// 报告要说清楚「提交几轮、实际跑几轮、在第几轮中止」，
+// 不能让读者以为漏了内容。
+func TestReportAbortedTurnsExplained(t *testing.T) {
+	cr := &models.CaseResult{
+		CaseID: "CASE-004", Name: "中途中止",
+		Prompt: "第一轮", Prompts: []string{"第一轮", "第二轮", "第三轮"},
+		TurnCount: 3, SessionID: "sess_abort",
+		AbortedAtTurn: 2,
+		Trace: &models.ExecutionTrace{
+			Turns: []*models.TurnTrace{
+				{Index: 0, Prompt: "第一轮", Answer: "a0", ElapsedS: 1},
+				{Index: 1, Prompt: "第二轮", Answer: "a1", ElapsedS: 1},
+			},
+		},
+	}
+	html := renderWith(t, []*models.CaseResult{cr})
+
+	if !strings.Contains(html, "实际执行 2 轮") {
+		t.Error("标题应说明实际只执行了 2 轮")
+	}
+	if !strings.Contains(html, "未跑完") {
+		t.Error("应有一段说明该用例未跑完")
+	}
+	if !strings.Contains(html, "第 3 轮中止") {
+		t.Error("应说明在第 3 轮中止（aborted_at_turn=2 是 0-based）")
+	}
+	// 只渲染实际存在的两轮
+	if strings.Contains(html, "提问：第三轮") {
+		t.Error("未执行的第三轮不应渲染成轮次块")
+	}
+}
