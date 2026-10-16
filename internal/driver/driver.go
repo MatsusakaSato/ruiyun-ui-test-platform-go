@@ -1067,6 +1067,102 @@ func (d *RuiyunUIDriver) WaitNewSession(before map[string]bool, timeoutS float64
 	return "", nil
 }
 
+// assistantMessageCount 统计会话里「已完成」的 assistant 消息条数。
+//
+// 多轮发送靠它判断「本轮是否真的开始了」与「本轮是否答完了」：
+// 第 N 轮发送后会话里应当多出一条 assistant 消息，只有这条消息
+// 不再处于流式状态，才说明本轮生成结束。
+// 只看 session.messages.json（发送后会立即出现该轮的用户消息）。
+func assistantMessageCount(sessDir string) int {
+	data, err := os.ReadFile(filepath.Join(sessDir, "session.messages.json"))
+	if err != nil {
+		return -1
+	}
+	var root map[string]any
+	if err := json.Unmarshal(data, &root); err != nil {
+		return -1
+	}
+	msgs, ok := root["messages"].([]any)
+	if !ok {
+		return -1
+	}
+	n := 0
+	for _, m := range msgs {
+		mm, ok := m.(map[string]any)
+		if !ok {
+			continue
+		}
+		if fmt.Sprintf("%v", mm["role"]) != "assistant" {
+			continue
+		}
+		if isStreaming, ok := mm["isStreaming"].(bool); ok && isStreaming {
+			continue // 还在流式输出，这轮没结束
+		}
+		content := strings.TrimSpace(fmt.Sprintf("%v", mm["content"]))
+		completedAt := fmt.Sprintf("%v", mm["completedAt"])
+		if content != "" || (completedAt != "" && completedAt != "<nil>") {
+			n++
+		}
+	}
+	return n
+}
+
+// AssistantCount 取会话里已完成 assistant 消息的条数（导出给流水线用）。
+func (d *RuiyunUIDriver) AssistantCount(sessDir string) int {
+	return assistantMessageCount(sessDir)
+}
+
+// WaitTurnDone 等待「第 N 轮」生成完成。
+//
+// 与 WaitSettled 的区别（多轮必须用它）：
+// WaitSettled 只要求「会话日志静默且末条是已完成 assistant」——
+// 在轮间调用时，上一轮的日志本来就是静默且完成的，它会立刻返回 true，
+// 于是后一轮还没开始生成就被当成结束（会少发/漏收轮次）。
+// 这里先要求 assistant 条数比发送前**多**（说明本轮真的开始了），
+// 再要求日志静默，两个条件都满足才算本轮结束。
+//
+// prevCount 为发送前的 assistant 条数（用 assistantMessageCount 取，
+// 取不到时传 -1，此时退化为「只看静默」的行为）。
+func (d *RuiyunUIDriver) WaitTurnDone(sessDir string, prevCount int, timeoutS, quietS float64) bool {
+	deadline := time.Now().Add(time.Duration(timeoutS * float64(time.Second)))
+	msgFile := filepath.Join(sessDir, "session.messages.json")
+	var lastSig [2]int64
+	lastChange := time.Now()
+	started := false
+
+	for time.Now().Before(deadline) {
+		if !d.CheckAppAlive() {
+			return false
+		}
+		if d.maybeAutoConfirm(false, "") != nil {
+			lastChange = time.Now()
+		}
+		fi, err := os.Stat(msgFile)
+		var sig [2]int64
+		if err == nil {
+			sig = [2]int64{fi.Size(), fi.ModTime().UnixNano()}
+		}
+		if sig != lastSig {
+			lastSig = sig
+			lastChange = time.Now()
+		}
+		// 本轮开始的判据：assistant 条数超过发送前
+		if !started && prevCount >= 0 {
+			if cur := assistantMessageCount(sessDir); cur > prevCount {
+				started = true
+			}
+		}
+		// 本轮结束的判据：已开始 + 日志静默 + 末条是已完成 assistant
+		if started || prevCount < 0 {
+			if sig[0] > 0 && time.Since(lastChange).Seconds() >= quietS && looksComplete(msgFile) {
+				return true
+			}
+		}
+		time.Sleep(500 * time.Millisecond)
+	}
+	return false
+}
+
 func looksComplete(msgFile string) bool {
 	data, err := os.ReadFile(msgFile)
 	if err != nil {

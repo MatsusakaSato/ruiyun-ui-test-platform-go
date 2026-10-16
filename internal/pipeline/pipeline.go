@@ -406,6 +406,14 @@ func RunUICases(cfg map[string]any, cases []map[string]any, uidriver *driver.Rui
 				}
 				time.Sleep(500 * time.Millisecond)
 
+				// 发送前的已完成 assistant 条数：等待本轮结束时用它判断
+				// 「本轮是否真的开始了」。不记的话，上一轮残留的静默状态
+				// 会被误判成本轮已结束（轮次会被跳过）。
+				prevAsst := -1
+				if ti > 0 {
+					prevAsst = uidriver.AssistantCount(sess)
+				}
+
 				how, _ := uidriver.Send()
 
 				if ti == 0 {
@@ -436,6 +444,12 @@ func RunUICases(cfg map[string]any, cases []map[string]any, uidriver *driver.Rui
 				}
 
 				// 同会话追加一轮：等本轮生成完成再发下一轮。
+				//
+				// 必须用 WaitTurnDone 而不是 WaitSettled：后者的判据是
+				// 「日志静默 + 末条是已完成 assistant」，而刚发完第 N 轮时
+				// 第 N-1 轮的日志本来就是静默且完成的，会立刻返回 true，
+				// 于是本轮还没生成就被当成结束。
+				//
 				// 轮间等待上限取「每轮上限」与「总时长剩余额度」中较小的那个。
 				turnWait := caseTimeout
 				if remaining := caseTotalTimeout - (float64(time.Now().UnixNano())/1e9 - t0); remaining < turnWait {
@@ -444,7 +458,7 @@ func RunUICases(cfg map[string]any, cases []map[string]any, uidriver *driver.Rui
 				if turnWait < 1 {
 					turnWait = 1
 				}
-				if !uidriver.WaitSettled(sess, turnWait, quietS) {
+				if !uidriver.WaitTurnDone(sess, prevAsst, turnWait, quietS) {
 					if !uidriver.CheckAppAlive() {
 						return results
 					}
