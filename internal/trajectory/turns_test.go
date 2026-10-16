@@ -138,3 +138,89 @@ func TestBuildRoundDetailKeepsTurns(t *testing.T) {
 		t.Errorf("整轮归档里应保留 2 轮，实际 %d", len(turns))
 	}
 }
+
+// TestTurnRowsCarryOwnSteps 每一轮必须带**自己**的步骤（思考 + 工具，按时间线合并），
+// 并且带答复原文。只给会话级平铺 steps 时，前端/报告拿不到轮次归属，
+// 多轮用例会表现成「所有内容只剩最后一轮」（用户报告的问题）。
+func TestTurnRowsCarryOwnSteps(t *testing.T) {
+	tr := &models.ExecutionTrace{
+		SessionID: "sess_t", FinalAnswer: "第二轮答复",
+		// 真实轨迹里平铺字段与轮内切片是一份数据（logparser 同时写入），
+		// fixture 也照此构造，避免测出「归档里出现两个事实」的假象。
+		ToolCalls: []*models.ToolCall{
+			{Index: 0, Name: "read"}, {Index: 1, Name: "write"}, {Index: 2, Name: "search"},
+		},
+		ThinkingSteps: []*models.ThinkingStep{{Index: 0, Content: "第一轮的思考"}},
+		Turns: []*models.TurnTrace{
+			{Index: 0, Prompt: "第一轮提问", Answer: "第一轮答复",
+				ToolCalls:     []*models.ToolCall{{Index: 0, Name: "read"}, {Index: 1, Name: "write"}},
+				ThinkingSteps: []*models.ThinkingStep{{Index: 0, Content: "第一轮的思考"}}},
+			{Index: 1, Prompt: "第二轮提问", Answer: "第二轮答复",
+				ToolCalls: []*models.ToolCall{{Index: 2, Name: "search"}}},
+		},
+	}
+	cr := &models.CaseResult{
+		CaseID: "C1", Prompt: "第一轮提问", Prompts: []string{"第一轮提问", "第二轮提问"},
+		TurnCount: 2, AbortedAtTurn: -1, SessionID: "sess_t", Trace: tr,
+	}
+	d := BuildCaseDetail(cr, map[string][]*models.Finding{}, map[string]any{})
+
+	turns, _ := d["turns"].([]map[string]any)
+	if len(turns) != 2 {
+		t.Fatalf("turns 应为 2 轮，实际 %d", len(turns))
+	}
+
+	// 第 1 轮：读、思考、写 —— 同 index 时工具排在思考前（稳定排序）
+	s0, _ := turns[0]["steps"].([]map[string]any)
+	got0 := stepNames(s0)
+	want0 := []string{"read", "(思考)", "write"}
+	if !eqStrs(got0, want0) {
+		t.Errorf("第 1 轮步骤应为 %v，实际 %v", want0, got0)
+	}
+
+	// 第 2 轮只带自己的步骤，不能把第 1 轮的调用混进来
+	s1, _ := turns[1]["steps"].([]map[string]any)
+	got1 := stepNames(s1)
+	want1 := []string{"search"}
+	if !eqStrs(got1, want1) {
+		t.Errorf("第 2 轮步骤应为 %v，实际 %v", want1, got1)
+	}
+
+	// 答复原文要带出来，前端才能按轮展示「输出内容」
+	if turns[0]["answer"] != "第一轮答复" || turns[1]["answer"] != "第二轮答复" {
+		t.Errorf("每轮应带答复原文，实际 %#v / %#v", turns[0]["answer"], turns[1]["answer"])
+	}
+	if turns[1]["answer_chars"] != len([]rune("第二轮答复")) {
+		t.Errorf("第 2 轮答复字数不对：%v", turns[1]["answer_chars"])
+	}
+
+	// 会话级 steps 仍是全部步骤（4 个），老前端与单轮展示不受影响
+	all, _ := d["steps"].([]map[string]any)
+	if len(all) != 4 {
+		t.Errorf("会话级 steps 应保留全部 4 个步骤，实际 %d", len(all))
+	}
+}
+
+func stepNames(steps []map[string]any) []string {
+	out := []string{}
+	for _, s := range steps {
+		if s["type"] == "thinking" {
+			out = append(out, "(思考)")
+			continue
+		}
+		out = append(out, nilSafeStr(s["name"]))
+	}
+	return out
+}
+
+func eqStrs(a, b []string) bool {
+	if len(a) != len(b) {
+		return false
+	}
+	for i := range a {
+		if a[i] != b[i] {
+			return false
+		}
+	}
+	return true
+}

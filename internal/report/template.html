@@ -93,13 +93,12 @@
   .case-block h3:first-of-type{margin-top:14px}
   .case-prompt{font-size:12.5px;color:var(--tx2);background:#f8fafc;border-left:3px solid var(--accent);
     padding:9px 13px;border-radius:0 8px 8px 0;margin-top:12px;word-break:break-word}
-  /* 逐轮明细（多轮用例专属） */
-  .turn-block{background:#fcfcfd;border:1px solid var(--line2);border-left:3px solid var(--line);
-    border-radius:0 9px 9px 0;padding:11px 14px;margin-bottom:9px}
-  .turn-block.turn-bad{border-left-color:var(--p0);background:#fff7f7}
-  .turn-hd{display:flex;gap:9px;align-items:center;flex-wrap:wrap}
-  .turn-hd b{font-size:13px}
-  .turn-prompt{font-size:12.5px;color:var(--tx2);margin-top:7px;word-break:break-word}
+  /* 输出内容：按轮展示模型答复原文，长文本限高可滚，不把版式撑散 */
+  .out{font-size:12.5px;color:var(--tx);background:#f8fafc;border:1px solid var(--line2);
+    border-radius:8px;padding:10px 12px;white-space:pre-wrap;word-break:break-word;
+    max-height:320px;overflow:auto;margin-top:4px}
+  .out-empty{font-size:12.5px;color:var(--tx3)}
+  /* 轮次报错（多轮用例的每一轮各有自己的模型报错） */
   .turn-err{margin-top:7px;font-size:12px;color:var(--p0)}
   .turn-err .mono{word-break:break-all}
 </style>
@@ -183,6 +182,11 @@
     <div class="mono" style="color:var(--tx3)">纯文本应答，无工具调用</div>
   {{ end }}
 
+  <h3>输出内容</h3>
+  {{ if $t.answer }}<div class="out">{{ $t.answer }}</div>
+  {{ else }}<div class="out-empty">{{ if $t.incomplete }}该轮未收到答复{{ else }}该轮无输出内容{{ end }}</div>
+  {{ end }}
+
   <h3>客观信息</h3>
   <table class="kv">
     <tr><td>本轮耗时</td><td style="text-align:right"><b>{{ $t.elapsed_s }}s</b></td></tr>
@@ -222,6 +226,12 @@
     <div class="mono" style="color:var(--tx3);margin-top:4px">{{ $c.tool_calls }} 次调用 · {{ $c.thinking_steps }} 步思考 · 答复 {{ $c.answer_chars }} 字</div>
   {{ else }}
     <div class="mono" style="color:var(--tx3)">纯文本应答，无工具调用</div>
+  {{ end }}
+
+  <!-- 输出内容（单轮 / 无逐轮轨迹时的最终答复） -->
+  <h3>输出内容</h3>
+  {{ if $c.answer }}<div class="out">{{ $c.answer }}</div>
+  {{ else }}<div class="out-empty">本轮无输出内容</div>
   {{ end }}
 
   <!-- 客观信息 -->

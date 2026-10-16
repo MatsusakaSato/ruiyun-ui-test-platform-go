@@ -2,8 +2,9 @@
    用真实 index.html 建 DOM，导入真实前端模块，只 stub 网络与弹窗。
    验证：单/多轮标签、轮次编辑区、提交体形状、队列行轮次弹窗、运行提交体。
 
-   运行：cd /Users/amano/.workbuddy/binaries/node/workspace && \
-         NODE_PATH=./node_modules node <本文件绝对路径>
+   运行：本文件必须与 node_modules 同级（ESM 不认 NODE_PATH）：
+         cp tests/turns-smoke.mjs /Users/amano/.workbuddy/binaries/node/workspace/
+         cd /Users/amano/.workbuddy/binaries/node/workspace && node turns-smoke.mjs
    （本文件放在项目内是为了受工作区写权限约束，依赖仍取工作区外的 node_modules） */
 import { readFileSync } from 'node:fs';
 import { pathToFileURL } from 'node:url';
@@ -249,6 +250,56 @@ ok('roundHasMultiTurn 能识别归档里的多轮', hist.roundHasMultiTurn() ===
 // 轮次折叠预览也要看到两轮
 const prev = hist.promptPreview({ cases: [archived] });
 ok('promptPreview 展示多轮（含 + 计数不适用但含首轮）', prev.includes('你好，我是翟嘉乐'), prev.slice(0, 120));
+
+/* ---- 归档用例详情：多轮必须按时间线逐轮展示（调用链路 + 输出内容）---- */
+// 归档只给平铺 steps 时，界面上所有轮次的步骤混在一起、输出只剩最后一轮。
+// round_detail.json 的 turns[].steps / turns[].answer 才能按轮还原。
+const stepTool = (i, name) => ({ i, type: 'tool_call', name, status: 'ok', args_summary: '{}', result: 'r', result_len: 1, raw_len: 1, issues: [] });
+
+const archivedTurns = {
+  case_id: 'C1', name: '多轮用例', status: 'PASS', session_id: 'sess_x',
+  prompts: ['你好，我是翟嘉乐', '我是谁？'], turn_count: 2,
+  elapsed_s: 12.3, tool_call_count: 2, thinking_count: 1, answer_chars: 5,
+  answer_excerpt: '你是翟嘉乐',
+  // 会话级平铺步骤（含一条不属于任何一轮的自动确认）
+  steps: [stepTool(0, 'tool_a'), stepTool(1, 'tool_b'),
+    { type: 'auto_confirm', time: '16:50:40', label: '确认授权', text: '允许' }],
+  turns: [
+    { index: 0, prompt: '你好，我是翟嘉乐', answer: '你好呀小助手答复', answer_excerpt: '你好呀小助手答复',
+      answer_chars: 8, tool_calls: 1, thinking_steps: 0, elapsed_s: 8.1, steps: [stepTool(0, 'tool_a')] },
+    { index: 1, prompt: '我是谁？', answer: '你是翟嘉乐', answer_excerpt: '你是翟嘉乐',
+      answer_chars: 5, tool_calls: 1, thinking_steps: 1, elapsed_s: 4.2, steps: [stepTool(1, 'tool_b')] }
+  ]
+};
+const multiHtml = hist.caseTimeline(archivedTurns);
+ok('多轮用例按轮分段', (multiHtml.match(/class="turn-sec"/g) || []).length === 2,
+  String((multiHtml.match(/class="turn-sec"/g) || []).length));
+ok('每轮各带自己的提问', multiHtml.includes('你好，我是翟嘉乐') && multiHtml.includes('我是谁？'));
+ok('每轮各带自己的输出内容', multiHtml.includes('你好呀小助手答复') && multiHtml.includes('你是翟嘉乐'));
+ok('输出内容按时间线排列', multiHtml.indexOf('你好呀小助手答复') < multiHtml.indexOf('你是翟嘉乐'));
+ok('不再把最后一轮答复重复到顶部', (multiHtml.match(/你是翟嘉乐/g) || []).length === 1,
+  String((multiHtml.match(/你是翟嘉乐/g) || []).length));
+
+const secs = multiHtml.split('class="turn-sec"').slice(1);
+ok('第 1 轮只渲染本轮步骤', secs[0] && secs[0].includes('tool_a') && !secs[0].includes('tool_b'));
+ok('第 2 轮只渲染本轮步骤', secs[1] && secs[1].includes('tool_b') && !secs[1].includes('tool_a'));
+ok('会话级自动确认不丢', multiHtml.includes('自动确认') && multiHtml.includes('16:50:40'));
+
+// 旧归档没有 turns[].steps：保持原来的平坦展示，不凭空造轮次
+const legacyArchive = {
+  case_id: 'C2', name: '旧归档', status: 'PASS', session_id: 'sess_y',
+  prompts: ['第一轮', '第二轮'], turn_count: 2, elapsed_s: 3,
+  tool_call_count: 1, thinking_count: 0, answer_chars: 4, answer_excerpt: '末轮答复',
+  steps: [stepTool(0, 'tool_old')],
+  turns: [
+    { index: 0, prompt: '第一轮', answer: 'a0', answer_chars: 2 },
+    { index: 1, prompt: '第二轮', answer: 'a1', answer_chars: 2 }
+  ]
+};
+const legacyHtml = hist.caseTimeline(legacyArchive);
+ok('旧归档回落平坦展示', !legacyHtml.includes('class="turn-sec"'));
+ok('旧归档仍展示平铺步骤', legacyHtml.includes('tool_old'));
+ok('旧归档仍展示末轮答复', legacyHtml.includes('末轮答复'));
 
 /* ---- 汇总 ---- */
 // startEval 会起 pollEval 的 setInterval 轮询；冒烟不验证轮询，

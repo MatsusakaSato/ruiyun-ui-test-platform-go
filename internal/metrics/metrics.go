@@ -126,7 +126,8 @@ func ReproSubBlock(r *repro.ReproRecipe) map[string]any {
 //
 // 单轮用例（Turns 为空）返回 nil，报告层按「没有逐轮数据」处理，
 // 保持与改造前完全一致的展示。多轮用例每轮一行：
-// 轮次、提问、答复字数、耗时、工具/思考数，以及该轮是否完整答复。
+// 轮次、提问、**该轮答复原文**、答复字数、耗时、工具/思考数，以及该轮是否完整答复。
+// 答复原文必须带出来：只给字数时，报告里只能看到最后一轮的输出内容。
 // 轮级 findings 只用于定位是哪一轮出问题，不参与通过性判定。
 func turnRows(c *models.CaseResult, tr *models.ExecutionTrace) []map[string]any {
 	if c == nil || tr == nil || len(tr.Turns) == 0 {
@@ -155,6 +156,7 @@ func turnRows(c *models.CaseResult, tr *models.ExecutionTrace) []map[string]any 
 		rows = append(rows, map[string]any{
 			"index":          t.Index,
 			"prompt":         t.Prompt,
+			"answer":         t.Answer,
 			"answer_chars":   utf8.RuneCountInString(t.Answer),
 			"elapsed_s":      trajectory.RoundToOneDecimal(t.ElapsedS),
 			"tools":          toolNames,
@@ -451,16 +453,19 @@ func BuildMetrics(caseResults []*models.CaseResult, cfg map[string]any, recipes 
 
 	// 用例行列表
 	var caseRows []map[string]any
-	for _, c := range caseResults {		tr := c.Trace
+	for _, c := range caseResults {
+		tr := c.Trace
 		toolNames := []string{}
 		thinkingCount := 0
 		toolCalls := 0
 		answerChars := 0
+		finalAnswer := ""
 		if tr != nil {
 			toolNames = tr.ToolNames()
 			thinkingCount = len(tr.ThinkingSteps)
 			toolCalls = len(tr.ToolCalls)
 			answerChars = utf8.RuneCountInString(tr.FinalAnswer)
+			finalAnswer = tr.FinalAnswer
 		}
 		caseRows = append(caseRows, map[string]any{
 			"case_id":         c.CaseID,
@@ -472,17 +477,18 @@ func BuildMetrics(caseResults []*models.CaseResult, cfg map[string]any, recipes 
 			"turn_findings":   c.TurnFindings,
 			"aborted_at_turn": c.AbortedAtTurn,
 			"status":          c.Status(),
-			"session_id":     c.SessionID,
-			"tool_calls":     toolCalls,
-			"thinking_steps": thinkingCount,
-			"findings":       len(c.Findings),
-			"elapsed_s":      trajectory.RoundToOneDecimal(c.ElapsedS),
-			"ui_error":       c.UIError,
-			"waited_limit":   c.WaitedLimit,
-			"wait_note":      c.WaitNote,
-			"auto_confirms":  c.AutoConfirms,
-			"tools":          toolNames,
-			"answer_chars":   answerChars,
+			"session_id":      c.SessionID,
+			"tool_calls":      toolCalls,
+			"thinking_steps":  thinkingCount,
+			"findings":        len(c.Findings),
+			"elapsed_s":       trajectory.RoundToOneDecimal(c.ElapsedS),
+			"ui_error":        c.UIError,
+			"waited_limit":    c.WaitedLimit,
+			"wait_note":       c.WaitNote,
+			"auto_confirms":   c.AutoConfirms,
+			"tools":           toolNames,
+			"answer":          finalAnswer,
+			"answer_chars":    answerChars,
 		})
 	}
 

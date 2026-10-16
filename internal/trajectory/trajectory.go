@@ -153,6 +153,105 @@ func stepStatus(tc *models.ToolCall, findingsByStep map[string][]*models.Finding
 	return "ok"
 }
 
+// buildSteps 把（工具调用 + 思考步）按全局 step index 合并成一条执行时间线。
+//
+// 用例级（整会话）与轮级（单轮）共用这一份实现：两条路径各写一遍的话，
+// 字段迟早会漂移 —— 已经发生过「归档里只有最后一轮」的同类事故。
+//
+// 合并规则必须稳定：工具先入列、思考后入列，同 index 时工具排在思考前。
+// 用 sort.SliceStable，普通 sort.Slice 会让同 index 的顺序随机漂移。
+func buildSteps(toolCalls []*models.ToolCall, thinking []*models.ThinkingStep, sessionID string, findingsByStep map[string][]*models.Finding) []map[string]any {
+	type mergedItem struct {
+		kind  string
+		idx   int
+		tc    *models.ToolCall
+		think *models.ThinkingStep
+	}
+	var merged []mergedItem
+	for _, tc := range toolCalls {
+		if tc == nil {
+			continue
+		}
+		merged = append(merged, mergedItem{kind: "tool", idx: tc.Index, tc: tc})
+	}
+	for _, th := range thinking {
+		if th == nil {
+			continue
+		}
+		merged = append(merged, mergedItem{kind: "think", idx: th.Index, think: th})
+	}
+	sort.SliceStable(merged, func(i, j int) bool {
+		return merged[i].idx < merged[j].idx
+	})
+
+	steps := []map[string]any{}
+	thinkingNo := 0
+	for _, m := range merged {
+		if m.kind == "think" {
+			thinkingNo++
+			c := m.think.Content
+			steps = append(steps, map[string]any{
+				"i":       m.idx,
+				"type":    "thinking",
+				"n":       thinkingNo,
+				"content": c,
+				"chars":   utf8.RuneCountInString(c),
+			})
+			continue
+		}
+		tc := m.tc
+		st := stepStatus(tc, findingsByStep, sessionID)
+		raw := ""
+		if tc.RawResult != nil {
+			raw = *tc.RawResult
+		}
+		rLen := utf8.RuneCountInString(tc.Body)
+		if rLen == 0 {
+			rLen = utf8.RuneCountInString(raw)
+		}
+		stepKey := fmt.Sprintf("%s:%d", sessionID, tc.Index)
+		var issueRules []string
+		for _, f := range findingsByStep[stepKey] {
+			issueRules = append(issueRules, f.Rule)
+		}
+		sort.Strings(issueRules)
+
+		var sFiles []string
+		if tc.Name == "read_skill_file" {
+			sFiles = SkillFiles(tc)
+		}
+
+		steps = append(steps, map[string]any{
+			"i":            tc.Index,
+			"type":         "tool_call",
+			"name":         tc.Name,
+			"status":       st,
+			"args_summary": argSummary(tc.Arguments, 160),
+			"result":       raw,
+			"result_len":   rLen,
+			"raw_len":      utf8.RuneCountInString(raw),
+			"body_from":    tc.BodyFrom,
+			"result_empty": strings.TrimSpace(raw) == "",
+			"skill_name":   SkillName(tc),
+			"skill_files":  nonNilSlices(sFiles),
+			"issues":       nonNilSlices(issueRules),
+		})
+	}
+	return steps
+}
+
+// excerpt 截断长文本用于归档展示（前端只读，不看全量正文）。
+func excerpt(s string, limit int) string {
+	if limit <= 0 {
+		return s
+	}
+	runes := []rune(s)
+	if len(runes) <= limit {
+		return s
+	}
+	return string(runes[:limit]) + "…"
+}
+
 func SkillName(tc *models.ToolCall) string {
 	if tc.Name != "read_skill_file" {
 		return ""
@@ -665,89 +764,16 @@ func BuildCaseDetail(caseResult *models.CaseResult, findingsByStep map[string][]
 			"artifact_kinds":    []string{},
 			"artifacts_version": artifacts.ExtractVersion,
 			// 多轮信息即使没有 trace 也要如实带出，否则归档里只剩第 1 轮
-			"prompts":        nonNilStrings(caseResult.Prompts),
-			"turn_count":     caseResult.TurnCount,
+			"prompts":         nonNilStrings(caseResult.Prompts),
+			"turn_count":      caseResult.TurnCount,
 			"aborted_at_turn": caseResult.AbortedAtTurn,
-			"turns":          []map[string]any{},
+			"turns":           []map[string]any{},
 		}
 	}
 
 	objective := BuildObjective(caseResult, nil)
 
-	type mergedItem struct {
-		kind  string
-		idx   int
-		tc    *models.ToolCall
-		think *models.ThinkingStep
-	}
-	var merged []mergedItem
-	for _, tc := range trace.ToolCalls {
-		merged = append(merged, mergedItem{kind: "tool", idx: tc.Index, tc: tc})
-	}
-	for _, th := range trace.ThinkingSteps {
-		merged = append(merged, mergedItem{kind: "think", idx: th.Index, think: th})
-	}
-	// 必须稳定排序：先按「tool 全部入列、再把 thinking 入列」的顺序入队，
-	// 所以**下标相同时 tool 排在 thinking 前面**。
-	// 用 sort.Slice 会让同下标的顺序随机化，整个时间线随之漂移。
-	sort.SliceStable(merged, func(i, j int) bool {
-		return merged[i].idx < merged[j].idx
-	})
-
-	steps := []map[string]any{}
-	thinkingNo := 0
-	for _, m := range merged {
-		if m.kind == "think" {
-			thinkingNo++
-			c := m.think.Content
-			steps = append(steps, map[string]any{
-				"i":       m.idx,
-				"type":    "thinking",
-				"n":       thinkingNo,
-				"content": c,
-				"chars":   utf8.RuneCountInString(c),
-			})
-		} else {
-			tc := m.tc
-			st := stepStatus(tc, findingsByStep, trace.SessionID)
-			raw := ""
-			if tc.RawResult != nil {
-				raw = *tc.RawResult
-			}
-			rLen := utf8.RuneCountInString(tc.Body)
-			if rLen == 0 {
-				rLen = utf8.RuneCountInString(raw)
-			}
-			stepKey := fmt.Sprintf("%s:%d", trace.SessionID, tc.Index)
-			var issueRules []string
-			for _, f := range findingsByStep[stepKey] {
-				issueRules = append(issueRules, f.Rule)
-			}
-			sort.Strings(issueRules)
-
-			var sFiles []string
-			if tc.Name == "read_skill_file" {
-				sFiles = SkillFiles(tc)
-			}
-
-			steps = append(steps, map[string]any{
-				"i":            tc.Index,
-				"type":         "tool_call",
-				"name":         tc.Name,
-				"status":       st,
-				"args_summary": argSummary(tc.Arguments, 160),
-				"result":       raw,
-				"result_len":   rLen,
-				"raw_len":      utf8.RuneCountInString(raw),
-				"body_from":    tc.BodyFrom,
-				"result_empty": strings.TrimSpace(raw) == "",
-				"skill_name":   SkillName(tc),
-				"skill_files":  nonNilSlices(sFiles),
-				"issues":       nonNilSlices(issueRules),
-			})
-		}
-	}
-
+	steps := buildSteps(trace.ToolCalls, trace.ThinkingSteps, trace.SessionID, findingsByStep)
 	steps = mergeConfirmEvents(steps, trace, caseResult.ConfirmEvents)
 
 	// 工具统计
@@ -845,11 +871,7 @@ func BuildCaseDetail(caseResult *models.CaseResult, findingsByStep map[string][]
 
 	findingsDTO := findingsToRows(caseResult.Findings)
 
-	ansExcerpt := trace.FinalAnswer
-	if utf8.RuneCountInString(ansExcerpt) > 600 {
-		runes := []rune(ansExcerpt)
-		ansExcerpt = string(runes[:600]) + "…"
-	}
+	ansExcerpt := excerpt(trace.FinalAnswer, 600)
 
 	return map[string]any{
 		"case_id":           caseResult.CaseID,
@@ -887,12 +909,16 @@ func BuildCaseDetail(caseResult *models.CaseResult, findingsByStep map[string][]
 		"prompts":         nonNilStrings(caseResult.Prompts),
 		"turn_count":      caseResult.TurnCount,
 		"aborted_at_turn": caseResult.AbortedAtTurn,
-		"turns":           turnDetailRows(caseResult),
+		"turns":           turnDetailRows(caseResult, findingsByStep),
 	}
 }
 
 // turnDetailRows 把每一轮整理成归档用的行；没有多轮信息时返回空切片。
-func turnDetailRows(c *models.CaseResult) []map[string]any {
+//
+// 每一轮自带 steps（该轮的思考步 + 工具调用，按时间线合并）与 answer_excerpt。
+// 只给平铺的会话级 steps 时，前端拿不到轮次归属，多轮用例会退化成
+// 「所有步骤混在一起、只显示最后一轮答复」—— 这就是用户报的问题。
+func turnDetailRows(c *models.CaseResult, findingsByStep map[string][]*models.Finding) []map[string]any {
 	out := []map[string]any{}
 	if c == nil || c.Trace == nil {
 		return out
@@ -905,9 +931,11 @@ func turnDetailRows(c *models.CaseResult) []map[string]any {
 			"index":          tn.Index,
 			"prompt":         tn.Prompt,
 			"answer":         tn.Answer,
+			"answer_excerpt": excerpt(tn.Answer, 600),
 			"answer_chars":   utf8.RuneCountInString(tn.Answer),
 			"tool_calls":     len(tn.ToolCalls),
 			"thinking_steps": len(tn.ThinkingSteps),
+			"steps":          buildSteps(tn.ToolCalls, tn.ThinkingSteps, c.Trace.SessionID, findingsByStep),
 			"elapsed_s":      RoundToOneDecimal(tn.ElapsedS),
 			"incomplete":     tn.Incomplete,
 			"incomplete_why": tn.IncompleteWhy,

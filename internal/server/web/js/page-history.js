@@ -387,37 +387,11 @@ export function confirmAction(st) {
   return CONFIRM_ACTION[st.mode] || st.label || '自动确认';
 }
 
-export function caseTimeline(c) {
-  let h = `<div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap">
-    <span style="font-weight:700">${esc(c.name)}</span>
-    <span class="mono">${esc(c.case_id)}</span>
-    <span class="badge ${c.status === 'PASS' ? 'b-ok' : c.status === 'FAIL' ? 'b-fail' : 'b-uifail'}">${c.status === 'PASS' ? '通过' : c.status === 'FAIL' ? '断言失败' : 'UI 失败'}</span>
-  </div>
-  <div class="case-meta">
-    <span>会话 ${sessionLink(c)}</span>
-    <span>耗时 ${c.elapsed_s}s</span>
-    <span>工具调用 <b>${c.tool_call_count ?? 0}</b></span>
-    <span>思考步 <b>${c.thinking_count ?? 0}</b></span>
-    <span>答复 ${c.answer_chars ?? 0} 字</span>
-  </div>
-  ${promptBlock(c)}`;
-
-  if ((c.attachments || []).length) {
-    h += `<div style="font-size:12px;color:var(--tx2);margin-bottom:8px"><b>附件：</b>`
-      + c.attachments.map(a => `<span class="badge" style="background:#eff6ff;color:#1d4ed8" title="${esc(a)}">`
-        + `${esc(String(a).split('/').pop())}</span>`).join(' ')
-      + (c.attach_note ? `<span style="color:var(--tx3);margin-left:6px">${esc(c.attach_note)}</span>` : '') + '</div>';
-  }
-  if (c.ui_error) h += `<div style="color:var(--p0);font-size:12.5px;margin-bottom:10px">UI 异常：${esc(c.ui_error)}</div>`;
-  if (c.waited_limit) h += `<div style="color:var(--tx2);font-size:12.5px;margin-bottom:10px">· ${esc(c.wait_note || '已达等待上限')}</div>`;
-  if (c.answer_excerpt) h += `<div class="answer">${esc(c.answer_excerpt)}</div>`;
-  if (c.skills && c.skills.length) {
-    h += `<div style="font-size:12px;color:var(--tx2);margin-bottom:12px">调用 Skill：
-      ${c.skills.map(s => `<span class="badge" style="background:#ede9fe;color:#6d28d9">${esc(s.name)}</span>`).join(' ')}</div>`;
-  }
-
-  h += '<div class="tl">';
-  for (const st of (c.steps || [])) {
+// stepsHtml 把一条时间线的步骤渲染出来。用例级（平坦）与轮级共用，
+// 保证两种模式下的步骤长得完全一样。
+function stepsHtml(steps) {
+  let h = '';
+  for (const st of (steps || [])) {
     if (st.type === 'thinking') {
       const ctn = st.content || '';
       const head = ctn.replace(/\s+/g, ' ').slice(0, 60);
@@ -467,6 +441,90 @@ export function caseTimeline(c) {
       </div>`;
     }
   }
+  return h;
+}
+
+// turnSections 逐轮渲染：第 N 轮 → 提问 → 步骤 → 输出内容。
+//
+// 归档里每轮自带 steps 与 answer（round_detail.json 的 turns[]），
+// 只有按轮渲染才能既看到每一轮的调用链路、又看到每一轮的输出内容；
+// 平铺渲染会把所有轮次的步骤混成一堆、输出只剩最后一轮。
+function turnSections(c) {
+  let h = '';
+  const turns = c.turns || [];
+  for (let k = 0; k < turns.length; k++) {
+    const t = turns[k] || {};
+    const errs = (t.system_errors || []).filter(x => String(x).trim() !== '');
+    const out = String(t.answer_excerpt || t.answer || '');
+    h += `<div class="turn-sec">
+      <div class="turn-sec-hd">
+        <span class="turn-no">第 ${k + 1} 轮</span>
+        ${t.incomplete ? '<span class="badge b-fail">未答复</span>' : ''}
+        <span class="mono">${t.elapsed_s ?? '—'}s · 工具 ${t.tool_calls ?? 0} · 思考 ${t.thinking_steps ?? 0} · 答复 ${t.answer_chars ?? 0} 字</span>
+      </div>
+      <div class="prompt-block"><b>提问：</b>${esc(t.prompt || '')}</div>
+      ${t.waited_limit ? `<div style="color:var(--tx2);font-size:12.5px;margin-bottom:8px">· ${esc(t.wait_note || '已达等待上限')}</div>` : ''}
+      ${errs.length ? `<div class="turn-err">模型报错：${errs.map(e => `<span class="mono">${esc(e)}</span>`).join('')}</div>` : ''}
+      ${t.incomplete && t.incomplete_why ? `<div class="mono" style="color:var(--p0);font-size:12px;margin-bottom:8px">${esc(t.incomplete_why)}</div>` : ''}
+      <div class="tl">${(t.steps || []).length ? stepsHtml(t.steps)
+        : '<div class="empty" style="padding:10px 0">本轮无工具调用与思考步骤</div>'}</div>
+      <div class="turn-out"><b>输出内容</b>
+        <div class="answer">${out ? esc(out) : '（该轮无输出内容）'}</div>
+      </div>
+    </div>`;
+  }
+  return h;
+}
+
+export function caseTimeline(c) {
+  // 逐轮渲染要求归档里每轮都带 steps（round_detail.json 的 turns[].steps）。
+  // 旧归档没有这个字段 —— 那就保持原来的平坦展示，不能凭空造轮次。
+  const turns = Array.isArray(c.turns) ? c.turns : [];
+  const perTurn = caseTurnCount(c) > 1 && turns.length > 1 && turns.some(t => t && Array.isArray(t.steps));
+
+  let h = `<div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap">
+    <span style="font-weight:700">${esc(c.name)}</span>
+    <span class="mono">${esc(c.case_id)}</span>
+    <span class="badge ${c.status === 'PASS' ? 'b-ok' : c.status === 'FAIL' ? 'b-fail' : 'b-uifail'}">${c.status === 'PASS' ? '通过' : c.status === 'FAIL' ? '断言失败' : 'UI 失败'}</span>
+  </div>
+  <div class="case-meta">
+    <span>会话 ${sessionLink(c)}</span>
+    <span>耗时 ${c.elapsed_s}s</span>
+    <span>工具调用${perTurn ? '（合计）' : ''} <b>${c.tool_call_count ?? 0}</b></span>
+    <span>思考步${perTurn ? '（合计）' : ''} <b>${c.thinking_count ?? 0}</b></span>
+    ${perTurn ? '' : `<span>答复 ${c.answer_chars ?? 0} 字</span>`}
+  </div>
+  ${perTurn ? '' : promptBlock(c)}`;
+
+  if ((c.attachments || []).length) {
+    h += `<div style="font-size:12px;color:var(--tx2);margin-bottom:8px"><b>附件：</b>`
+      + c.attachments.map(a => `<span class="badge" style="background:#eff6ff;color:#1d4ed8" title="${esc(a)}">`
+        + `${esc(String(a).split('/').pop())}</span>`).join(' ')
+      + (c.attach_note ? `<span style="color:var(--tx3);margin-left:6px">${esc(c.attach_note)}</span>` : '') + '</div>';
+  }
+  if (c.ui_error) h += `<div style="color:var(--p0);font-size:12.5px;margin-bottom:10px">UI 异常：${esc(c.ui_error)}</div>`;
+  if (!perTurn && c.waited_limit) h += `<div style="color:var(--tx2);font-size:12.5px;margin-bottom:10px">· ${esc(c.wait_note || '已达等待上限')}</div>`;
+  if (!perTurn && c.answer_excerpt) h += `<div class="answer">${esc(c.answer_excerpt)}</div>`;
+  if (c.skills && c.skills.length) {
+    h += `<div style="font-size:12px;color:var(--tx2);margin-bottom:12px">调用 Skill：
+      ${c.skills.map(s => `<span class="badge" style="background:#ede9fe;color:#6d28d9">${esc(s.name)}</span>`).join(' ')}</div>`;
+  }
+
+  if (perTurn) {
+    h += turnSections(c);
+    // 会话级步骤里只剩「自动确认」这类不属于任何一轮的条目，
+    // 以及用例级产物 —— 按轮渲染后必须补回来，不能丢。
+    const rest = stepsHtml((c.steps || []).filter(s => s && s.type === 'auto_confirm'));
+    let arts = '';
+    for (const a of (c.artifacts || [])) arts += artifactStep(a);
+    if (rest || arts) {
+      h += `<div class="tl">${rest ? `<div class="tl-sec">自动确认</div>${rest}` : ''}${arts}</div>`;
+    }
+    return h;
+  }
+
+  h += '<div class="tl">';
+  h += stepsHtml(c.steps || []);
   for (const a of (c.artifacts || [])) h += artifactStep(a);
   return h + '</div>';
 }

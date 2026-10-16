@@ -94,6 +94,11 @@
   .case-prompt{font-size:12.5px;color:var(--tx2);background:#f8fafc;border-left:3px solid var(--accent);
     padding:9px 13px;border-radius:0 8px 8px 0;margin-top:12px;word-break:break-word}
    
+  .out{font-size:12.5px;color:var(--tx);background:#f8fafc;border:1px solid var(--line2);
+    border-radius:8px;padding:10px 12px;white-space:pre-wrap;word-break:break-word;
+    max-height:320px;overflow:auto;margin-top:4px}
+  .out-empty{font-size:12.5px;color:var(--tx3)}
+   
   .turn-block{background:#fcfcfd;border:1px solid var(--line2);border-left:3px solid var(--line);
     border-radius:0 9px 9px 0;padding:11px 14px;margin-bottom:9px}
   .turn-block.turn-bad{border-left-color:var(--p0);background:#fff7f7}
@@ -114,8 +119,8 @@
     <span><b>应用版本</b> 2.0.17</span>
     <span><b>Bundle</b> com.yanxiu.srtclaw</span>
     <span><b>运行模式</b> UI 自动化</span>
-    <span><b>生成时间</b> 2026-10-16 16:42:38</span>
-    <span><b>总耗时</b> 29.7s</span>
+    <span><b>生成时间</b> 2026-10-16 17:05:20</span>
+    <span><b>总耗时</b> 30.1s</span>
   </div>
 </header>
 
@@ -150,6 +155,7 @@
 
 
 
+
 <div class="case-block">
   <div class="case-hd">
     <span class="badge b-pass">
@@ -157,120 +163,118 @@
     </span>
     <b>用例 1</b>
     <span class="mono">CASE-001</span>
-    <span class="mono" style="color:var(--tx3)">sess_1a143e039f1_aaad82</span>
+    <span class="mono" style="color:var(--tx3)">sess_1a143f4fed0_671166</span>
   </div>
 
   <div class="case-prompt"><b>提示词：</b>你好，我是翟嘉乐</div>
   
   
+  
 
   
+
+  <h3>调用链路（执行顺序）</h3>
+  
+    <div class="mono" style="color:var(--tx3)">纯文本应答，无工具调用</div>
+  
+
+  <h3>输出内容</h3>
+  <div class="out">你好呀，翟嘉乐！👋 很高兴认识你～
+
+我是睿云智能工作台（SRTClaw），可以帮你做很多教学相关的事情，比如：
+
+- 📚 **备课设计**：教学设计、教案、课件、问题链设计
+- 📝 **作业与试题**：出题、批改、试题质检
+- 📊 **学情分析**：成绩分析、可视化报告
+- 🎨 **幼儿园场景**：活动设计、环创指导、家园沟通
+- 🎬 **多媒体制作**：教学视频、互动网页、文生音乐
+
+今天想做点什么？直接告诉我就好～</div>
+  
+
+  <h3>客观信息</h3>
+  <table class="kv">
+    <tr><td>本轮耗时</td><td style="text-align:right"><b>6.7s</b></td></tr>
+    <tr><td>答复字数</td><td style="text-align:right"><b>212</b></td></tr>
+  </table>
+
+  <h3>问题发现</h3>
+  
+    <div class="finding">
+      <div class="f-hd"><b>ORPHAN_TOOL_CALL</b></div>
+      <div class="f-detail"><b>具体表现：</b>associatedToolCallIds 与 timelineSteps 的调用 ID 不匹配（声明 1 / 实际 0）</div>
+      <details class="evi-wrap"><summary>查看证据</summary><div class="evi">call_df2186ffc2c641ebbbc88616</div></details>
+    </div>
+  
+    <div class="finding">
+      <div class="f-hd"><b>OUTPUT_TRUNCATED</b></div>
+      <div class="f-detail"><b>具体表现：</b>最终答案疑似被强制截断（命中信号：缺完成标记；共 212 字）。【缺完成标记】消息无 completedAt 字段，说明生成未走完正常结束流程</div>
+      <details class="evi-wrap"><summary>查看证据</summary><div class="evi">兴认识你～
+
+我是睿云智能工作台（SRTClaw），可以帮你做很多教学相关的事情，比如：
+
+- 📚 **备课设计**：教学设计、教案、课件、问题链设计
+- 📝 **作业与试题**：出题、批改、试题质检
+- 📊 **学情分析**：成绩分析、可视化报告
+- 🎨 **幼儿园场景**：活动设计、环创指导、家园沟通
+- 🎬 **多媒体制作**：教学视频、互动网页、文生音乐
+
+今天想做点什么？直接告诉我就好～</div></details>
+    </div>
+  
+</div>
+
+<div class="case-block">
+  <div class="case-hd">
+    <span class="badge b-pass">
+      通过
+    </span>
+    <b>用例 1</b>
+    <span class="mono">CASE-001</span>
+    <span class="mono" style="color:var(--tx3)">sess_1a143f4fed0_671166</span>
+  </div>
+
+  <div class="case-prompt"><b>提示词：</b>我是谁？</div>
+  
+  
+  
+
+  
+
   <h3>调用链路（执行顺序）</h3>
   
     <div class="chain"><span class="ct">mcp_claw_manage_service_get_personal_user_info</span></div>
-    <div class="mono" style="color:var(--tx3);margin-top:4px">1 次调用 · 2 步思考 · 答复 140 字</div>
+    <div class="mono" style="color:var(--tx3);margin-top:4px">1 次调用 · 2 步思考 · 答复 148 字</div>
   
 
+  <h3>输出内容</h3>
+  <div class="out">你是**翟嘉乐**呀～刚才你亲口告诉我的 😄
+
+我顺便查了一下你的账号信息，目前系统里只登记了一个手机号（188\*\*\*\*7423），姓名、学校、学段学科这些资料还是空的。
+
+如果你愿意补充一下（比如教哪个学段、哪个学科、哪所学校），我以后帮你备课、出题、做分析时就能更贴合你的实际需求啦～</div>
   
+
   <h3>客观信息</h3>
-  <div class="tbl-wrap">
-  <table>
-    <tr><td>平台实测耗时</td><td style="text-align:right"><b>29.7s</b></td></tr>
-    <tr><td>首响延迟（提问 → 模型响应）</td><td style="text-align:right"><b>—</b></td></tr>
-    <tr><td>生成时长</td><td style="text-align:right"><b>—</b></td></tr>
-    <tr><td>会话时长</td><td style="text-align:right"><b>—</b></td></tr>
-    <tr><td>对话轮次 / 工具调用 / 思考步</td><td style="text-align:right"><b>0 / 0 / 0</b></td></tr>
-    <tr><td>调用成功 / 失败 / 截断</td><td style="text-align:right"><b>0 / 0 / 0</b></td></tr>
-    <tr><td>调用链路一致性</td>
-        <td style="text-align:right"><span class="badge b-pass">
-          一致</span></td></tr>
-    <tr><td>会话收尾</td>
-        <td style="text-align:right"><span class="badge b-fail">
-          —</span></td></tr>
-    <tr><td>token 估算（入 / 出 / 合计）</td><td style="text-align:right"><b>0 / 0 / <span class="v-acc">0</span></b></td></tr>
+  <table class="kv">
+    <tr><td>本轮耗时</td><td style="text-align:right"><b>10.6s</b></td></tr>
+    <tr><td>答复字数</td><td style="text-align:right"><b>148</b></td></tr>
   </table>
-  </div>
 
-  
   <h3>问题发现</h3>
   
-    <div class="none-banner" style="padding:22px 18px">
-      <div class="big" style="font-size:17px">✓ 该用例未发现问题</div>
-      <div class="sm">已按全部断言规则检查该用例的调用链路，未命中任何规则。</div>
+    <div class="finding">
+      <div class="f-hd"><b>OUTPUT_TRUNCATED</b></div>
+      <div class="f-detail"><b>具体表现：</b>最终答案疑似被强制截断（命中信号：缺完成标记；共 148 字）。【缺完成标记】消息无 completedAt 字段，说明生成未走完正常结束流程</div>
+      <details class="evi-wrap"><summary>查看证据</summary><div class="evi">你是**翟嘉乐**呀～刚才你亲口告诉我的 😄
+
+我顺便查了一下你的账号信息，目前系统里只登记了一个手机号（188\*\*\*\*7423），姓名、学校、学段学科这些资料还是空的。
+
+如果你愿意补充一下（比如教哪个学段、哪个学科、哪所学校），我以后帮你备课、出题、做分析时就能更贴合你的实际需求啦～</div></details>
     </div>
-  
-
-  
-  
-  
-  <h3>逐轮明细（共 2 轮）</h3>
-  
-  
-  
-  <div class="turn-block">
-    <div class="turn-hd">
-      <b>第 1 轮</b>
-      
-      
-      <span class="mono" style="color:var(--tx3)">9.1s · 答复 218 字 · 工具 0 · 思考 0</span>
-    </div>
-    <div class="turn-prompt"><b>提问：</b>你好，我是翟嘉乐</div>
-    
-    
-    
-      
-      <div class="finding" style="margin-top:8px">
-        <div class="f-hd"><b>ORPHAN_TOOL_CALL</b></div>
-        <div class="f-detail"><b>具体表现：</b>associatedToolCallIds 与 timelineSteps 的调用 ID 不匹配（声明 1 / 实际 0）</div>
-        <div class="evi">call_96c85af5aaeb4c5c849097ca</div>
-      </div>
-      
-      <div class="finding" style="margin-top:8px">
-        <div class="f-hd"><b>OUTPUT_TRUNCATED</b></div>
-        <div class="f-detail"><b>具体表现：</b>最终答案疑似被强制截断（命中信号：缺完成标记；共 218 字）。【缺完成标记】消息无 completedAt 字段，说明生成未走完正常结束流程</div>
-        <div class="evi">
-我是睿云智能工作台（SRTClaw），可以帮你做很多教学相关的事情，比如：
-
-- 📚 **备课设计**：教学设计、教案、问题链、任务链设计
-- 📝 **作业出题**：课后作业、练习题、试题质检
-- 🎨 **课件制作**：交互式课件、教学视频、微课
-- 📊 **学情分析**：成绩分析、班级管理、评语生成
-- 🏫 **幼儿园专题**：活动设计、环创指导、家园沟通
-
-今天想做点什么？直接告诉我就好 😊</div>
-      </div>
-      
-    
-  </div>
-  
-  
-  <div class="turn-block">
-    <div class="turn-hd">
-      <b>第 2 轮</b>
-      
-      
-      <span class="mono" style="color:var(--tx3)">8s · 答复 140 字 · 工具 1 · 思考 2</span>
-    </div>
-    <div class="turn-prompt"><b>提问：</b>我是谁？</div>
-    
-    
-    
-      
-      <div class="finding" style="margin-top:8px">
-        <div class="f-hd"><b>OUTPUT_TRUNCATED</b></div>
-        <div class="f-detail"><b>具体表现：</b>最终答案疑似被强制截断（命中信号：缺完成标记；共 140 字）。【缺完成标记】消息无 completedAt 字段，说明生成未走完正常结束流程</div>
-        <div class="evi">你是**翟嘉乐**呀～刚才你自己告诉我的 😄
-
-我顺便看了一下你的账号信息，目前系统里只登记了你的手机号（188****7423），姓名、学校、学段学科这些资料还没有完善哦。
-
-如果你愿意告诉我你教的**学段和学科**，我以后帮你备课、出题、做课件时就能更贴合你的实际需求啦～ 📚</div>
-      </div>
-      
-    
-  </div>
-  
   
 </div>
+
 
 
 

@@ -889,7 +889,11 @@ func RunPipeline(opts PipelineOptions) (int, error) {
 	reportPath := filepath.Join(reportDir, reportName)
 
 	_, err = report.RenderReport(builtMetrics, reportPath, appVersion, bundleID, runMode, totalElapsed)
-	if err != nil {
+	// reportOK 必须留给归档层判断：渲染失败时 reportPath 上仍是**上一次**的报告文件，
+	// 直接拷贝会把上一轮的结论当成这一轮的结果发出去（真实事故：归档报告只显示
+	// 最后一轮，实际读到的是一份几十分钟前的旧档案）。
+	reportOK := err == nil
+	if !reportOK {
 		logFn(fmt.Sprintf("  警告：报告渲染出错: %v", err))
 	}
 	tStage3 := float64(time.Now().UnixNano())/1e9 - tStage3Start
@@ -952,9 +956,8 @@ func RunPipeline(opts PipelineOptions) (int, error) {
 		bSummary, _ := json.MarshalIndent(roundSummary, "", "  ")
 		_ = os.WriteFile(filepath.Join(roundDir, "round_summary.json"), bSummary, 0644)
 
-		if reportBytes, err := os.ReadFile(reportPath); err == nil {
-			_ = os.WriteFile(filepath.Join(roundDir, "report.html"), reportBytes, 0644)
-		}
+		// 报告归档：只写**本轮真的渲染出来**的那一份。
+		archiveReport(reportOK, reportPath, roundDir, logFn)
 		logFn(fmt.Sprintf("\n  本轮数据已归档：%s", roundDir))
 	}
 
@@ -1011,4 +1014,28 @@ func orFallback(s, fb string) string {
 		return fb
 	}
 	return s
+}
+
+// archiveReport 把本轮的 HTML 报告写进轮次归档目录。
+//
+// reportOK=false 表示本轮渲染失败 —— 此时 reportPath 上留着的是**上一次**
+// 的报告文件，直接拷贝会把旧一轮的结论伪装成本轮结果，读报告的人会以为
+// 「多轮用例只剩最后一轮」（真实事故）。宁可归档里没有报告（前端 404），
+// 也不要一份张冠李戴的旧报告。
+func archiveReport(reportOK bool, reportPath, roundDir string, logFn func(string)) {
+	dst := filepath.Join(roundDir, "report.html")
+	if !reportOK {
+		// 同一 run_id 重跑时可能残留旧文件，先清掉
+		_ = os.Remove(dst)
+		logFn("  警告：本轮报告渲染失败，归档目录不写入 report.html（避免发出上一轮的旧报告）")
+		return
+	}
+	b, err := os.ReadFile(reportPath)
+	if err != nil {
+		logFn(fmt.Sprintf("  警告：读不到本轮报告文件，归档跳过 report.html：%v", err))
+		return
+	}
+	if err := os.WriteFile(dst, b, 0644); err != nil {
+		logFn(fmt.Sprintf("  警告：报告写入归档目录失败：%v", err))
+	}
 }

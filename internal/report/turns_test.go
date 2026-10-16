@@ -110,6 +110,83 @@ func TestReportSingleTurnUnchanged(t *testing.T) {
 	}
 }
 
+// TestReportMultiTurnShowsEveryTurnOutput 报告必须按时间线把每一轮的
+// 调用链路与**输出内容**都展示出来：只展示最后一轮的链路和输出，
+// 读报告的人会以为前面的轮次没执行（用户报告的问题）。
+func TestReportMultiTurnShowsEveryTurnOutput(t *testing.T) {
+	tr := &models.ExecutionTrace{
+		FinalAnswer: "第二轮答复",
+		Turns: []*models.TurnTrace{
+			{Index: 0, Prompt: "第一轮提问", Answer: "第一轮答复", ElapsedS: 3.0,
+				ToolCalls: []*models.ToolCall{{Index: 0, Name: "read_memory"}}},
+			{Index: 1, Prompt: "第二轮提问", Answer: "第二轮答复", ElapsedS: 5.0,
+				ToolCalls: []*models.ToolCall{{Index: 1, Name: "write_memory"}}},
+		},
+	}
+	cr := &models.CaseResult{
+		CaseID: "CASE-001", Name: "多轮用例",
+		Prompt: "第一轮提问", Prompts: []string{"第一轮提问", "第二轮提问"},
+		TurnCount: 2, SessionID: "sess_out", Trace: tr, AbortedAtTurn: -1,
+	}
+	html := renderWith(t, []*models.CaseResult{cr})
+
+	parts := strings.Split(html, `<div class="case-block">`)
+	if len(parts) != 3 {
+		t.Fatalf("2 轮应渲染 2 个用例块，实际 %d", len(parts)-1)
+	}
+	first, second := parts[1], parts[2]
+
+	// 每块各带自己的调用链路，不能两块都写最后一轮的
+	if !strings.Contains(first, "read_memory") || strings.Contains(first, "write_memory") {
+		t.Errorf("第 1 轮应只展示本轮调用链路 read_memory")
+	}
+	if !strings.Contains(second, "write_memory") || strings.Contains(second, "read_memory") {
+		t.Errorf("第 2 轮应只展示本轮调用链路 write_memory")
+	}
+
+	// 每块各带自己的输出内容
+	if !strings.Contains(first, "第一轮答复") {
+		t.Error("第 1 轮块里应有第 1 轮的输出内容")
+	}
+	if !strings.Contains(second, "第二轮答复") {
+		t.Error("第 2 轮块里应有第 2 轮的输出内容")
+	}
+	// 时间线顺序：第 1 轮的输出在前
+	if strings.Index(html, "第一轮答复") > strings.Index(html, "第二轮答复") {
+		t.Error("两轮输出内容应按时间线顺序排列")
+	}
+	// 每轮一个「输出内容」小节
+	if n := strings.Count(html, "输出内容"); n != 2 {
+		t.Errorf("2 轮应有 2 个「输出内容」小节，实际 %d", n)
+	}
+}
+
+// TestReportTurnWithoutAnswerSaysSo 轮次没答复时要写清楚，不能留空白
+func TestReportTurnWithoutAnswerSaysSo(t *testing.T) {
+	html := renderWith(t, []*models.CaseResult{multiTurnCase()})
+	if !strings.Contains(html, "该轮未收到答复") {
+		t.Error("未完成轮应显式说明「该轮未收到答复」")
+	}
+}
+
+// TestReportSingleTurnShowsOutput 单轮用例同样要展示输出内容（与多轮同形）
+func TestReportSingleTurnShowsOutput(t *testing.T) {
+	cr := &models.CaseResult{
+		CaseID: "CASE-002", Name: "单轮用例",
+		Prompt: "单轮提问", Prompts: []string{"单轮提问"}, TurnCount: 1,
+		SessionID: "sess_y", AbortedAtTurn: -1,
+		Trace: &models.ExecutionTrace{FinalAnswer: "单轮答复正文",
+			Turns: []*models.TurnTrace{{Index: 0, Prompt: "单轮提问", Answer: "单轮答复正文"}}},
+	}
+	html := renderWith(t, []*models.CaseResult{cr})
+	if !strings.Contains(html, "单轮答复正文") {
+		t.Error("单轮用例报告应展示输出内容")
+	}
+	if n := strings.Count(html, "输出内容"); n != 1 {
+		t.Errorf("单轮应只有 1 个「输出内容」小节，实际 %d", n)
+	}
+}
+
 // TestReportMultiTurnNoTurnsFallsBack 标了多轮但轨迹缺失时不炸，退回用例级展示
 func TestReportMultiTurnNoTurnsFallsBack(t *testing.T) {
 	cr := &models.CaseResult{
