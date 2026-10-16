@@ -974,28 +974,84 @@ func (d *RuiyunUIDriver) waitInputCleared(timeoutS float64) bool {
 	return false
 }
 
-// Send 发送
+// sendOutcome 判定一次发送尝试的结果。
+//
+// 判据只有一条：**输入框是否被清空**。应用收下内容后必然清空输入框，
+// 所以「还留着原文」就等于发送没生效。
+// 抽成纯函数是为了能直接单测这条判据 —— Send 本身依赖 CDP，无法离线跑。
+//
+// 返回 (是否成功, 是否需要继续尝试下一种发送方式)。
+func sendOutcome(landedBefore string, clearedAfter bool) (ok bool, keepTrying bool) {
+	if strings.TrimSpace(landedBefore) == "" {
+		// 本来就是空的：没有「已清空」这个信号可用，按成功处理（沿用既有行为）
+		return true, false
+	}
+	if clearedAfter {
+		return true, false
+	}
+	return false, true
+}
+
+// sendFailureError 组装发送失败的报错文案（输入框残留内容 + 按钮状态）
+func sendFailureError(left, desc, snapshotPath string) error {
+	head := left
+	if len([]rune(head)) > 40 {
+		head = string([]rune(head)[:40])
+	}
+	if desc != "" && !strings.HasPrefix(desc, "disabled:") {
+		return fmt.Errorf("发送未生效：输入框仍留有内容（%q），发送按钮 %s；现场已导出 %v",
+			head, desc, snapshotPath)
+	}
+	if strings.HasPrefix(desc, "disabled:") {
+		return fmt.Errorf("发送未生效：输入框仍留有内容（%q），发送按钮不可点（%s）；现场已导出 %v",
+			head, desc, snapshotPath)
+	}
+	return fmt.Errorf("发送未生效：输入框仍留有内容（%q）；未找到可用的发送按钮；现场已导出 %v",
+		head, snapshotPath)
+}
+
+// Send 发送当前输入框里的内容，成功返回发送方式，失败返回 error。
+//
+// 「发送成功」的判据是**输入框被清空**：无论是点发送按钮还是按回车，
+// 应用把内容收下之后都会清空输入框。若三种方式试完输入框还留着原文，
+// 就说明这次发送根本没生效 —— 必须报错，不能当成功返回。
+//
+// 这一点对多轮至关重要：发送没生效时，会话日志不会有任何新消息，
+// 上层只能等到「本轮等待超时」，报出来的原因是「等待超时」而不是
+// 「发送失败」，排查时会往错误的方向找。历史实现恒返回 nil error，
+// 调用方（流水线、复现率验证器）的 err 分支形同虚设。
 func (d *RuiyunUIDriver) Send() (string, error) {
 	landed := d.inputTextNowAny()
+	wasEmpty := strings.TrimSpace(landed) == ""
 	desc := d.sendButton(true)
 	clicked := desc != "" && !strings.HasPrefix(desc, "disabled:")
-	if clicked && (strings.TrimSpace(landed) == "" || d.waitInputCleared(1.5)) {
+
+	// 输入框本来就是空的：没有可判断的「已清空」信号，沿用既有行为按成功返回。
+	if ok, _ := sendOutcome(landed, false); ok && wasEmpty {
+		if clicked {
+			return fmt.Sprintf("button(%s)", desc), nil
+		}
+		_ = d.CDP.PressKey("Enter", "Enter", 13, 13, "")
+		return "enter(空输入框)", nil
+	}
+
+	if clicked && d.waitInputCleared(1.5) {
 		return fmt.Sprintf("button(%s)", desc), nil
 	}
 
 	_ = d.CDP.PressKey("Enter", "Enter", 13, 13, "")
-	if strings.TrimSpace(landed) == "" || d.waitInputCleared(1.2) {
+	if d.waitInputCleared(1.2) {
 		return "enter", nil
 	}
 
 	_ = d.CDP.PressKey("Enter", "Enter", 13, 13, "\r")
-	if strings.TrimSpace(landed) != "" {
-		d.waitInputCleared(1.2)
-	}
-	if clicked || desc == "" {
+	if d.waitInputCleared(1.2) {
 		return "enter(char)", nil
 	}
-	return fmt.Sprintf("enter(按钮不可点:%s)", desc), nil
+
+	// 三种方式都没让输入框清空 —— 这次发送没生效
+	info := d.DumpDOMSnapshot("ui_send_failed.json")
+	return "", sendFailureError(d.inputTextNowAny(), desc, fmt.Sprintf("%v", info["path"]))
 }
 
 func (d *RuiyunUIDriver) ComposerState() map[string]any {

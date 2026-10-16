@@ -414,7 +414,20 @@ func RunUICases(cfg map[string]any, cases []map[string]any, uidriver *driver.Rui
 					prevAsst = uidriver.AssistantCount(sess)
 				}
 
-				how, _ := uidriver.Send()
+				how, sendErr := uidriver.Send()
+				if sendErr != nil {
+					// 发送没生效就别再往下等：等下去只会等到「本轮等待超时」，
+					// 报出来的原因会指向等待而不是发送，把排查带偏。
+					if !uidriver.CheckAppAlive() {
+						return results
+					}
+					res.UIOk = false
+					res.UIError = fmt.Sprintf("第 %d 轮发送失败: %v", ti+1, sendErr)
+					res.AbortedAtTurn = ti
+					logger(fmt.Sprintf("        失败：%s", res.UIError))
+					sendFailed = true
+					break
+				}
 
 				if ti == 0 {
 					var err error

@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 )
@@ -111,5 +112,73 @@ func TestWaitTurnDoneStartedZeroPrev(t *testing.T) {
 	d := &RuiyunUIDriver{}
 	if !d.WaitTurnDone(dir, -1, 3.0, 0.2) {
 		t.Error("prevCount 取不到时应退化为只看静默并返回 true")
+	}
+}
+
+// TestSendOutcome 发送成败的判据：输入框没被清空就等于没发出去
+func TestSendOutcome(t *testing.T) {
+	cases := []struct {
+		name      string
+		landed    string
+		cleared   bool
+		wantOK    bool
+		wantRetry bool
+	}{
+		{"有内容且已清空 = 成功", "第二轮提问", true, true, false},
+		{"有内容但没清空 = 失败，可换方式重试", "第二轮提问", false, false, true},
+		{"只有空白也算空输入框 = 成功", "   ", false, true, false},
+		{"本来就是空的 = 成功", "", false, true, false},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			ok, retry := sendOutcome(c.landed, c.cleared)
+			if ok != c.wantOK || retry != c.wantRetry {
+				t.Errorf("sendOutcome(%q,%v) = (%v,%v)，期望 (%v,%v)",
+					c.landed, c.cleared, ok, retry, c.wantOK, c.wantRetry)
+			}
+		})
+	}
+}
+
+// TestSendFailureErrorMentionsCause 报错文案要能区分三种成因，
+// 否则排查时看不出是「按钮被禁用」还是「压根没找到按钮」。
+func TestSendFailureErrorMentionsCause(t *testing.T) {
+	cases := []struct {
+		name    string
+		desc    string
+		wantSub string
+	}{
+		{"按钮可点但仍没生效", "发送", "发送按钮 发送"},
+		{"按钮被禁用", "disabled:发送", "不可点"},
+		{"找不到按钮", "", "未找到可用的发送按钮"},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			err := sendFailureError("第二轮提问", c.desc, "/tmp/x.json")
+			if err == nil {
+				t.Fatal("应返回 error")
+			}
+			if !strings.Contains(err.Error(), c.wantSub) {
+				t.Errorf("报错应包含 %q，实际 %q", c.wantSub, err.Error())
+			}
+			if !strings.Contains(err.Error(), "第二轮提问") {
+				t.Errorf("报错应带上残留内容，实际 %q", err.Error())
+			}
+		})
+	}
+}
+
+// TestSendFailureErrorTruncatesLongText 超长残留内容被截断，避免刷屏
+func TestSendFailureErrorTruncatesLongText(t *testing.T) {
+	long := strings.Repeat("很长的提问", 30)
+	err := sendFailureError(long, "发送", "/tmp/x.json")
+	if err == nil {
+		t.Fatal("应返回 error")
+	}
+	if strings.Contains(err.Error(), long) {
+		t.Error("超长内容应被截断")
+	}
+	if !strings.Contains(err.Error(), "…") && len([]rune(err.Error())) > 200 {
+		t.Errorf("报错过长：%d 字", len([]rune(err.Error())))
 	}
 }

@@ -93,6 +93,15 @@
   .case-block h3:first-of-type{margin-top:14px}
   .case-prompt{font-size:12.5px;color:var(--tx2);background:#f8fafc;border-left:3px solid var(--accent);
     padding:9px 13px;border-radius:0 8px 8px 0;margin-top:12px;word-break:break-word}
+   
+  .turn-block{background:#fcfcfd;border:1px solid var(--line2);border-left:3px solid var(--line);
+    border-radius:0 9px 9px 0;padding:11px 14px;margin-bottom:9px}
+  .turn-block.turn-bad{border-left-color:var(--p0);background:#fff7f7}
+  .turn-hd{display:flex;gap:9px;align-items:center;flex-wrap:wrap}
+  .turn-hd b{font-size:13px}
+  .turn-prompt{font-size:12.5px;color:var(--tx2);margin-top:7px;word-break:break-word}
+  .turn-err{margin-top:7px;font-size:12px;color:var(--p0)}
+  .turn-err .mono{word-break:break-all}
 </style>
 </head>
 <body>
@@ -105,8 +114,8 @@
     <span><b>应用版本</b> 2.0.17</span>
     <span><b>Bundle</b> com.yanxiu.srtclaw</span>
     <span><b>运行模式</b> UI 自动化</span>
-    <span><b>生成时间</b> 2026-09-30 17:32:05</span>
-    <span><b>总耗时</b> 38.5s</span>
+    <span><b>生成时间</b> 2026-10-16 16:14:46</span>
+    <span><b>总耗时</b> 54.9s</span>
   </div>
 </header>
 
@@ -148,25 +157,24 @@
     </span>
     <b>用例 1</b>
     <span class="mono">CASE-001</span>
-    <span class="mono" style="color:var(--tx3)">sess_1a0f1a79abc_5f936d</span>
+    <span class="mono" style="color:var(--tx3)">sess_1a143c6e4ac_569acc</span>
   </div>
 
-  <div class="case-prompt"><b>提示词：</b>针对议论文滥用不明网络金句问题，设计学术诚信专项反馈，要求学生溯源查证、规范转述或替换素材，补充个人独立分析内容。</div>
+  <div class="case-prompt"><b>提示词：</b>你好，我是翟嘉乐</div>
   
   
 
   
   <h3>调用链路（执行顺序）</h3>
   
-    <div class="chain"><span class="ct">convert_markdown_to_docx</span> → <span class="ct">write_memory</span> → <span class="ct">edit_memory</span></div>
-    <div class="mono" style="color:var(--tx3);margin-top:4px">3 次调用 · 2 步思考 · 答复 683 字</div>
+    <div class="mono" style="color:var(--tx3)">纯文本应答，无工具调用</div>
   
 
   
   <h3>客观信息</h3>
   <div class="tbl-wrap">
   <table>
-    <tr><td>平台实测耗时</td><td style="text-align:right"><b>38.5s</b></td></tr>
+    <tr><td>平台实测耗时</td><td style="text-align:right"><b>17.9s</b></td></tr>
     <tr><td>首响延迟（提问 → 模型响应）</td><td style="text-align:right"><b>—</b></td></tr>
     <tr><td>生成时长</td><td style="text-align:right"><b>—</b></td></tr>
     <tr><td>会话时长</td><td style="text-align:right"><b>—</b></td></tr>
@@ -190,13 +198,56 @@
       <div class="sm">已按全部断言规则检查该用例的调用链路，未命中任何规则。</div>
     </div>
   
+
+  
+  
+  
+  <h3>逐轮明细（共 2 轮，实际执行 1 轮）</h3>
+  
+  <div class="mono" style="color:var(--p0);margin:-4px 0 9px">
+    该用例未跑完：提交 2 轮，实际执行 1 轮。
+  </div>
+  
+  
+  
+  <div class="turn-block">
+    <div class="turn-hd">
+      <b>第 1 轮</b>
+      
+      
+      <span class="mono" style="color:var(--tx3)">9.3s · 答复 168 字 · 工具 0 · 思考 0</span>
+    </div>
+    <div class="turn-prompt"><b>提问：</b>你好，我是翟嘉乐</div>
+    
+    
+    
+      
+      <div class="finding" style="margin-top:8px">
+        <div class="f-hd"><b>OUTPUT_TRUNCATED</b></div>
+        <div class="f-detail"><b>具体表现：</b>最终答案疑似被强制截断（命中信号：缺完成标记；共 168 字）。【缺完成标记】消息无 completedAt 字段，说明生成未走完正常结束流程</div>
+        <div class="evi">你好呀，翟嘉乐！👋 很高兴认识你～
+
+我是睿云智能工作台（SRTClaw），可以帮你做很多教学相关的事情，比如：
+
+- 📚 备课：教学设计、教案、课件、问题链设计
+- 📝 出题：课后作业、试题质检、作文批改
+- 📊 分析：学情分析、教材分析、课堂实录分析
+- 🎨 幼教：活动设计、环创指导、家园沟通
+
+今天想做点什么？直接告诉我就好 😊</div>
+      </div>
+      
+    
+  </div>
+  
+  
 </div>
 
 
 
 <div class="note" style="margin-top:26px">
-  <b>判定与说明</b><br/>
-  · 报告数据来自本轮 1 条用例产生的会话日志。<br/>
+  <b>判定与口径说明</b><br/>
+  · 本报告全部数据来自本轮 1 条用例产生的会话日志，不含任何历史数据。<br/>
   · 「问题发现」基于 12 条断言规则（阈值见 config.yaml），不对生成内容的质量做评价。<br/>
   · token 为字符量折算的估算值（应用日志未记录官方 usage）；步骤级耗时日志未记录，耗时仅到会话/消息级。<br/>
   · 复现率由 UI 自动化重复执行同一配方统计，&lt;3 次样本的结论仅供参考。
