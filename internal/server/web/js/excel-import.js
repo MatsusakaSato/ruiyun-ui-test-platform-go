@@ -2,7 +2,7 @@
    平台已提供标准模板，导入不再让用户手动挑选列：
    上传后先按模板校验并预览，不符合模板直接提示；确认导入后在用例库给出成功/失败结果。 */
 
-import { $, esc, fileToBase64, fmtInvalidAttachments } from './utils.js';
+import { $, esc, fileToBase64, fmtInvalidAttachments, toTurns, firstTurn, turnsBadge } from './utils.js';
 import { state } from './state.js';
 import { loadPresetLib } from './page-cases.js';
 
@@ -88,7 +88,8 @@ export function impxRender(d) {
             : '<span class="imp-none">—</span>';
           return `<tr>`
             + `<td class="imp-no">${no}</td>`
-            + `<td class="imp-prompt" title="${esc(it.prompt)}">${esc(it.prompt)}</td>`
+            + `<td class="imp-prompt" title="${esc(toTurns(it.prompt).join('  ⏎  '))}">`
+              + `${turnsBadge(it.prompt)}${esc(firstTurn(it.prompt))}</td>`
             + `<td class="imp-scene">${esc(it.scene || '')}</td>`
             + `<td class="imp-diff">${esc(it.difficulty || '')}</td>`
             + `<td>${att}</td>`

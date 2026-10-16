@@ -1,6 +1,6 @@
 /* ================= 历史记录与详情面板（轨迹/报告/问题/质量评估） ================= */
 
-import { $, esc, fmtPct, FM_NAME, sessionLink, revealInFinder } from './utils.js';
+import { $, esc, fmtPct, FM_NAME, sessionLink, revealInFinder, toTurns, firstTurn, turnCount } from './utils.js';
 import { state } from './state.js';
 import { renderHistoryPane } from './nav.js';
 import { openLlm } from './modals.js';
@@ -111,15 +111,21 @@ export function artLink(r) {
 
 const PREVIEW_CHARS = 42;
 export function promptPreview(r) {
-  const cases = (r.cases || []).filter(c => (c.prompt || '').trim());
+  const cases = (r.cases || []).filter(c => turnCount(c.prompt) > 0);
   if (!cases.length) return '';
   const cut = t => {
     const t2 = t.trim().replace(/\s+/g, ' ');
     return t2.length > PREVIEW_CHARS ? t2.slice(0, PREVIEW_CHARS) + '…' : t2;
   };
-  const first = cut(cases[0].prompt);
+  const first = cut(firstTurn(cases[0].prompt));
   const more = cases.length > 1 ? `<span class="rp-more">+${cases.length - 1}</span>` : '';
-  const full = cases.map((c, i) => `${i + 1}. ${(c.prompt || '').trim()}`).join('\n');
+  const full = cases.map((c, i) => {
+    const ts = toTurns(c.prompt).map(t => String(t).trim()).filter(t => t !== '');
+    // 多轮用例在悬停里把各轮依次列出
+    return ts.length > 1
+      ? `${i + 1}. ${ts.map((t, k) => `【第 ${k + 1} 轮】${t}`).join('\n     ')}`
+      : `${i + 1}. ${ts[0] || ''}`;
+  }).join('\n');
   return `<div class="rprompt" title="${esc(full)}">${esc(first)}${more}</div>`;
 }
 
@@ -286,6 +292,20 @@ export function pickCase(i) {
   else body.innerHTML = bugsTab(m, d);
 }
 
+
+// 用例提问的展示块：多轮用例逐轮列出（第 1 轮加粗底色，便于与单轮区分）
+function promptBlock(c) {
+  const ts = toTurns(c.prompt).map(t => String(t).trim()).filter(t => t !== '');
+  if (!ts.length) return '';
+  if (ts.length === 1) {
+    return `<div class="prompt-block"><b>提问：</b>${esc(ts[0])}</div>`;
+  }
+  const rows = ts.map((t, k) => `<div class="prompt-turn"><span class="prompt-turn-no">第 ${k + 1} 轮</span>`
+    + `<span class="prompt-turn-tx">${esc(t)}</span></div>`).join('');
+  return `<div class="prompt-block"><b>提问：</b><span class="tag t-turn t-turn-multi">多轮 · ${ts.length}</span>`
+    + `<div class="prompt-turns">${rows}</div></div>`;
+}
+
 /* ---------- 客观信息 ---------- */
 export function objTab(m, d) {
   const cases = d.cases || [];
@@ -297,7 +317,7 @@ export function objTab(m, d) {
   let h = '<div class="case-chips">' + cases.map((x, i) =>
       `<span class="chip-c ${i === state.currentCase ? 'active' : ''}" onclick="pickCase(${i})">${esc(x.case_id)} ${esc(x.name)} ${x.status === 'PASS' ? '✓' : x.status === 'FAIL' ? '✗' : '⚠'}</span>`).join('') + '</div>';
 
-  h += `<div style="font-size:12.5px;margin-bottom:12px"><b>提问：</b>${esc(c.prompt)}</div>`;
+  h += promptBlock(c);
 
   h += '<h3 class="sec" style="margin-top:0">耗时</h3><div class="tbl-card"><table>'
     + `<tr><td>平台记录 <span class="q tip-right" data-tip="从发出提问到测试结果写盘完成的总耗时">?</span></td><td style="text-align:right"><b>${c.elapsed_s ?? '—'}s</b></td></tr>`
@@ -377,7 +397,7 @@ export function caseTimeline(c) {
     <span>思考步 <b>${c.thinking_count ?? 0}</b></span>
     <span>答复 ${c.answer_chars ?? 0} 字</span>
   </div>
-  <div style="font-size:12.5px;margin-bottom:6px"><b>提问：</b>${esc(c.prompt)}</div>`;
+  ${promptBlock(c)}`;
 
   if ((c.attachments || []).length) {
     h += `<div style="font-size:12px;color:var(--tx2);margin-bottom:8px"><b>附件：</b>`
@@ -487,7 +507,7 @@ export function bugsTab(m, d) {
 
   let h = '<div class="case-chips">' + cases.map((x, i) =>
       `<span class="chip-c ${i === state.currentCase ? 'active' : ''}" onclick="pickCase(${i})">${esc(x.case_id)} ${esc(x.name)} ${x.status === 'PASS' ? '✓' : x.status === 'FAIL' ? '✗' : '⚠'}</span>`).join('') + '</div>'
-    + `<div style="font-size:12.5px;margin-bottom:12px"><b>提问：</b>${esc(c.prompt)}</div>`;
+    + promptBlock(c);
 
   if (!rows.length) {
     return h + `<div class="none-banner">
@@ -674,7 +694,7 @@ export function evCaseTable(c, i, sm) {
   return `<div class="card ev-case">
     <div class="ev-case-hd">
       <div class="ev-case-tt"><b style="font-size:12.5px">${esc(c.case_id)}</b>
-        <span class="ev-case-prompt" title="${esc(c.prompt || '')}">${esc(clip(c.prompt || '（没有提问）', 78))}</span></div>
+        <span class="ev-case-prompt" title="${esc(toTurns(c.prompt).join('  ⏎  '))}">${turnCount(c.prompt) > 1 ? `<span class="tag t-turn t-turn-multi">多轮 · ${turnCount(c.prompt)}</span>` : ''}${esc(clip(firstTurn(c.prompt) || '（没有提问）', 78))}</span></div>
       <div class="ev-case-meta">${meta.join('')}</div>
       ${je ? `<div class="ev-case-err">打分失败的原因：${esc(je)}`
         + (c.judge_raw ? `<div class="pb-detail">${esc(c.judge_raw)}</div>` : '') + '</div>' : ''}

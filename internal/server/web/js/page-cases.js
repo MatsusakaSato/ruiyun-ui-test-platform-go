@@ -1,6 +1,7 @@
 /* ================= 测试用例页（预设库 + 队列编辑 + 附件管理） ================= */
 
-import { $, esc, fmtSize, fileToBase64, fmtInvalidAttachments, IS_WIN, MOD_KEY, doOpenFile, copyText } from './utils.js';
+import { $, esc, fmtSize, fileToBase64, fmtInvalidAttachments, IS_WIN, MOD_KEY, doOpenFile, copyText,
+         MAX_TURNS, toTurns, firstTurn, turnCount, turnsBadge } from './utils.js';
 import { state } from './state.js';
 import { renderRunCases, doRun } from './page-home.js';
 import { syncSelectSkin } from './msel-select.js';
@@ -150,7 +151,7 @@ export function rmAttach(i, j) {
 
 /* ---------- 队列状态与渲染 ---------- */
 export function syncCaseState() {
-  const filled = state.CASES.filter(c => c.prompt.trim()).length;
+  const filled = state.CASES.filter(c => turnCount(c.prompt) > 0).length;
   document.querySelectorAll('.btn-run').forEach(b => {
     b.disabled = state.RUNNING || filled === 0;
   });
@@ -198,6 +199,7 @@ export function renderCases() {
   box.innerHTML = state.CASES.map((c, i) => {
     const atts = c.attachments || [];
     const L = c.labels || {};
+    const turns = toTurns(c.prompt);
     // 预设里带的自定义标签跟着用例一起进队列（只读展示：入库存改一律走库里的「编辑」）
     const chips = [
       L.scene ? `<span class="tag t-scene">${esc(L.scene)}</span>` : '',
@@ -210,9 +212,12 @@ export function renderCases() {
       <div class="no">${String(i + 1).padStart(2, '0')}</div>
       <div class="fields">
         <input class="prompt" placeholder="输入提示词，例如：请读取你的记忆文件并告诉我记录条数"
-               value="${esc(c.prompt)}" oninput="CASES[${i}].prompt=this.value; syncCaseState()"
-               onchange="CASES[${i}].prompt=this.value; syncCaseState()"/>
+               value="${esc(turns[0] || '')}" oninput="setCaseTurn(${i},0,this.value)"
+               onchange="setCaseTurn(${i},0,this.value)"/>
         <div class="cl-acts">
+          ${turnsBadge(c.prompt)}
+          <button class="cl-att" onclick="openTurns(${i})"
+                  title="编辑多轮对话：一个用例内依次发送多轮提问">轮次${turns.length > 1 ? '(' + turns.length + ')' : ''}</button>
           <button class="cl-att" onclick="pickAttach(${i})" title="上传附件：运行时会被投递给被测应用">📎 附件</button>
           <button class="cl-att" onclick="openLib(${i})" title="打开附件库，点击即加入本用例">库${state.UPLOADS.length ? '(' + state.UPLOADS.length + ')' : ''}</button>
           <input type="file" multiple style="display:none" id="attFile${i}"
@@ -226,12 +231,94 @@ export function renderCases() {
   syncCaseState();
 }
 
+/* 写回第 idx 轮提问（第 0 轮由队列行上的输入框直接编辑） */
+export function setCaseTurn(i, idx, value) {
+  const c = state.CASES[i];
+  if (!c) return;
+  const turns = toTurns(c.prompt);
+  while (turns.length <= idx) turns.push('');
+  turns[idx] = value;
+  c.prompt = turns;
+  syncCaseState();
+}
+
+/* 队列行的「轮次」按钮：打开多轮编辑弹窗 */
+export function openTurns(i) {
+  const c = state.CASES[i];
+  if (!c) return;
+  state.TURNS_ROW = i;
+  state.TURNS_DRAFT = toTurns(c.prompt);
+  if (state.TURNS_DRAFT.length === 0) state.TURNS_DRAFT = [''];
+  renderTurnsModal();
+}
+
+/* 队列行的多轮编辑弹窗：与「新增/编辑用例」对话框里的轮次区同构 */
+function renderTurnsModal() {
+  const mask = $('turnsMask');
+  if (!mask) return;
+  const box = $('turnsRows');
+  if (box) {
+    box.innerHTML = state.TURNS_DRAFT.map((t, k) => `
+      <div class="turn-row">
+        <div class="turn-no">第 ${k + 1} 轮</div>
+        <textarea class="turn-inp" rows="2" placeholder="第 ${k + 1} 轮的提问"
+          oninput="setDraftTurn(${k},this.value)">${esc(t)}</textarea>
+        <button class="turn-del" title="删除该轮" onclick="delDraftTurn(${k})"
+          ${state.TURNS_DRAFT.length <= 1 ? 'disabled' : ''}>×</button>
+      </div>`).join('');
+  }
+  const add = $('turnsAdd');
+  if (add) add.disabled = state.TURNS_DRAFT.length >= MAX_TURNS;
+  const hint = $('turnsHint');
+  if (hint) hint.textContent = `最多 ${MAX_TURNS} 轮 · 当前 ${state.TURNS_DRAFT.length} 轮`;
+  mask.hidden = false;
+}
+
+export function setDraftTurn(k, v) {
+  state.TURNS_DRAFT[k] = v;
+}
+
+export function delDraftTurn(k) {
+  if (state.TURNS_DRAFT.length <= 1) return;
+  state.TURNS_DRAFT.splice(k, 1);
+  renderTurnsModal();
+}
+
+export function addDraftTurn() {
+  if (state.TURNS_DRAFT.length >= MAX_TURNS) return;
+  state.TURNS_DRAFT.push('');
+  renderTurnsModal();
+  const rows = document.querySelectorAll('#turnsRows .turn-inp');
+  rows[rows.length - 1]?.focus();
+}
+
+export function closeTurns() {
+  const mask = $('turnsMask');
+  if (mask) mask.hidden = true;
+  state.TURNS_ROW = -1;
+  state.TURNS_DRAFT = [];
+}
+
+export function saveTurns() {
+  const i = state.TURNS_ROW;
+  if (i < 0 || !state.CASES[i]) { closeTurns(); return; }
+  const turns = state.TURNS_DRAFT.map(t => String(t || '').trim()).filter(t => t !== '');
+  if (!turns.length) {
+    const hint = $('turnsHint');
+    if (hint) hint.textContent = '至少填写一轮提问';
+    return;
+  }
+  state.CASES[i].prompt = turns;
+  closeTurns();
+  renderCases();
+}
+
 /* at 省略时追加到队尾；传入序号则插到该位置之前（回车新增用 at = 当前行 + 1） */
 export function addCase(at) {
   const pos = Number.isInteger(at)
     ? Math.min(Math.max(at, 0), state.CASES.length)
     : state.CASES.length;
-  state.CASES.splice(pos, 0, { prompt: '', attachments: [] });
+  state.CASES.splice(pos, 0, { prompt: [''], attachments: [] });
   renderCases();
   focusCaseRow(pos);
 }
@@ -444,14 +531,19 @@ export function renderLibTable() {
       + '<th class="th-chk" style="width:38px" title="全选 / 取消全选"><input type="checkbox" id="libAllBox" tabindex="-1"/></th>'
       + '<th style="width:104px">编号</th><th>提问</th><th style="width:210px">标签</th>'
       + '<th style="width:104px"></th></tr></thead><tbody>'
-      + (rows.length ? rows.map(c => `<tr data-id="${esc(c.id || '')}">
+      + (rows.length ? rows.map(c => {
+        const t1 = firstTurn(c.prompt);
+        const n = turnCount(c.prompt);
+        const titleText = toTurns(c.prompt).join('  ⏎  ');
+        return `<tr data-id="${esc(c.id || '')}">
           <td class="td-chk"><input type="checkbox" ${state.PSEL.has(c.id) ? 'checked' : ''} tabindex="-1"/></td>
           <td class="mono">${esc(c.id || '')}</td>
-          <td class="lp" title="${esc(c.prompt || '')}">${esc(c.prompt || '')}</td>
+          <td class="lp" title="${esc(titleText)}">${turnsBadge(c.prompt)}${esc(t1)}${n > 1 ? `<span class="lp-more">等 ${n} 轮</span>` : ''}</td>
           <td>${libSelTags(c)}</td>
           <td class="td-acts"><button class="home-link lib-edit" data-id="${esc(c.id || '')}">编辑</button>
             <button class="home-link lib-del" data-id="${esc(c.id || '')}">删除</button></td>
-        </tr>`).join('')
+        </tr>`;
+      }).join('')
         : '<tr><td colspan="5" class="tbl-empty">没有符合条件的用例</td></tr>')
       + '</tbody></table>';
   }
@@ -642,6 +734,55 @@ export async function uploadCaFiles(files) {
   caseAddHint(msgs.join(' · '));
 }
 
+/* ---------- 对话框里的「多轮提问」编辑区 ----------
+   第 1 轮就是原有的 #caPrompt 输入框（保持不变），这里只负责第 2 轮及以后。
+   轮次上限 MAX_TURNS 与后端、Excel 的 prompt_1..prompt_8 一致。 */
+
+export function renderCaTurns() {
+  const box = $('caTurns');
+  if (!box) return;
+  const extra = (state.CA_TURNS || []).slice(1);
+  box.innerHTML = extra.map((t, k) => {
+    const n = k + 2;   // 第 1 轮在 #caPrompt
+    return `
+    <div class="turn-row">
+      <div class="turn-no">第 ${n} 轮</div>
+      <textarea class="turn-inp" rows="2" placeholder="第 ${n} 轮的提问"
+        oninput="setCaTurn(${k + 1},this.value)">${esc(t)}</textarea>
+      <button class="turn-del" title="删除该轮" onclick="delCaTurn(${k + 1})">×</button>
+    </div>`;
+  }).join('');
+
+  const total = 1 + extra.length;
+  const add = $('caTurnAdd');
+  if (add) add.disabled = total >= MAX_TURNS;
+  const hint = $('caTurnHint');
+  if (hint) hint.textContent = total > 1 ? `多轮用例 · 共 ${total} 轮` : '';
+}
+
+export function setCaTurn(idx, v) {
+  if (!state.CA_TURNS) state.CA_TURNS = [''];
+  while (state.CA_TURNS.length <= idx) state.CA_TURNS.push('');
+  state.CA_TURNS[idx] = v;
+}
+
+export function addCaTurn() {
+  if (!state.CA_TURNS) state.CA_TURNS = [''];
+  if (state.CA_TURNS.length >= MAX_TURNS) return;
+  state.CA_TURNS.push('');
+  renderCaTurns();
+  const rows = document.querySelectorAll('#caTurns .turn-inp');
+  rows[rows.length - 1]?.focus();
+}
+
+export function delCaTurn(idx) {
+  if (!state.CA_TURNS) return;
+  // 只允许删第 2 轮及以后（第 1 轮是必填，走 #caPrompt）
+  if (idx < 1 || idx >= state.CA_TURNS.length) return;
+  state.CA_TURNS.splice(idx, 1);
+  renderCaTurns();
+}
+
 export function openCaseAdd() {
   const mask = $('caseAddMask');
   if (!mask) return;
@@ -654,6 +795,8 @@ export function openCaseAdd() {
   if ($('caPrompt')) $('caPrompt').value = '';
   state.CA_ATTS = [];
   state.CA_TAGS = [];
+  state.CA_TURNS = [''];
+  renderCaTurns();
   renderCaAtts();
   renderCaTags();
   const caFile = $('caAttFile');
@@ -682,7 +825,9 @@ export function openCaseEdit(id) {
   if ($('caScene')) $('caScene').value = L.scene || '';
   if ($('caDifficulty')) $('caDifficulty').value = L.difficulty || '';
   syncSelectSkin('caDifficulty');
-  if ($('caPrompt')) $('caPrompt').value = c.prompt || '';
+  if ($('caPrompt')) $('caPrompt').value = firstTurn(c.prompt);
+  state.CA_TURNS = toTurns(c.prompt);
+  renderCaTurns();
   state.CA_ATTS = attsFromPaths(c.attachments);
   state.CA_TAGS = (L.tags || []).map(String);
   renderCaAtts();
@@ -718,12 +863,23 @@ async function submitCaseAdd() {
   const promptEl = $('caPrompt');
   const prompt = (promptEl?.value || '').trim();
   if (!prompt) {
-    caseAddHint('提问不能为空');
+    caseAddHint('第 1 轮提问不能为空');
     promptEl?.closest('.fld')?.classList.add('err');
     promptEl?.focus();
     return;
   }
   promptEl.closest('.fld')?.classList.remove('err');
+
+  // 组装轮次：第 1 轮取输入框，其余轮取「轮次编辑区」的草稿。
+  // 空行直接丢掉（加了行又没填是常见路径）。
+  const extra = (state.CA_TURNS || []).slice(1)
+    .map(t => String(t || '').trim())
+    .filter(t => t !== '');
+  const turns = [prompt, ...extra];
+  if (turns.length > MAX_TURNS) {
+    caseAddHint(`最多 ${MAX_TURNS} 轮，当前填了 ${turns.length} 轮`);
+    return;
+  }
 
   const scene = ($('caScene')?.value || '').trim();
   const difficulty = ($('caDifficulty')?.value || '').trim();
@@ -744,8 +900,8 @@ async function submitCaseAdd() {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(editID
-        ? { action: 'update', id: editID, prompt, labels: { scene, difficulty, tags, attachment }, attachments }
-        : { action: 'add', prompt, labels: { scene, difficulty, tags, attachment }, attachments })
+        ? { action: 'update', id: editID, prompt: turns, labels: { scene, difficulty, tags, attachment }, attachments }
+        : { action: 'add', prompt: turns, labels: { scene, difficulty, tags, attachment }, attachments })
     });
     const j = await r.json().catch(() => ({ ok: false, message: '响应解析失败' }));
     if (!j.ok) {
@@ -849,7 +1005,7 @@ export function initCases() {
 
       e.preventDefault();
       const cur = state.CASES[i];
-      if (i === state.CASES.length - 1 && !((cur && cur.prompt) || '').trim()) return;
+      if (i === state.CASES.length - 1 && turnCount(cur && cur.prompt) === 0) return;
       addCase(i + 1);
     });
   }
@@ -857,7 +1013,7 @@ export function initCases() {
   const btnClear = $('btnClearCases');
   if (btnClear) {
     btnClear.onclick = () => {
-      if (state.CASES.filter(c => c.prompt.trim()).length
+      if (state.CASES.filter(c => turnCount(c.prompt) > 0).length
         && !confirm('清空本轮队列？（只清队列，预设用例库不受影响）')) return;
       state.CASES = [];
       closeLib();
@@ -1097,20 +1253,21 @@ export function initCases() {
     libToQueue.onclick = () => {
       const picked = state.LIB_ROWS.filter(c => state.PSEL.has(c.id));
       if (!picked.length) { alert('请先勾选要加入本轮的用例'); return; }
-      state.CASES = state.CASES.filter(c => c.prompt.trim());
+      state.CASES = state.CASES.filter(c => turnCount(c.prompt) > 0);
       // 勾选几条就加几条，不去重：队列里已有的相同提问也照加
       for (const it of picked) {
-        const p = (it.prompt || '').trim();
-        if (!p) continue;
+        // 多轮用例：整组轮次一起带回队列
+        const turns = toTurns(it.prompt).map(t => String(t).trim()).filter(t => t !== '');
+        if (!turns.length) continue;
         // 预设里存的附件路径要一起带回队列，否则运行时不会投递
-        state.CASES.push({ prompt: p, labels: it.labels || {}, attachments: attsFromPaths(it.attachments) });
+        state.CASES.push({ prompt: turns, labels: it.labels || {}, attachments: attsFromPaths(it.attachments) });
       }
       renderCases();
       setCaseTab('queue');
       const msg = $('caseHint');
       if (msg) {
         msg.className = 'hint';
-        msg.textContent = `已加入本轮：共 ${state.CASES.filter(c => c.prompt.trim()).length} 条。点右下角「运行测试」即可开始。`;
+        msg.textContent = `已加入本轮：共 ${state.CASES.filter(c => turnCount(c.prompt) > 0).length} 条。点右下角「运行测试」即可开始。`;
       }
     };
   }

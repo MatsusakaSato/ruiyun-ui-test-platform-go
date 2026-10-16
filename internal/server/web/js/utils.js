@@ -11,6 +11,44 @@ export const esc = s => String(s ?? '').replace(/[&<>"]/g, c => ({
 
 export const fmtPct = v => (v == null ? '—' : (v * 100).toFixed(0) + '%');
 
+/* ---------- 多轮对话 ---------- */
+
+// 单个用例允许的最大轮数（与后端 testcasedb.MaxTurns、Excel prompt_1..prompt_8 一致）
+export const MAX_TURNS = 8;
+
+// 把任意来源的 prompt 归一成轮次数组。
+// 约定：接口与库里 prompt 一律是字符串数组（单轮也是长度 1 的数组）；
+// 这里对裸字符串兜底，避免历史调用方直接把页面打崩。
+export function toTurns(p) {
+  if (Array.isArray(p)) return p.map(t => String(t ?? ''));
+  if (typeof p === 'string' && p !== '') return [p];
+  return [];
+}
+
+// 第 1 轮（列表、标题、日志等单行展示用）
+export function firstTurn(p) {
+  const t = toTurns(p);
+  return t.length ? t[0] : '';
+}
+
+// 轮数
+export function turnCount(p) {
+  return toTurns(p).filter(t => String(t).trim() !== '').length;
+}
+
+// 是否多轮用例（轮数 > 1）
+export function isMultiTurn(p) {
+  return turnCount(p) > 1;
+}
+
+// 单轮 / 多轮标签的 HTML。空用例不显示标签。
+export function turnsBadge(p) {
+  const n = turnCount(p);
+  if (n === 0) return '';
+  if (n === 1) return '<span class="tag t-turn">单轮</span>';
+  return `<span class="tag t-turn t-turn-multi">多轮 · ${n}</span>`;
+}
+
 export function fmtSize(n) {
   n = Number(n || 0);
   if (n >= 1048576) return (n / 1048576).toFixed(1) + 'MB';

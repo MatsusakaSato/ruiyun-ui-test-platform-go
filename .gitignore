@@ -33,3 +33,6 @@ coverage.html
 .idea/
 .vscode/
 .gocache/
+
+# 前端冒烟测试用的 node_modules 软链（依赖在 workspace 外，不入库）
+node_modules

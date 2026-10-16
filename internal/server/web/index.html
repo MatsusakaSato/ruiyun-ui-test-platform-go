@@ -526,8 +526,17 @@
       </div>
 
       <div class="fld">
-        <label for="caPrompt">提问 <span style="color:var(--p0)">*</span></label>
+        <label for="caPrompt">第 1 轮提问 <span style="color:var(--p0)">*</span></label>
         <textarea id="caPrompt" rows="4" placeholder="填入要存档、要发给被测应用的问题原文（必填）"></textarea>
+      </div>
+
+      <!-- 多轮对话：第 2 轮及以后。第 1 轮固定是上面的 #caPrompt，
+           一条也不加时就是单轮用例（保存后列表显示「单轮」标签）。 -->
+      <div class="fld" id="caTurnFld">
+        <label>后续轮次 <span class="fhint-inline" id="caTurnHint"></span></label>
+        <div id="caTurns" class="turn-list"></div>
+        <button type="button" class="btn-ghost turn-add" id="caTurnAdd" onclick="addCaTurn()">＋ 添加一轮</button>
+        <span class="fhint">同一个会话里依次发送，最多 8 轮；不加就是单轮用例</span>
       </div>
     </div>
     <div class="modal-ft">
@@ -552,6 +561,27 @@
     <div class="modal-ft">
       <span class="mcount" id="libCount"></span>
       <button class="btn-primary" id="libDone">完成</button>
+    </div>
+  </div>
+</div>
+
+<!-- ============ 队列行的「轮次」弹窗（编辑多轮对话） ============
+     与「新增/编辑用例」对话框里的轮次区同构，区别是这里编辑的是队列里已有的那一行。 -->
+<div class="modal-mask" id="turnsMask">
+  <div class="modal" role="dialog" aria-modal="true" aria-label="编辑多轮对话">
+    <div class="modal-hd">
+      <h3>编辑多轮对话</h3>
+      <span class="msub" id="turnsHint"></span>
+      <button class="mclose" onclick="closeTurns()" title="关闭">✕</button>
+    </div>
+    <div class="modal-bd">
+      <div id="turnsRows" class="turn-list"></div>
+      <button type="button" class="btn-ghost turn-add" id="turnsAdd" onclick="addDraftTurn()">＋ 添加一轮</button>
+      <span class="fhint">同一个会话里依次发送；上一轮完成后才会发下一轮</span>
+    </div>
+    <div class="modal-ft">
+      <button class="btn-ghost" onclick="closeTurns()">取消</button>
+      <button class="btn-primary" onclick="saveTurns()">保存</button>
     </div>
   </div>
 </div>

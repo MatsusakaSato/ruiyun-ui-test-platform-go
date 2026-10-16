@@ -220,3 +220,11 @@
   .hist-detail-pane{height:auto;overflow:visible}
   .hist-sum-wrap{margin-left:0;width:100%}
 }
+
+/* ---------- 多轮对话：用例提问展示（2026-10-16 加） ---------- */
+.prompt-block{font-size:12.5px;margin-bottom:12px}
+.prompt-turns{display:flex;flex-direction:column;gap:4px;margin-top:6px}
+.prompt-turn{display:flex;gap:8px;align-items:flex-start;
+  padding:5px 8px;border-radius:7px;background:var(--bg2,#f8fafc)}
+.prompt-turn-no{flex:0 0 auto;color:var(--tx3);font-size:11.5px;white-space:nowrap;padding-top:1px}
+.prompt-turn-tx{flex:1;color:var(--tx2);white-space:pre-wrap;word-break:break-word}

@@ -42,7 +42,8 @@ export const state = {
   APP_CFG_DESC: null,
 
   // 本轮队列用例与附件库
-  CASES: [{ prompt: '', attachments: [] }],
+  // prompt 是**轮次数组**（单轮也是长度 1 的数组），与接口/库里的格式一致
+  CASES: [{ prompt: [''], attachments: [] }],
   UPLOADS: [],
   // 附件库弹窗的目标：-1 未打开 / 数字 = 队列行序号 / 'caseadd' = 新增用例对话框
   LIB_FOR: -1,
@@ -54,6 +55,12 @@ export const state = {
   // CA_EDIT_ID 非空表示对话框正处于「编辑已有用例」状态，提交时走 action:'update'
   CA_TAGS: [],
   CA_EDIT_ID: '',
+  // 对话框中待保存的多轮提问（字符串数组，第 1 轮与 #caPrompt 双向同步）
+  CA_TURNS: [''],
+
+  // 队列行「轮次」弹窗：TURNS_ROW 为队列行序号（-1 表示未打开），TURNS_DRAFT 为待保存轮次
+  TURNS_ROW: -1,
+  TURNS_DRAFT: [],
 
   // 预设用例库
   // 筛选条件：scenes / difficulties / tags 为空数组表示不限；attachment 取 ''（不限）/ 'yes' / 'no'，

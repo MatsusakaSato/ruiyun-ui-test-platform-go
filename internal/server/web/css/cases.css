@@ -196,3 +196,31 @@ tr.just-added {
 .fld .ca-tag-box input,
 .fld .ca-tag-box input:focus{flex:1;min-width:150px;border:none;border-radius:0;
   padding:3px 2px;background:transparent;box-shadow:none;outline:none}
+
+/* ---------- 多轮对话（2026-10-16 加） ---------- */
+
+/* 单轮 / 多轮标签：只读标识，轮数由 prompt 数组长度自动判定 */
+.tag.t-turn{background:#f1f5f9;color:#475569}
+.tag.t-turn.t-turn-multi{background:#eef2ff;color:#4338ca;font-weight:600}
+
+/* 列表里第 1 轮之后的省略提示 */
+.lib-table .lp .lp-more{margin-left:6px;color:var(--tx3);font-size:12px}
+.lib-table .lp .tag.t-turn{margin-right:6px}
+
+/* 轮次编辑区（对话框与队列弹窗共用） */
+.turn-list{display:flex;flex-direction:column;gap:8px;margin-bottom:8px}
+.turn-row{display:flex;gap:8px;align-items:flex-start}
+.turn-no{flex:0 0 56px;padding-top:8px;font-size:12px;color:var(--tx3);
+  text-align:right;white-space:nowrap}
+.turn-inp{flex:1;min-height:38px;padding:8px 10px;border:1px solid var(--bd);
+  border-radius:8px;background:var(--bg);color:var(--tx);font:inherit;
+  font-size:13px;line-height:1.5;resize:vertical;box-sizing:border-box}
+.turn-inp:focus{outline:none;border-color:var(--accent);
+  box-shadow:0 0 0 3px color-mix(in srgb,var(--accent) 14%,transparent)}
+.turn-del{flex:0 0 auto;width:26px;height:26px;margin-top:6px;border:1px solid var(--bd);
+  border-radius:7px;background:var(--bg);color:var(--tx3);cursor:pointer;
+  font-size:15px;line-height:1;padding:0}
+.turn-del:hover:not(:disabled){color:var(--p0);border-color:var(--p0)}
+.turn-del:disabled{opacity:.4;cursor:not-allowed}
+.turn-add{margin-top:2px}
+.fhint-inline{font-weight:400;color:var(--tx3);font-size:12px}

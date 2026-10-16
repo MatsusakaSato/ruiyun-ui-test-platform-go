@@ -1,6 +1,6 @@
 /* ================= 首页运行台与测试控制 ================= */
 
-import { $, esc } from './utils.js';
+import { $, esc, toTurns, firstTurn, turnCount } from './utils.js';
 import { state } from './state.js';
 import { noteConsoleContent, setConsoleOpen, renderConsoleLines, syncConsoleNew } from './console.js';
 import { switchPage, syncEnvUI, syncAutoClickUI } from './nav.js';
@@ -10,7 +10,7 @@ import { loadRounds, openRoundById } from './page-history.js';
 export function renderRunCases() {
   const box = $('runCases');
   if (!box) return;
-  const n = state.CASES.filter(c => c.prompt.trim()).length;
+  const n = state.CASES.filter(c => turnCount(c.prompt) > 0).length;
   const qCnt = $('queueCount');
   if (qCnt) qCnt.textContent = n ? `（${n} 条）` : '';
 
@@ -127,25 +127,33 @@ export async function startRun(body) {
   setConsoleOpen(true);
   switchPage('home');
 
-  state.RUN_CASES = state.CASES.filter(c => c.prompt.trim()).map((c, i) => ({
-    case_id: 'CASE-' + String(i + 1).padStart(3, '0'),
-    prompt: c.prompt.trim(),
-    status: '',
-    elapsed_s: null
-  }));
+  state.RUN_CASES = state.CASES.filter(c => turnCount(c.prompt) > 0).map((c, i) => {
+    const turns = toTurns(c.prompt).map(t => String(t).trim()).filter(t => t !== '');
+    return {
+      case_id: 'CASE-' + String(i + 1).padStart(3, '0'),
+      prompt: turns[0] || '',
+      prompts: turns,
+      turn_count: turns.length,
+      status: '',
+      elapsed_s: null
+    };
+  });
   renderRunCases();
   setRunning(true);
 }
 
 export function doRun() {
   if (state.RUNNING) { alert('已有测试在运行，请等它结束或先终止'); return; }
-  const items = state.CASES.filter(c => c.prompt.trim())
-    .map((c, i) => ({
-      id: 'CASE-' + String(i + 1).padStart(3, '0'),
-      prompt: c.prompt.trim(),
-      labels: c.labels || {},
-      attachments: (c.attachments || []).map(a => a.path)
-    }));
+  const items = state.CASES.filter(c => turnCount(c.prompt) > 0)
+    .map((c, i) => {
+      const turns = toTurns(c.prompt).map(t => String(t).trim()).filter(t => t !== '');
+      return {
+        id: 'CASE-' + String(i + 1).padStart(3, '0'),
+        prompt: turns,           // 多轮：数组；单轮也是长度 1 的数组
+        labels: c.labels || {},
+        attachments: (c.attachments || []).map(a => a.path)
+      };
+    });
   if (!items.length) { alert('请至少填写一条用例的提问'); return; }
   startRun({ case_items: items, max_inflight: state.INFLIGHT, auto_confirm: state.AUTO_CLICK });
 }
