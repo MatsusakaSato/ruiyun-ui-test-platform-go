@@ -184,7 +184,18 @@ func DetectColumns(rows [][]string) map[string]any {
 
 	// 列识别按固定顺序逐个收窄排除集合，保证同一列不会被认出两次：
 	// prompt -> scene -> attachment -> difficulty。
-	promptCol := headerCol(promptHeaders, nil, []string{"类型", "type"})
+	//
+	// 注意先把「轮次列」排除在外：promptHeaders 里的 "prompt" 会被
+	// strings.Contains 匹配到 prompt_1 / prompt_2 上，若不做排除，
+	// 普通「提问」列会认到 prompt_1 上、并把该列从轮次识别里剔掉，
+	// 结果是第 1 轮整轮丢失。
+	excludePrompt := make(map[int]bool)
+	for i, h := range header {
+		if turnColIndex(h) > 0 {
+			excludePrompt[i] = true
+		}
+	}
+	promptCol := headerCol(promptHeaders, excludePrompt, []string{"类型", "type"})
 
 	excludeScene := make(map[int]bool)
 	if promptCol != nil {
@@ -258,10 +269,16 @@ func DetectColumns(rows [][]string) map[string]any {
 	}
 
 	hasPromptHeader := promptCol != nil
-	// 多轮模板：以 prompt_1 为第 1 轮，普通「提问」列可缺省
+	// 多轮模板：以 prompt_1 为第 1 轮，普通「提问」列可缺省。
+	//
+	// 注意用 map 的存在性判断而不是 `turnCols[1] != 0`：
+	// 列下标 0 是合法位置（prompt_1 就是第一列，很常见），
+	// 用 0 当「不存在」会让第 1 轮被整轮丢掉。
 	hasTurnCols := len(turnCols) > 0
-	if hasTurnCols && turnCols[1] != 0 {
-		actualPromptCol = turnCols[1]
+	if hasTurnCols {
+		if ci, ok := turnCols[1]; ok {
+			actualPromptCol = ci
+		}
 	}
 	if hasTurnCols {
 		hasPromptHeader = true
@@ -348,13 +365,17 @@ func RowsToItems(rows [][]string, headIdx *int, cols CaseCols) map[string]any {
 				}
 			}
 			for n := 1; n <= maxN; n++ {
-				ci, ok := cols.TurnCols[n]
-				if !ok {
+				v := ""
+				if ci, ok := cols.TurnCols[n]; ok {
+					v = getVal(r, &ci)
+				} else if n != 1 {
+					// 中间缺号（如只填了 prompt_1 和 prompt_3）视为该轮为空
 					continue
 				}
-				v := getVal(r, &ci)
 				if n == 1 && v == "" {
-					v = prompt // 用普通「提问」列兜底第 1 轮
+					// 第 1 轮兜底：普通「提问」列（模板「提问」+ prompt_2..N 时
+					// TurnCols 里根本没有轮 1，此时必须回落到普通列）
+					v = prompt
 				}
 				if v != "" {
 					turns = append(turns, v)
