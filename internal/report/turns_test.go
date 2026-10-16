@@ -51,20 +51,34 @@ func multiTurnCase() *models.CaseResult {
 	}
 }
 
-// TestReportMultiTurnExpands 多轮用例渲染逐轮明细，且轮级发现落在对应轮次里
-func TestReportMultiTurnExpands(t *testing.T) {
+// TestReportMultiTurnRepeatsCaseBlock 多轮用例按轮重复整块，
+// 每块与单轮用例长得一样（用户要求：不要多轮样式，像单轮那样多展示几次）。
+func TestReportMultiTurnRepeatsCaseBlock(t *testing.T) {
 	html := renderWith(t, []*models.CaseResult{multiTurnCase()})
 
-	for _, want := range []string{
-		"逐轮明细（共 2 轮）",
-		"第 1 轮", "第 2 轮",
-		"第一轮提问", "第二轮提问",
-		"未答复",          // 第 2 轮标记未答复
-		"TURN_INCOMPLETE", // 轮级发现
-		"model call failed", // 该轮的模型报错
-	} {
+	// 2 轮 -> 2 个用例块
+	if n := strings.Count(html, `class="case-block"`); n != 2 {
+		t.Errorf("多轮 2 轮应渲染 2 个用例块，实际 %d", n)
+	}
+	// 每轮各有自己的提示词，且都用同一套「提示词」标题
+	if n := strings.Count(html, "提示词："); n != 2 {
+		t.Errorf("每轮都应有「提示词」，实际 %d 处", n)
+	}
+	for _, want := range []string{"第一轮提问", "第二轮提问"} {
 		if !strings.Contains(html, want) {
-			t.Errorf("多轮报告应包含 %q", want)
+			t.Errorf("应展示轮次提问 %q", want)
+		}
+	}
+	// 轮级发现与模型报错留在各自轮里
+	for _, want := range []string{"TURN_INCOMPLETE", "model call failed"} {
+		if !strings.Contains(html, want) {
+			t.Errorf("应包含 %q", want)
+		}
+	}
+	// 不应出现多轮专属的措辞
+	for _, bad := range []string{"逐轮明细", "多轮 ·", "第 1 轮", "第 2 轮"} {
+		if strings.Contains(html, bad) {
+			t.Errorf("不应出现多轮措辞 %q", bad)
 		}
 	}
 }
@@ -104,12 +118,15 @@ func TestReportMultiTurnNoTurnsFallsBack(t *testing.T) {
 		SessionID: "sess_z", Trace: nil, AbortedAtTurn: -1,
 	}
 	html := renderWith(t, []*models.CaseResult{cr})
-	// turn_count>1 会进逐轮区，但 turns 为空 -> 区块内没有轮次行
-	if !strings.Contains(html, "逐轮明细") {
-		t.Error("多轮用例应出现逐轮明细标题")
+	// 轮次数据缺失时退化成 1 个用例块，用 prompt（第 1 轮）兜底，不能渲染成空白
+	if n := strings.Count(html, `class="case-block"`); n != 1 {
+		t.Errorf("轨迹缺失时应渲染 1 个用例块，实际 %d", n)
+	}
+	if !strings.Contains(html, "第一轮") {
+		t.Error("轨迹缺失时应回落到 prompt 展示")
 	}
 	if strings.Contains(html, "第 1 轮") {
-		t.Error("轨迹缺失时不应虚拟出轮次行")
+		t.Error("不应虚拟出轮次标记")
 	}
 }
 
@@ -131,17 +148,15 @@ func TestReportAbortedTurnsExplained(t *testing.T) {
 	}
 	html := renderWith(t, []*models.CaseResult{cr})
 
-	if !strings.Contains(html, "实际执行 2 轮") {
-		t.Error("标题应说明实际只执行了 2 轮")
+	// 只渲染实际执行的两轮（第 3 轮没跑就不该有块）
+	if n := strings.Count(html, `class="case-block"`); n != 2 {
+		t.Errorf("只执行了 2 轮就应渲染 2 个块，实际 %d", n)
 	}
-	if !strings.Contains(html, "未跑完") {
-		t.Error("应有一段说明该用例未跑完")
+	if strings.Contains(html, "第三轮提问") {
+		t.Error("未执行的第三轮不应渲染")
 	}
-	if !strings.Contains(html, "第 3 轮中止") {
-		t.Error("应说明在第 3 轮中止（aborted_at_turn=2 是 0-based）")
-	}
-	// 只渲染实际存在的两轮
-	if strings.Contains(html, "提问：第三轮") {
-		t.Error("未执行的第三轮不应渲染成轮次块")
+	// 中止信息要如实带出，不能让读者以为只提交了 2 轮
+	if !strings.Contains(html, "中止") && !strings.Contains(html, "未发出") {
+		t.Error("应说明该用例中途中止")
 	}
 }

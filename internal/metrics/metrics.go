@@ -137,11 +137,27 @@ func turnRows(c *models.CaseResult, tr *models.ExecutionTrace) []map[string]any 
 		if t == nil {
 			continue
 		}
+		// 该轮的工具链（按调用顺序去重前的原始顺序），报告里按轮展示「调用链路」
+		toolNames := []string{}
+		for _, tc := range t.ToolCalls {
+			if tc == nil {
+				continue
+			}
+			if tc.Name == "" {
+				continue
+			}
+			// 连续重复的同一工具折叠成一个，与单轮的展示口径一致
+			if n := len(toolNames); n > 0 && toolNames[n-1] == tc.Name {
+				continue
+			}
+			toolNames = append(toolNames, tc.Name)
+		}
 		rows = append(rows, map[string]any{
 			"index":          t.Index,
 			"prompt":         t.Prompt,
 			"answer_chars":   utf8.RuneCountInString(t.Answer),
 			"elapsed_s":      trajectory.RoundToOneDecimal(t.ElapsedS),
+			"tools":          toolNames,
 			"tool_calls":     len(t.ToolCalls),
 			"thinking_steps": len(t.ThinkingSteps),
 			"incomplete":     t.Incomplete,

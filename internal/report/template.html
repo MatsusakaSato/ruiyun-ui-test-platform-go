@@ -152,6 +152,55 @@
 {{ $cid := printf "%v" $c.case_id }}
 {{ $co := getObjective $.CaseObjective $cid }}
 {{ $cfind := getFindings $.CaseFindings $cid }}
+{{ if and (isMulti $c.turn_count) $c.turns }}{{ range $t := $c.turns }}{{ $tf := turnFindings $c.turn_findings $t.index }}
+<div class="case-block">
+  <div class="case-hd">
+    <span class="badge {{ if $t.incomplete }}b-fail{{ else if eq $c.status "PASS" }}b-pass{{ else if eq $c.status "FAIL" }}b-fail{{ else }}b-uifail{{ end }}">
+      {{ if $t.incomplete }}未答复{{ else if eq $c.status "PASS" }}通过{{ else if eq $c.status "FAIL" }}断言失败{{ else }}UI 失败{{ end }}
+    </span>
+    <b>{{ $c.name }}</b>
+    <span class="mono">{{ $c.case_id }}</span>
+    <span class="mono" style="color:var(--tx3)">{{ if $c.session_id }}{{ $c.session_id }}{{ else }}—{{ end }}</span>
+  </div>
+
+  <div class="case-prompt"><b>提示词：</b>{{ $t.prompt }}</div>
+  {{ if $c.ui_error }}<div style="color:var(--p0);font-size:12.5px;margin-top:6px">UI 异常：{{ $c.ui_error }}</div>{{ end }}
+  {{ if $t.waited_limit }}<div style="color:var(--tx2);font-size:12.5px;margin-top:6px">· {{ $t.wait_note }}</div>{{ end }}
+  {{ if $t.incomplete }}{{ if $t.incomplete_why }}
+    <div class="mono" style="color:var(--p0);font-size:12.5px;margin-top:6px">{{ $t.incomplete_why }}</div>
+  {{ end }}{{ end }}
+
+  {{ if $t.errors }}
+  <div class="turn-err" style="margin-top:8px"><b>模型报错：</b>
+    {{ range $e := $t.errors }}<div class="mono">{{ $e }}</div>{{ end }}</div>
+  {{ end }}
+
+  <h3>调用链路（执行顺序）</h3>
+  {{ if $t.tools }}
+    <div class="chain">{{ range $idx, $x := $t.tools }}{{ if $idx }} → {{ end }}<span class="ct">{{ $x }}</span>{{ end }}</div>
+    <div class="mono" style="color:var(--tx3);margin-top:4px">{{ $t.tool_calls }} 次调用 · {{ $t.thinking_steps }} 步思考 · 答复 {{ $t.answer_chars }} 字</div>
+  {{ else }}
+    <div class="mono" style="color:var(--tx3)">纯文本应答，无工具调用</div>
+  {{ end }}
+
+  <h3>客观信息</h3>
+  <table class="kv">
+    <tr><td>本轮耗时</td><td style="text-align:right"><b>{{ $t.elapsed_s }}s</b></td></tr>
+    <tr><td>答复字数</td><td style="text-align:right"><b>{{ $t.answer_chars }}</b></td></tr>
+  </table>
+
+  <h3>问题发现</h3>
+  {{ if $tf }}{{ range $f := $tf }}
+    <div class="finding">
+      <div class="f-hd"><b>{{ $f.Rule }}</b></div>
+      <div class="f-detail"><b>具体表现：</b>{{ $f.Detail }}</div>
+      {{ if $f.Evidence }}<details class="evi-wrap"><summary>查看证据</summary><div class="evi">{{ $f.Evidence }}</div></details>{{ end }}
+    </div>
+  {{ end }}{{ else }}
+    <div class="ok">✓ 本轮未发现问题</div>
+  {{ end }}
+</div>
+{{ end }}{{ else }}
 <div class="case-block">
   <div class="case-hd">
     <span class="badge {{ if eq $c.status "PASS" }}b-pass{{ else if eq $c.status "FAIL" }}b-fail{{ else }}b-uifail{{ end }}">
@@ -231,47 +280,8 @@
     {{ end }}
   {{ end }}
 
-  <!-- 逐轮明细：只在多轮用例上出现，单轮用例的报告与改造前完全一致。
-       轮级发现放在对应轮次里，便于一眼看出是哪一轮出的问题；
-       通过性仍只由上面的会话级判定决定。 -->
-  {{ if isMulti $c.turn_count }}
-  {{ $ran := len $c.turns }}
-  <h3>逐轮明细（共 {{ $c.turn_count }} 轮{{ if ne $ran $c.turn_count }}，实际执行 {{ $ran }} 轮{{ end }}）</h3>
-  {{ if ne $ran $c.turn_count }}
-  <div class="mono" style="color:var(--p0);margin:-4px 0 9px">
-    该用例未跑完：提交 {{ $c.turn_count }} 轮，实际执行 {{ $ran }} 轮{{ if ge $c.aborted_at_turn 0 }}，在第 {{ add1 $c.aborted_at_turn }} 轮中止{{ end }}。
-  </div>
-  {{ end }}
-  {{ range $t := $c.turns }}
-  {{ $tf := turnFindings $c.turn_findings $t.index }}
-  <div class="turn-block{{ if $t.incomplete }} turn-bad{{ end }}">
-    <div class="turn-hd">
-      <b>第 {{ add1 $t.index }} 轮</b>
-      {{ if $t.incomplete }}<span class="badge b-fail">未答复</span>{{ end }}
-      {{ if $t.waited_limit }}<span class="badge b-uifail">等待达上限</span>{{ end }}
-      <span class="mono" style="color:var(--tx3)">{{ $t.elapsed_s }}s · 答复 {{ $t.answer_chars }} 字 · 工具 {{ $t.tool_calls }} · 思考 {{ $t.thinking_steps }}</span>
-    </div>
-    <div class="turn-prompt"><b>提问：</b>{{ $t.prompt }}</div>
-    {{ if $t.incomplete }}{{ if $t.incomplete_why }}
-      <div class="mono" style="color:var(--p0);margin-top:4px">{{ $t.incomplete_why }}</div>
-    {{ end }}{{ end }}
-    {{ if $t.errors }}
-      <div class="turn-err"><b>模型报错：</b>
-        {{ range $e := $t.errors }}<div class="mono">{{ $e }}</div>{{ end }}</div>
-    {{ end }}
-    {{ if $tf }}
-      {{ range $f := $tf }}
-      <div class="finding" style="margin-top:8px">
-        <div class="f-hd"><b>{{ $f.Rule }}</b></div>
-        <div class="f-detail"><b>具体表现：</b>{{ $f.Detail }}</div>
-        {{ if $f.Evidence }}<div class="evi">{{ $f.Evidence }}</div>{{ end }}
-      </div>
-      {{ end }}
-    {{ end }}
-  </div>
-  {{ end }}
-  {{ end }}
 </div>
+{{ end }}
 {{ end }}
 {{ end }}
 
