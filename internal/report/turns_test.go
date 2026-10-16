@@ -187,6 +187,27 @@ func TestReportSingleTurnShowsOutput(t *testing.T) {
 	}
 }
 
+// TestReportMultiTurnTablesAreWrapped 多轮报告里每个「客观信息」表格都要有卡片外框。
+//
+// 踩过的坑：逐轮块里写的是 <table class="kv">，而报告样式里**没有** .kv 定义
+// （样式段只有 .tbl-wrap + 裸 td/th 规则），于是裸表格没有边框/圆角/底色，
+// 与单轮并列时看起来就是「版式错乱」。实测：单轮 wrapped:true，多轮 tblWrap:0。
+func TestReportMultiTurnTablesAreWrapped(t *testing.T) {
+	html := renderWith(t, []*models.CaseResult{multiTurnCase()})
+
+	tables := strings.Count(html, "<table")
+	wrapped := strings.Count(html, `class="tbl-wrap"`)
+	if tables == 0 {
+		t.Fatal("报告里应有表格")
+	}
+	if tables != wrapped {
+		t.Errorf("%d 个表格只有 %d 个带 .tbl-wrap 卡片外框（逐轮块的表格漏了）", tables, wrapped)
+	}
+	if strings.Contains(html, `class="kv"`) {
+		t.Error(`报告样式里没有 .kv 定义，class="kv" 会渲染成裸表格`)
+	}
+}
+
 // TestReportMultiTurnNoTurnsFallsBack 标了多轮但轨迹缺失时不炸，退回用例级展示
 func TestReportMultiTurnNoTurnsFallsBack(t *testing.T) {
 	cr := &models.CaseResult{

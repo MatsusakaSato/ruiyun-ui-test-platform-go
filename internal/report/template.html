@@ -188,10 +188,15 @@
   {{ end }}
 
   <h3>客观信息</h3>
-  <table class="kv">
+  <!-- 与单轮同形：表格必须有 .tbl-wrap 卡片外框。
+       曾经这里写成 <table class="kv">，而报告样式里根本没有 .kv 定义，
+       裸表格没有边框/圆角/底色，和多轮并列时看起来就是「版式错乱」。 -->
+  <div class="tbl-wrap">
+  <table>
     <tr><td>本轮耗时</td><td style="text-align:right"><b>{{ $t.elapsed_s }}s</b></td></tr>
     <tr><td>答复字数</td><td style="text-align:right"><b>{{ $t.answer_chars }}</b></td></tr>
   </table>
+  </div>
 
   <h3>问题发现</h3>
   {{ if $tf }}{{ range $f := $tf }}
